@@ -23,6 +23,9 @@ class TokenUsage(models.Model):
     message = models.ForeignKey(
         "chat.Message", on_delete=models.CASCADE, null=True, blank=True, related_name="token_usage"
     )
+    tool_call = models.ForeignKey(
+        "tools.ToolCall", on_delete=models.CASCADE, null=True, blank=True, related_name="token_usage"
+    )
     operation = models.CharField(max_length=50, choices=Operation.choices)
     provider = models.CharField(max_length=100, default="litellm")
     model = models.CharField(max_length=255, blank=True, null=True)
@@ -42,6 +45,7 @@ class TokenUsage(models.Model):
             models.Index(fields=["chat", "-created_at"]),
             models.Index(fields=["model"]),
             models.Index(fields=["operation"]),
+            models.Index(fields=["tool_call"]),
         ]
 
     def __str__(self):

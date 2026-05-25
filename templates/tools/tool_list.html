@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Tools{% endblock %}
+{% block content %}
+<h1>Available Tools</h1>
+{% if tools %}
+    <ul class="tool-list">
+    {% for tool in tools %}
+        <li>
+            <strong>{{ tool.display_name }}</strong>
+            <p>{{ tool.description }}</p>
+            <span class="meta">{{ tool.name }} v{{ tool.version }}</span>
+        </li>
+    {% endfor %}
+    </ul>
+{% else %}
+    <p>No tools available.</p>
+{% endif %}
+{% endblock %}

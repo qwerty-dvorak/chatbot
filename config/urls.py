@@ -16,5 +16,6 @@ urlpatterns = [
     path("accounts/reset/<uidb64>/<token>/", auth_views.PasswordResetConfirmView.as_view(template_name="accounts/password_reset.html"), name="password_reset_confirm"),
     path("accounts/reset/done/", auth_views.PasswordResetCompleteView.as_view(template_name="accounts/password_reset.html"), name="password_reset_complete"),
     path("chats/", include("apps.chat.urls")),
+    path("tools/", include("apps.tools.urls")),
     path("share/<str:token>/", SharedChatView.as_view(), name="chat-shared"),
 ]

@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Tool Call{% endblock %}
+{% block content %}
+<h1>Tool Call: {{ tool_call.name_snapshot }}</h1>
+<dl>
+    <dt>Status</dt>
+    <dd>{{ tool_call.status }}</dd>
+    <dt>Arguments</dt>
+    <dd><pre>{{ tool_call.arguments|pprint }}</pre></dd>
+    <dt>Created</dt>
+    <dd>{{ tool_call.created_at }}</dd>
+    {% if tool_call.started_at %}
+        <dt>Started</dt>
+        <dd>{{ tool_call.started_at }}</dd>
+    {% endif %}
+    {% if tool_call.completed_at %}
+        <dt>Completed</dt>
+        <dd>{{ tool_call.completed_at }}</dd>
+    {% endif %}
+</dl>
+{% if tool_call.executions.exists %}
+    <h2>Executions</h2>
+    {% for exec in tool_call.executions.all %}
+        <div class="execution">
+            <p>Attempt {{ exec.attempt }}: {{ exec.status }}</p>
+            {% if exec.error_message %}<p class="error">{{ exec.error_message }}</p>{% endif %}
+        </div>
+    {% endfor %}
+{% endif %}
+{% endblock %}
