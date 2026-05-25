@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}{{ chat.title }}{% endblock %}
+{% block content %}
+<h1>{{ chat.title }}</h1>
+<div class="chat-actions">
+    <a href="{% url 'chat:list' %}">Back to Chats</a>
+    <a href="{% url 'chat:share' chat.id %}">Share</a>
+    <a href="{% url 'chat:archive' chat.id %}">{% if chat.archived %}Restore{% else %}Archive{% endif %}</a>
+</div>
+<div id="messages" class="message-list">
+    {% for msg in messages %}
+        <div class="message-item message-{{ msg.role }}">
+            <strong>{{ msg.role|capfirst }}</strong>
+            <p>{{ msg.content|linebreaksbr }}</p>
+            {% if msg.attachments %}
+                <div class="attachments">
+                    {% for att in msg.attachments %}
+                        <span class="attachment-file">{{ att.original_filename }}</span>
+                    {% endfor %}
+                </div>
+            {% endif %}
+            <span class="meta">{{ msg.created_at|time:"H:i" }}</span>
+        </div>
+    {% endfor %}
+</div>
+<form method="post" enctype="multipart/form-data" class="message-form">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <button type="submit">Send</button>
+</form>
+{% endblock %}

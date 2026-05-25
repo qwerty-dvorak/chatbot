@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Share Chat{% endblock %}
+{% block content %}
+<h1>Share: {{ chat.title }}</h1>
+{% if share %}
+    <p>Share link: <a href="{% url 'chat-shared' share.token %}">{{ request.get_host }}{% url 'chat-shared' share.token %}</a></p>
+    <p>Created {{ share.created_at|timesince }} ago</p>
+{% endif %}
+<form method="post">
+    {% csrf_token %}
+    {% if share %}
+        <button type="submit">Revoke & Create New</button>
+    {% else %}
+        <button type="submit">Create Share Link</button>
+    {% endif %}
+</form>
+<a href="{% url 'chat:detail' chat.id %}">Back to Chat</a>
+{% endblock %}

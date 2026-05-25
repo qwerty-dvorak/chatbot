@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}{{ chat.title }}{% endblock %}
+{% block content %}
+<h1>{{ chat.title }}</h1>
+<p class="meta">Shared by {{ share.user.email }} | Read-only view</p>
+<div class="message-list">
+    {% for msg in messages %}
+        <div class="message-item message-{{ msg.role }}">
+            <strong>{{ msg.role|capfirst }}</strong>
+            <p>{{ msg.content|linebreaksbr }}</p>
+            <span class="meta">{{ msg.created_at|time:"H:i" }}</span>
+        </div>
+    {% endfor %}
+</div>
+{% endblock %}

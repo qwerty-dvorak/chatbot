@@ -1,11 +1,15 @@
 [project]
 name = "chatbot"
 version = "0.1.0"
-description = "Add your description here"
+description = "Local Django chatbot with RAG, memory, and tool calling"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "django>=5.1.2",
+    "django>=5.1.2,<5.2",
+    "psycopg[binary]>=3.2,<3.3",
+    "python-dotenv>=1.0,<1.1",
+    "whitenoise>=6.7,<6.8",
+    "gunicorn>=23.0,<23.1",
     "litellm==1.40.0",
 ]
 

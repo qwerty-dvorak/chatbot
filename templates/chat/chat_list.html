@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Chats{% endblock %}
+{% block content %}
+<h1>Chats</h1>
+<a href="{% url 'chat:new' %}" class="btn">New Chat</a>
+{% if chats %}
+    <ul class="chat-list">
+    {% for chat in chats %}
+        <li>
+            <a href="{% url 'chat:detail' chat.id %}">{{ chat.title }}</a>
+            <span class="meta">{{ chat.updated_at|timesince }} ago</span>
+            {% if chat.archived %}<span class="badge">archived</span>{% endif %}
+            <a href="{% url 'chat:archive' chat.id %}" class="btn-small">
+                {% if chat.archived %}Restore{% else %}Archive{% endif %}
+            </a>
+        </li>
+    {% endfor %}
+    </ul>
+{% else %}
+    <p>No chats yet. <a href="{% url 'chat:new' %}">Start one</a>.</p>
+{% endif %}
+{% endblock %}
