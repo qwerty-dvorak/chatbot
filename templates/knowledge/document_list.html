@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Knowledge Documents{% endblock %}
+{% block content %}
+<h1>Knowledge Documents</h1>
+<a href="{% url 'knowledge:upload' %}" class="btn">Upload Document</a>
+{% if documents %}
+    <ul class="document-list">
+    {% for doc in documents %}
+        <li>
+            <a href="{% url 'knowledge:detail' doc.id %}">{{ doc.title }}</a>
+            <span class="meta">{{ doc.mime_type }} | {{ doc.status }} | {{ doc.created_at|timesince }} ago</span>
+        </li>
+    {% endfor %}
+    </ul>
+{% else %}
+    <p>No documents yet. <a href="{% url 'knowledge:upload' %}">Upload one</a>.</p>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}{{ document.title }}{% endblock %}
+{% block content %}
+<h1>{{ document.title }}</h1>
+<dl>
+    <dt>Status</dt>
+    <dd>{{ document.status }}</dd>
+    <dt>Type</dt>
+    <dd>{{ document.mime_type }}</dd>
+    <dt>Created</dt>
+    <dd>{{ document.created_at }}</dd>
+</dl>
+<a href="{% url 'knowledge:list' %}">Back to Documents</a>
+
+{% if chunks %}
+    <h2>Chunks ({{ chunks|length }})</h2>
+    {% for chunk in chunks %}
+        <div class="chunk">
+            <strong>#{{ chunk.chunk_index }}</strong>
+            <p>{{ chunk.content|truncatewords:100 }}</p>
+            <span class="meta">{{ chunk.token_count }} tokens</span>
+        </div>
+    {% endfor %}
+{% endif %}
+{% endblock %}
