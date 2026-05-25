@@ -3,6 +3,7 @@ from django.contrib.auth import views as auth_views
 from django.shortcuts import redirect
 from django.urls import include, path
 
+from apps.api import health_check, stats
 from apps.chat.views import SharedChatView
 
 urlpatterns = [
@@ -20,4 +21,6 @@ urlpatterns = [
     path("knowledge/", include("apps.knowledge.urls")),
     path("memory/", include("apps.memory.urls")),
     path("share/<str:token>/", SharedChatView.as_view(), name="chat-shared"),
+    path("api/health/", health_check, name="api-health"),
+    path("api/stats/", stats, name="api-stats"),
 ]
