@@ -3,6 +3,7 @@ import uuid
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse
+from django.views import View
 from django.views.generic import CreateView, DetailView, ListView, TemplateView, UpdateView
 
 from .forms import MessageForm
@@ -123,6 +124,23 @@ class ChatShareView(LoginRequiredMixin, CreateView):
 
     def get_success_url(self):
         return reverse("chat:share", args=[self.kwargs["chat_id"]])
+
+
+class ChatStreamView(LoginRequiredMixin, View):
+    def get(self, request, chat_id):
+        chat = get_object_or_404(Chat, id=chat_id, user=request.user)
+        pending_msg = Message.objects.filter(
+            chat=chat, role=Message.Role.ASSISTANT, status=Message.Status.PENDING
+        ).last()
+        if not pending_msg:
+            pending_msg = Message.objects.create(
+                chat=chat,
+                role=Message.Role.ASSISTANT,
+                content="",
+                status=Message.Status.PENDING,
+            )
+        from .streaming import stream_chat_response
+        return stream_chat_response(pending_msg, request.user)
 
 
 class SharedChatView(TemplateView):

@@ -10,4 +10,5 @@ urlpatterns = [
     path("<uuid:chat_id>/", views.ChatDetailView.as_view(), name="detail"),
     path("<uuid:chat_id>/archive/", views.ChatArchiveView.as_view(), name="archive"),
     path("<uuid:chat_id>/share/", views.ChatShareView.as_view(), name="share"),
+    path("<uuid:chat_id>/stream/", views.ChatStreamView.as_view(), name="stream"),
 ]
