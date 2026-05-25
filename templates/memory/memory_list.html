@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Memories{% endblock %}
+{% block content %}
+<h1>Memories</h1>
+<a href="{% url 'memory:settings' %}" class="btn">Settings</a>
+{% if memories %}
+    <ul class="memory-list">
+    {% for memory in memories %}
+        <li>
+            <p>{{ memory.content }}</p>
+            <span class="meta">Importance: {{ memory.importance }} | Last used: {{ memory.last_used_at|timesince }} ago</span>
+        </li>
+    {% endfor %}
+    </ul>
+{% else %}
+    <p>No memories yet.</p>
+{% endif %}
+{% endblock %}

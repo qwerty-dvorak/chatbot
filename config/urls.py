@@ -18,5 +18,6 @@ urlpatterns = [
     path("chats/", include("apps.chat.urls")),
     path("tools/", include("apps.tools.urls")),
     path("knowledge/", include("apps.knowledge.urls")),
+    path("memory/", include("apps.memory.urls")),
     path("share/<str:token>/", SharedChatView.as_view(), name="chat-shared"),
 ]
