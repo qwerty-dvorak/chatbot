@@ -25,6 +25,6 @@ def compact_chat(chat):
         facts=[],
         open_questions=[],
         token_count=len(fake_summary_text) // 4,
-        model=settings.QWEN_CHAT_MODEL,
+        model=settings.CHAT_MODEL,
     )
     return compaction

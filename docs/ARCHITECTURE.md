@@ -9,10 +9,13 @@ The system should replace the JavaScript/Prisma/Node shape from the reference sc
 ## Constraints
 
 - Backend: Django.
-- Database: PostgreSQL with `pgvector`.
+- Relational database: PostgreSQL.
+- Vector store: Milvus.
 - LLM access: LiteLLM.
-- Inference: local `Jackrong/Qwopus3.6-27B-v2-GGUF` 6-bit model endpoint.
-- Embeddings: local `nvidia/llama-embed-nemotron-8b` endpoint.
+- Chat/vision model: Gemma 4 26B A4B IT.
+- Text embeddings: nvidia/llama-embed-nemotron-8b (dim: 4096).
+- Multimodal embeddings: nvidia/nemotron-colembed-vl-8b-v2 (dim: 4096).
+- Reranker: Qwen3-VL-Reranker-8B.
 - Auth: email/password only.
 - Frontend: Django templates and forms.
 - Streaming responses are required.
@@ -20,7 +23,7 @@ The system should replace the JavaScript/Prisma/Node shape from the reference sc
 - Uploaded knowledge is private per user by default.
 - Public share links are allowed through unguessable tokens and revocation.
 - Background workers are allowed.
-- Local runtime should use Docker Compose for Django, PostgreSQL, workers, and model-facing services.
+- Local runtime should use Docker Compose for Django, PostgreSQL, Milvus, and model-facing services.
 - Use `uv` only for Python dependency installation and command execution.
 - No npm, no JavaScript package manager, no Node API service.
 - Prefer older, pinned dependency versions according to `pyproject.toml` policy.
@@ -37,16 +40,17 @@ Django web container
   |-- accounts: email/password auth and security logs
   |-- chat: chats, messages, streaming, votes, shares, token usage
   |-- memory: user memories, memory settings, context assembly
-  |-- knowledge: documents, assets, chunks, embeddings, retrieval
+  |-- knowledge: documents, assets, chunks, retrieval
   |-- ingestion: file parsing, OCR, image analysis, indexing jobs
-  |-- llm: LiteLLM client, model routing, token accounting
+  |-- llm: LiteLLM client, model routing, token accounting, Milvus store
   |-- tools: tool registry, permissions, execution, audit trail
   |-- compaction: chat summarization and context compression
   |
   v
-PostgreSQL + pgvector
+PostgreSQL + Milvus
   |
-  | vector search, full text search, relational state
+  | PostgreSQL: relational state (users, chats, messages, tool calls, etc.)
+  | Milvus: vector search for document chunks and memory embeddings
   v
 Python worker container(s)
   |
@@ -56,7 +60,7 @@ LiteLLM / local model runtime
   |
   | OpenAI-compatible API or LiteLLM provider adapter
   v
-Qwopus chat/vision model + llama-embed-nemotron embeddings
+Gemma 4 26B A4B IT chat/vision + NVIDIA embedding models + Qwen reranker
 ```
 
 ## Request Flow
@@ -72,7 +76,7 @@ Qwopus chat/vision model + llama-embed-nemotron embeddings
    - relevant RAG chunks,
    - uploaded attachments linked to the current message.
 4. Tool policy selects available tools for the user, chat, and current prompt.
-5. LiteLLM calls the local Qwopus model in streaming mode.
+5. LiteLLM calls Gemma 4 (via local GGUF server) in streaming mode.
 6. Streaming deltas are written to `chat.MessageDelta` and sent to the browser.
 7. If the model requests a tool call, Django records `tools.ToolCall`, validates permission, runs the tool, records `tools.ToolResult`, and resumes generation with the tool result.
 8. The final assistant response is stored as `chat.Message`.
@@ -125,10 +129,11 @@ Initial built-in tools:
 2. Ingestion job extracts text and metadata.
 3. Multimodal analyzer processes images or scanned pages when available.
 4. Chunker creates normalized text chunks.
-5. Embedding generator creates vectors.
-6. Chunks are stored in PostgreSQL with `pgvector`.
-7. Queries embed the user question with `nvidia/llama-embed-nemotron-8b` and rank chunks by vector similarity.
-8. Full text search is used as fallback or hybrid boost.
+5. Embedding generator creates vectors (text: llama-embed-nemotron-8b, multimodal: nemotron-colembed-vl-8b-v2).
+6. Chunks are stored in Milvus with their vectors and metadata.
+7. Queries embed the user question and rank chunks by vector similarity in Milvus.
+8. Reranker (Qwen3-VL-Reranker-8B) optionally re-ranks top results.
+9. Full text search is used as fallback or hybrid boost.
 
 ### Chat Compaction
 
@@ -156,10 +161,12 @@ Owns chats, messages, attachments, votes, shares, stream IDs if needed later, an
 ### `memory`
 
 Owns persistent facts/preferences about a user and rules for when memory is retrieved or updated.
+Memory embeddings are stored in Milvus.
 
 ### `knowledge`
 
-Owns canonical ingested content, document chunks, embeddings, source metadata, and retrieval result records.
+Owns canonical ingested content, document chunks, source metadata, and retrieval result records.
+Chunk embeddings are stored in Milvus.
 
 ### `ingestion`
 
@@ -167,7 +174,7 @@ Owns file processing jobs and parsers. This app should be operationally isolated
 
 ### `llm`
 
-Owns LiteLLM wrapper code, prompt assembly helpers, model policy, retries, and token accounting.
+Owns LiteLLM wrapper code, prompt assembly helpers, model policy, retries, token accounting, and Milvus vector store client.
 
 ### `compaction`
 
@@ -176,7 +183,7 @@ Owns summarization of long chats. This can be a separate app or a module inside 
 ## Storage Strategy
 
 - Relational state lives in PostgreSQL.
-- Embeddings live in `pgvector` columns on chunk and memory tables.
+- Embeddings live in Milvus (separate collections for document chunks and memories).
 - Raw uploaded files live in Django storage, initially local filesystem.
 - Extracted text and model analysis live in database text/JSON fields.
 - All generated model outputs should be traceable through token usage and metadata rows.

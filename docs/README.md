@@ -8,8 +8,9 @@ This folder defines the planned architecture and file structure for a local Djan
 - Chat compaction for long-running conversations
 - Built-in RAG over user/admin ingested content
 - Multimodal ingestion and analysis
-- PostgreSQL with `pgvector`
-- LiteLLM connected to a local Qwen model endpoint
+- PostgreSQL for relational data
+- Milvus vector store for embeddings
+- LiteLLM connected to local model endpoints
 - First-class tool calling with durable call/result records
 - Streaming responses
 - Docker Compose local runtime
@@ -35,9 +36,12 @@ These are planning documents only. They intentionally do not add application cod
 - Dependency versions should be pinned deliberately before implementation.
 - `uv` is the only Python dependency and command runner.
 - The application is local-first and should not require cloud inference.
-- Chat and multimodal reasoning model: `Jackrong/Qwopus3.6-27B-v2-GGUF`, 6-bit, with native support up to 32K / 128K context length depending on runtime configuration.
-- Embedding model: `nvidia/llama-embed-nemotron-8b`.
-- Qwen will be reached through LiteLLM using a local OpenAI-compatible endpoint.
+- Chat and multimodal reasoning model: `Gemma 4 26B A4B IT`, 256K context window.
+- Text embedding model: `nvidia/llama-embed-nemotron-8b` (dim: 4096).
+- Multimodal embedding model: `nvidia/nemotron-colembed-vl-8b-v2` (dim: 4096).
+- Reranker: `Qwen3-VL-Reranker-8B`.
+- Vector store: Milvus (two collections: document_chunks, user_memories).
+- All models will be reached through LiteLLM using local OpenAI-compatible endpoints.
 - The first frontend should be Django server-rendered HTML using forms and standard browser navigation.
 - Streaming is required. Implement it with Django `StreamingHttpResponse` or Server-Sent Events using plain browser APIs and no npm packages.
 - Uploaded knowledge is private to the uploading user by default.
@@ -48,12 +52,12 @@ These are planning documents only. They intentionally do not add application cod
 ## Implementation Order
 
 1. Create Django project and apps.
-2. Configure PostgreSQL, `pgvector`, and custom email auth.
+2. Configure PostgreSQL, Milvus, and custom email auth.
 3. Implement chat, messages, votes, shares, token usage, and security logs.
 4. Implement tool registry, tool call execution, and durable tool call records.
 5. Implement streaming chat generation through LiteLLM.
 6. Implement document ingestion models and background processing.
-7. Implement embeddings, chunks, and retrieval.
+7. Implement embeddings, Milvus collections, chunks, and retrieval.
 8. Add user memory and chat compaction.
 9. Add multimodal file analysis for text, Markdown, PDF, images, and CSV.
 10. Add Docker Compose services, admin screens, operational commands, tests, and fixtures.

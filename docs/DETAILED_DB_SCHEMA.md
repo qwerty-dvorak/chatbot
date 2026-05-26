@@ -15,15 +15,14 @@ JSON convention:
 - use `JSONField(default=dict, blank=True)` for metadata objects.
 - use `JSONField(default=list, blank=True)` for list-like values unless PostgreSQL arrays are clearly better.
 
-Vector convention:
+Vector storage: All vectors are stored in Milvus, not PostgreSQL. The Milvus collections are:
 
-- `DocumentChunk.embedding` and `Memory.embedding` use pgvector.
-- Dimension must match the actual `nvidia/llama-embed-nemotron-8b` runtime output before creating migrations.
+- `document_chunks` (dim: 4096) - document chunk embeddings
+- `user_memories` (dim: 4096) - user memory embeddings
 
 ## Extensions
 
 ```sql
-CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 ```
 
@@ -419,7 +418,6 @@ User-specific durable context.
 | `content` | text | no | none | Memory text |
 | `tags` | jsonb | no | `[]` | Tags |
 | `importance` | integer | no | 1 | 1 to 5 |
-| `embedding` | vector(N) | yes | null | N = confirmed embedding dimension |
 | `last_used_at` | timestamptz | no | now | Retrieval/use time |
 | `created_at` | timestamptz | no | now | Created timestamp |
 | `updated_at` | timestamptz | no | now | Updated timestamp |
@@ -428,7 +426,8 @@ Indexes:
 
 - `memories_user_importance_used_idx` on `(user_id, importance, last_used_at DESC)`
 - `memories_user_updated_idx` on `(user_id, updated_at DESC)`
-- vector index on `embedding`
+
+Vector storage: Milvus collection `user_memories` (dim: 4096).
 
 ### Table: `memory_settings`
 
@@ -525,7 +524,7 @@ Indexes:
 
 ### Table: `document_chunks`
 
-Retrievable text chunks.
+Retrievable text units.
 
 | Column | Type | Null | Default | Notes |
 | --- | --- | --- | --- | --- |
@@ -536,7 +535,6 @@ Retrievable text chunks.
 | `content` | text | no | none | Chunk text |
 | `content_hash` | char(64) | no | none | Hash of normalized content |
 | `token_count` | integer | no | 0 | Estimated tokens |
-| `embedding` | vector(N) | yes | null | N = confirmed embedding dimension |
 | `metadata` | jsonb | no | `{}` | Page, section, source citation |
 | `created_at` | timestamptz | no | now | Created timestamp |
 
@@ -548,8 +546,8 @@ Indexes:
 
 - `document_chunks_document_index_idx` on `(document_id, chunk_index)`
 - `document_chunks_content_hash_idx` on `content_hash`
-- full text GIN index on `content`
-- vector index on `embedding`
+
+Vector storage: Milvus collection `document_chunks` (dim: 4096). The chunk's UUID serves as the Milvus document ID.
 
 ## Ingestion
 
@@ -589,7 +587,7 @@ One retrieval operation, often created by `rag.search`.
 | `message_id` | uuid | yes | null | FK to `messages` |
 | `tool_call_id` | uuid | yes | null | FK to `tool_calls` |
 | `query` | text | no | none | Search text |
-| `query_embedding` | vector(N) | yes | null | Query vector |
+| `query_embedding` | jsonb | yes | null | Query vector (cached) |
 | `strategy` | varchar(30) | no | `hybrid` | `vector`, `text`, `hybrid` |
 | `metadata` | jsonb | no | `{}` | Attempts, filters, thresholds |
 | `created_at` | timestamptz | no | now | Created timestamp |
@@ -708,3 +706,4 @@ Memory access:
 - Deleting a document cascades assets, chunks, and ingestion jobs.
 - Deleting a tool definition should be restricted if historical calls exist.
 - Public share links should be revoked rather than deleted when possible.
+- Deleting a document or memory should also remove its vector from Milvus.

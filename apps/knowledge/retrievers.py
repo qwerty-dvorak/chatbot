@@ -1,29 +1,42 @@
+from django.conf import settings
+
 from apps.knowledge.models import DocumentChunk, RetrievalHit, RetrievalRun
 from apps.tools.models import ToolCall
 
 
 def hybrid_search(query, user, top_k=8, tool_call=None):
     from apps.llm.embeddings import FakeEmbeddingClient
+    from apps.llm.milvus_store import search_vectors
 
-    embedder = FakeEmbeddingClient(dim=256)
-    query_vector = embedder.embed_text(query)
+    embedder = FakeEmbeddingClient()
+    query_vector = embedder.embed_query(query)
 
     run = RetrievalRun.objects.create(
         user=user,
         query=query,
-        query_embedding=query_vector,
         strategy="hybrid",
         tool_call=tool_call,
     )
 
-    chunks = DocumentChunk.objects.all()[:top_k]
+    results = search_vectors(
+        settings.MILVUS_COLLECTION_CHUNKS,
+        query_vector,
+        top_k=top_k,
+    )
+
     hits = []
-    for rank, chunk in enumerate(chunks):
+    for rank, result in enumerate(results):
+        chunk_id = result.get("id", "")
+        score = result.get("distance", 0)
+        try:
+            chunk = DocumentChunk.objects.get(id=chunk_id)
+        except DocumentChunk.DoesNotExist:
+            continue
         hit = RetrievalHit.objects.create(
             run=run,
             chunk=chunk,
             rank=rank,
-            score=1.0 - (rank * 0.1),
+            score=score,
             source_title=chunk.document.title,
             source_metadata=chunk.metadata,
         )

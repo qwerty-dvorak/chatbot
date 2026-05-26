@@ -11,12 +11,7 @@ dependencies = [
     "django>=5.1.2",
     "litellm==1.40.0",
 ]
-
-[tool.uv]
-exclude-newer = "2024-10-15T23:59:59Z"
 ```
-
-Before implementation, convert broad ranges into explicit pins where practical. The current `exclude-newer` policy is useful for avoiding unexpectedly new releases, but exact pins make deployments more reproducible.
 
 Use `uv` only:
 
@@ -29,10 +24,9 @@ Do not introduce `pip`, `poetry`, npm, yarn, pnpm, or Node-based build steps.
 
 Expected dependency groups:
 
-- runtime: Django, psycopg, pgvector integration, LiteLLM, file parsing libraries.
+- runtime: Django, psycopg, LiteLLM, pymilvus, file parsing libraries.
 - dev: pytest, pytest-django, ruff or equivalent if allowed.
 - optional OCR/PDF/image dependencies based on accepted file formats.
-- worker: Celery/RQ or a Django management-command worker if approved during implementation.
 
 No npm dependency group is needed.
 
@@ -44,17 +38,20 @@ Expected services:
 
 ```text
 postgres        PostgreSQL with pgvector
+milvus          Vector store (document chunks, memories)
+etcd            Milvus metadata store
+minio           Milvus object storage
 web             Django ASGI/WSGI app, started with uv
 worker          Python background worker, started with uv
 scheduler       optional periodic worker, started with uv
 litellm         optional LiteLLM proxy if not embedded in web/worker
-model-runtime   local OpenAI-compatible endpoint for Qwopus and embeddings
 ```
 
 Compose requirements:
 
 - mount source code for local development,
 - persist PostgreSQL data in a named volume,
+- persist Milvus data in a named volume,
 - persist media uploads in a named volume or local bind mount,
 - run migrations through `uv run python manage.py migrate`,
 - never run npm install or a JavaScript build container.
@@ -74,16 +71,32 @@ DATABASE_URL=postgresql://chatbot:chatbot@localhost:5432/chatbot
 MEDIA_ROOT=./media
 STATIC_ROOT=./staticfiles
 
+# Model endpoints (via LiteLLM)
 LITELLM_BASE_URL=http://localhost:8000/v1
 LITELLM_API_KEY=local-placeholder
-QWEN_CHAT_MODEL=Jackrong/Qwopus3.6-27B-v2-GGUF
-QWEN_VISION_MODEL=Jackrong/Qwopus3.6-27B-v2-GGUF
-QWEN_EMBEDDING_MODEL=nvidia/llama-embed-nemotron-8b
-EMBEDDING_DIM=confirm-before-migration
+
+# Chat model: Gemma 4 26B A4B IT
+CHAT_MODEL=gemma-4-26b-a4b-it
+VISION_MODEL=gemma-4-26b-a4b-it
+
+# Text embedding: nvidia/llama-embed-nemotron-8b (dim: 4096)
+TEXT_EMBEDDING_MODEL=nvidia/llama-embed-nemotron-8b
+TEXT_EMBEDDING_DIM=4096
+
+# Multimodal embedding: nvidia/nemotron-colembed-vl-8b-v2 (dim: 4096)
+MULTIMODAL_EMBEDDING_MODEL=nvidia/nemotron-colembed-vl-8b-v2
+MULTIMODAL_EMBEDDING_DIM=4096
+
+# Reranker: Qwen3-VL-Reranker-8B
+RERANKER_MODEL=Qwen/Qwen3-VL-Reranker-8B
+
+# Milvus vector store
+MILVUS_HOST=localhost
+MILVUS_PORT=19530
 
 CHAT_CONTEXT_MAX_TOKENS=32000
-CHAT_CONTEXT_MAX_TOKENS_LARGE=128000
-CHAT_RESPONSE_MAX_TOKENS=2048
+CHAT_CONTEXT_MAX_TOKENS_LARGE=256000
+CHAT_RESPONSE_MAX_TOKENS=4096
 CHAT_COMPACTION_THRESHOLD_TOKENS=14000
 CHAT_STREAMING_ENABLED=true
 
@@ -107,25 +120,50 @@ TOOL_RESULT_MAX_TOKENS=4000
 Database requirements:
 
 - PostgreSQL version compatible with selected Django and psycopg versions.
-- `pgvector` extension installed.
-- Database user allowed to create extension in local development.
+- Database user allowed to create databases in local development.
+
+The vector extension is no longer needed since Milvus handles all vector operations.
 
 Initial database setup should include:
 
 ```sql
-CREATE EXTENSION IF NOT EXISTS vector;
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
 ```
 
-Indexes to plan:
+Standard B-tree indexes for chat, message, user, and job lookup paths.
 
-- HNSW or IVFFlat vector index on document chunk embeddings.
-- HNSW or IVFFlat vector index on memory embeddings.
-- Full text index for document chunk content.
-- Standard B-tree indexes for chat, message, user, and job lookup paths.
+## Milvus Setup
 
-Index type depends on the installed `pgvector` version and expected corpus size.
+Milvus replaces pgvector for all vector storage and search.
 
-## LiteLLM And Local Qwen
+Collections are auto-created by `apps/llm/milvus_store.ensure_collections()`.
+
+Two collections:
+
+| Collection | Dimension | Metric | Purpose |
+|-----------|-----------|--------|---------|
+| `document_chunks` | 4096 | IP | Document chunk retrieval |
+| `user_memories` | 4096 | IP | User memory search |
+
+Milvus requires three services in Docker Compose:
+- `milvus` (main service)
+- `etcd` (metadata store)
+- `minio` (object storage for Milvus)
+
+## Model Serving
+
+Each model has a dedicated server in the `scripts/` directory:
+
+| Directory | Model | Port | Purpose |
+|-----------|-------|------|---------|
+| `scripts/gemma4/` | Gemma 4 26B A4B IT | 8001 | Chat/vision (GGUF via llama.cpp) |
+| `scripts/llama-embed-nemotron/` | llama-embed-nemotron-8b | 8002 | Text embeddings |
+| `scripts/nemotron-colembed/` | nemotron-colembed-vl-8b-v2 | 8003 | Multimodal embeddings |
+| `scripts/qwen3-reranker/` | Qwen3-VL-Reranker-8B | 8004 | Re-ranking |
+
+All model servers expose OpenAI-compatible endpoints.
+
+## LiteLLM And Local Gemma 4
 
 LiteLLM should be wrapped behind local project code instead of called directly from views.
 
@@ -141,16 +179,18 @@ Recommended wrapper responsibilities:
 - error normalization,
 - provider-specific compatibility fixes.
 
-The local model runtime should expose an OpenAI-compatible API if possible:
+The local model runtime should expose an OpenAI-compatible API:
 
 ```text
 POST /v1/chat/completions
 POST /v1/embeddings
+POST /v1/rerank
 ```
 
-The selected chat/vision model is `Jackrong/Qwopus3.6-27B-v2-GGUF` 6-bit with native support up to 32K / 128K context length depending on runtime configuration. The selected embedding model is `nvidia/llama-embed-nemotron-8b`.
-
-Before migrations, confirm the embedding vector dimension from the actual local embedding endpoint.
+The selected chat/vision model is `Gemma 4 26B A4B IT` with 256K context window.
+Text embedding: `nvidia/llama-embed-nemotron-8b` (dim: 4096).
+Multimodal embedding: `nvidia/nemotron-colembed-vl-8b-v2` (dim: 4096).
+Reranker: `Qwen3-VL-Reranker-8B`.
 
 ## Management Commands
 
@@ -206,7 +246,7 @@ Minimum tests:
 - tool calls are validated, permission checked, executed, and recorded.
 - public share links do not expose private knowledge sources.
 
-Use fake LLM and fake embedding clients in tests so tests do not require the local model runtime.
+Use fake LLM, fake embedding, and fake reranker clients in tests so tests do not require the local model runtime.
 
 ## Security Notes
 
@@ -228,7 +268,7 @@ Track:
 - ingestion jobs queued/running/failed,
 - average ingestion duration,
 - number of ready documents,
-- number of chunks,
+- number of chunks in Milvus,
 - retrieval latency,
 - chat completion latency,
 - token usage by user/model/operation,

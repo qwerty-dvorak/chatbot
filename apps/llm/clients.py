@@ -14,8 +14,8 @@ class LiteLLMClient:
     def __init__(self):
         self.base_url = settings.LITELLM_BASE_URL
         self.api_key = settings.LITELLM_API_KEY
-        self.chat_model = settings.QWEN_CHAT_MODEL
-        self.vision_model = settings.QWEN_VISION_MODEL
+        self.chat_model = settings.CHAT_MODEL
+        self.vision_model = settings.VISION_MODEL
 
     def _get_client(self):
         try:
