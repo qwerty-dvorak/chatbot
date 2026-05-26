@@ -84,18 +84,46 @@ LOGIN_URL = "/accounts/login/"
 LOGIN_REDIRECT_URL = "/"
 LOGOUT_REDIRECT_URL = "/"
 
-# LiteLLM settings
+# Model settings
 LITELLM_BASE_URL = os.environ.get("LITELLM_BASE_URL", "http://localhost:8000/v1")
 LITELLM_API_KEY = os.environ.get("LITELLM_API_KEY", "local-placeholder")
-QWEN_CHAT_MODEL = os.environ.get("QWEN_CHAT_MODEL", "Jackrong/Qwopus3.6-27B-v2-GGUF")
-QWEN_VISION_MODEL = os.environ.get("QWEN_VISION_MODEL", "Jackrong/Qwopus3.6-27B-v2-GGUF")
-QWEN_EMBEDDING_MODEL = os.environ.get("QWEN_EMBEDDING_MODEL", "nvidia/llama-embed-nemotron-8b")
-EMBEDDING_DIM = int(os.environ.get("EMBEDDING_DIM", "4096"))
+
+# Chat model: Gemma 4 26B A4B IT (MoE, 256K context)
+CHAT_MODEL = os.environ.get("CHAT_MODEL", "gemma-4-26b-a4b-it")
+VISION_MODEL = os.environ.get("VISION_MODEL", "gemma-4-26b-a4b-it")
+
+# Text embedding: nvidia/llama-embed-nemotron-8b (dim: 4096)
+TEXT_EMBEDDING_MODEL = os.environ.get(
+    "TEXT_EMBEDDING_MODEL", "nvidia/llama-embed-nemotron-8b"
+)
+TEXT_EMBEDDING_DIM = int(os.environ.get("TEXT_EMBEDDING_DIM", "4096"))
+
+# Multimodal embedding: nvidia/nemotron-colembed-vl-8b-v2 (dim: 4096)
+MULTIMODAL_EMBEDDING_MODEL = os.environ.get(
+    "MULTIMODAL_EMBEDDING_MODEL", "nvidia/nemotron-colembed-vl-8b-v2"
+)
+MULTIMODAL_EMBEDDING_DIM = int(os.environ.get("MULTIMODAL_EMBEDDING_DIM", "4096"))
+
+# Reranker: Qwen3-VL-Reranker-8B (score-only, no dim needed)
+RERANKER_MODEL = os.environ.get(
+    "RERANKER_MODEL", "Qwen/Qwen3-VL-Reranker-8B"
+)
+
+# Milvus settings
+MILVUS_HOST = os.environ.get("MILVUS_HOST", "localhost")
+MILVUS_PORT = os.environ.get("MILVUS_PORT", "19530")
+MILVUS_ALIAS = os.environ.get("MILVUS_ALIAS", "default")
+MILVUS_COLLECTION_CHUNKS = os.environ.get(
+    "MILVUS_COLLECTION_CHUNKS", "document_chunks"
+)
+MILVUS_COLLECTION_MEMORIES = os.environ.get(
+    "MILVUS_COLLECTION_MEMORIES", "user_memories"
+)
 
 # Chat settings
 CHAT_CONTEXT_MAX_TOKENS = int(os.environ.get("CHAT_CONTEXT_MAX_TOKENS", "32000"))
-CHAT_CONTEXT_MAX_TOKENS_LARGE = int(os.environ.get("CHAT_CONTEXT_MAX_TOKENS_LARGE", "128000"))
-CHAT_RESPONSE_MAX_TOKENS = int(os.environ.get("CHAT_RESPONSE_MAX_TOKENS", "2048"))
+CHAT_CONTEXT_MAX_TOKENS_LARGE = int(os.environ.get("CHAT_CONTEXT_MAX_TOKENS_LARGE", "256000"))
+CHAT_RESPONSE_MAX_TOKENS = int(os.environ.get("CHAT_RESPONSE_MAX_TOKENS", "4096"))
 CHAT_COMPACTION_THRESHOLD_TOKENS = int(os.environ.get("CHAT_COMPACTION_THRESHOLD_TOKENS", "14000"))
 CHAT_STREAMING_ENABLED = os.environ.get("CHAT_STREAMING_ENABLED", "true").lower() in ("true", "1", "yes")
 

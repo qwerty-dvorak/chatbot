@@ -108,7 +108,6 @@ class DocumentChunk(models.Model):
     content = models.TextField()
     content_hash = models.CharField(max_length=64)
     token_count = models.IntegerField(default=0)
-    embedding = models.JSONField(null=True, blank=True)
     metadata = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -124,3 +123,6 @@ class DocumentChunk(models.Model):
 
     def __str__(self):
         return f"Chunk {self.chunk_index} of {self.document.title}"
+
+    def get_milvus_id(self):
+        return str(self.id)

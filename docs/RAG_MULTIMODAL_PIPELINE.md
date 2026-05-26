@@ -46,11 +46,11 @@ Normalized document text
 Chunking
   |
   v
-Embedding generation with nvidia/llama-embed-nemotron-8b
-  |
+Embedding generation (llama-embed-nemotron-8b for text,
+  | nemotron-colembed-vl-8b-v2 for multimodal)
   v
-DocumentChunk rows with vectors
-  |
+Milvus collection: document_chunks
+  | (vectors + metadata stored)
   v
 Document marked ready
 ```
@@ -112,28 +112,56 @@ Chunk metadata should include:
 
 Embeddings should be generated through a single wrapper in `apps/llm/embeddings.py`.
 
-Important decisions:
+Models:
 
-- Embedding model is `nvidia/llama-embed-nemotron-8b`.
-- Set `EMBEDDING_DIM` to match the local runtime output for this model.
-- Use the same dimension for document chunks and memory vectors unless there is a strong reason not to.
-- Store embedding model name in metadata for future reindexing.
+- **Text embedding**: `nvidia/llama-embed-nemotron-8b` (dim: 4096).
+- **Multimodal embedding**: `nvidia/nemotron-colembed-vl-8b-v2` (dim: 4096, late-interaction ColBERT-style).
+- **Reranker**: `Qwen3-VL-Reranker-8B` (cross-encoder, score output).
 
-If the embedding model changes dimension, create new vector columns or rebuild the table with a migration and reindexing plan.
+Vector dimensions:
+
+- `TEXT_EMBEDDING_DIM` = 4096
+- `MULTIMODAL_EMBEDDING_DIM` = 4096
+
+If the embedding model changes dimension, create new Milvus collections or reindex.
+
+## Vector Store: Milvus
+
+Milvus replaces pgvector for all vector storage and search.
+
+Collections:
+
+| Collection | Dimension | Purpose |
+|-----------|-----------|---------|
+| `document_chunks` | 4096 | Document chunk embeddings for RAG |
+| `user_memories` | 4096 | User memory embeddings |
+
+Each collection stores:
+
+- `id` (string): UUID reference to the Django model
+- `vector` (float[]): embedding vector
+- Additional metadata fields as needed
+
+Milvus is accessed through `apps/llm/milvus_store.py`, which provides:
+
+- `ensure_collections()` - create collections if not exist
+- `insert_vectors()` - bulk insert
+- `search_vectors()` - vector similarity search
+- `delete_vectors()` - delete by IDs
+- `delete_by_expr()` - delete by filter expression
 
 ## Retrieval Strategy
 
 ### Default Hybrid Retrieval
 
-1. Embed the user query.
-2. Run vector similarity search against `DocumentChunk.embedding`.
-3. Run PostgreSQL full text search against `DocumentChunk.content`.
-4. Merge and rerank results.
-5. Apply access filtering:
+1. Embed the user query with the text embedding model.
+2. Run vector similarity search against Milvus `document_chunks` collection.
+3. Optionally rerank top results with Qwen3-VL-Reranker-8B.
+4. Apply access filtering:
    - user private documents,
    - shared sources,
    - global sources.
-6. Return top chunks with citations.
+5. Return top chunks with citations.
 
 If retrieval is invoked by the LLM as a tool, the full call must be recorded as:
 
@@ -218,7 +246,7 @@ Auto-save policy:
 1. After assistant response, inspect the last exchange.
 2. Decide whether it contains stable user preference or project context.
 3. If yes, create or update `Memory`.
-4. Embed the memory for future semantic retrieval.
+4. Embed the memory and insert into Milvus for future semantic retrieval.
 
 Memory can also be updated through `memory.save` tool calls, but the tool must respect user settings and never save secrets.
 

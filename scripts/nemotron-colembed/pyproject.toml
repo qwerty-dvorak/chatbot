@@ -1,0 +1,12 @@
+[project]
+name = "nemotron-colembed-server"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "torch>=2.6,<3",
+    "transformers>=4.51,<5",
+    "Pillow>=11,<12",
+]
+
+[project.optional-dependencies]
+gpu = ["flash-attn>=2.6.3,<3"]

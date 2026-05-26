@@ -25,7 +25,7 @@ The MVP should keep only the pieces needed for:
 | `Vote` | `chat.Vote` | Keep composite uniqueness by chat/message/user if per-user votes are needed. |
 | `ChatShare` | `chat.ChatShare` | Useful for share links. |
 | `SecurityLog` | `accounts.SecurityLog` | Keep for login and sensitive events. |
-| `Memory` | `memory.Memory` | Add optional embedding for semantic retrieval. |
+| `Memory` | `memory.Memory` | Embeddings stored in Milvus instead of PostgreSQL. |
 | `MemorySettings` | `memory.MemorySettings` | Keep auto-save and token budget settings. |
 | `StreamId` | `chat.StreamId` | Optional. Keep only if resumable generations are required. |
 | `TokenUsage` | `llm.TokenUsage` | Used across chat, ingestion, tool calls, memory, and compaction. |
@@ -247,18 +247,18 @@ Fields:
 - `id`
 - `user`
 - `content`
-- `tags`: PostgreSQL array or JSON list
+- `tags`: JSON list
 - `importance`
-- `embedding`: vector, optional but recommended
 - `last_used_at`
 - `created_at`
 - `updated_at`
+
+Vector storage: Milvus collection `user_memories` (dim: 4096).
 
 Indexes:
 
 - `(user, importance, -last_used_at)`
 - `(user, -updated_at)`
-- vector index on `embedding`
 
 ### `memory.MemorySettings`
 
@@ -371,18 +371,17 @@ Fields:
 - `content`
 - `content_hash`
 - `token_count`
-- `embedding`
 - `metadata`
 - `created_at`
+
+Vector storage: Milvus collection `document_chunks` (dim: 4096).
 
 Indexes:
 
 - unique `(document, chunk_index)`
 - `(document, chunk_index)`
-- PostgreSQL full text index on `content`
-- `pgvector` index on `embedding`
 
-Important: `embedding` dimension must match `nvidia/llama-embed-nemotron-8b` as exposed by the local embedding runtime. Confirm the exact output dimension before the first migration because pgvector dimensions are schema-level decisions.
+Note: Embeddings are stored in Milvus, not in the PostgreSQL row. The chunk's UUID serves as the Milvus document ID for cross-referencing.
 
 ### `ingestion.IngestionJob`
 
@@ -618,3 +617,4 @@ Indexes:
 - Global knowledge sources should not be deleted when an admin user is removed.
 - Deleting a document deletes assets, chunks, and related ingestion jobs.
 - Deleting a chat deletes messages, votes, compactions, retrieval runs, tool calls, stream deltas, and chat token usage.
+- Deleting a document should also remove its vectors from Milvus.

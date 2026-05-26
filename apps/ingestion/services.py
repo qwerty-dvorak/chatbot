@@ -1,6 +1,11 @@
 import logging
+from datetime import datetime, timezone
+
+from django.conf import settings
 
 from apps.knowledge.models import Document
+from apps.llm import milvus_store as milvus
+from apps.llm.embeddings import FakeEmbeddingClient
 
 from .chunking import TextChunker
 from .extractors.image import ImageExtractor
@@ -37,12 +42,13 @@ def run_ingestion(job: IngestionJob) -> bool:
             from apps.knowledge.models import DocumentChunk
 
             DocumentChunk.objects.filter(document=document).delete()
-            DocumentChunk.objects.bulk_create(
+            created = DocumentChunk.objects.bulk_create(
                 [DocumentChunk(**c) for c in chunks]
             )
+            _index_chunks(created)
 
         job.status = IngestionJob.Status.SUCCEEDED
-        job.finished_at = __import__("datetime").datetime.now(tz=__import__("datetime").timezone.utc)
+        job.finished_at = datetime.now(tz=timezone.utc)
         job.save(update_fields=["status", "finished_at"])
         logger.info(f"Ingestion succeeded for document {document.id}")
         return True
@@ -51,9 +57,35 @@ def run_ingestion(job: IngestionJob) -> bool:
         logger.error(f"Ingestion failed for document {document.id}: {e}")
         job.status = IngestionJob.Status.FAILED
         job.error = str(e)
-        job.finished_at = __import__("datetime").datetime.now(tz=__import__("datetime").timezone.utc)
+        job.finished_at = datetime.now(tz=timezone.utc)
         job.save(update_fields=["status", "error", "finished_at"])
         return False
+
+
+def _index_chunks(chunks):
+    if not chunks:
+        return
+    try:
+        embedder = FakeEmbeddingClient()
+        texts = [c.content for c in chunks]
+        vectors = embedder.embed(texts)
+        metadata_list = []
+        for chunk in chunks:
+            metadata_list.append({
+                "id": str(chunk.id),
+                "document_id": str(chunk.document_id),
+                "chunk_index": chunk.chunk_index,
+                "content": chunk.content[:512],
+                "token_count": chunk.token_count,
+            })
+        milvus.insert_vectors(
+            settings.MILVUS_COLLECTION_CHUNKS,
+            vectors,
+            metadata_list,
+        )
+        logger.info(f"Indexed {len(chunks)} chunks in Milvus")
+    except Exception:
+        logger.warning("Failed to index chunks in Milvus")
 
 
 def _get_extractor(mime_type: str):

@@ -12,7 +12,6 @@ class Memory(models.Model):
     content = models.TextField()
     tags = models.JSONField(default=list, blank=True)
     importance = models.IntegerField(default=1)
-    embedding = models.JSONField(null=True, blank=True)
     last_used_at = models.DateTimeField(auto_now_add=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -26,6 +25,9 @@ class Memory(models.Model):
 
     def __str__(self):
         return self.content[:60]
+
+    def get_milvus_id(self):
+        return str(self.id)
 
 
 class MemorySettings(models.Model):
