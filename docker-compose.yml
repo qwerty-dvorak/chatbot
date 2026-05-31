@@ -86,7 +86,9 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    command: ["uv", "run", "python", "manage.py", "run_ingestion_worker", "--settings=config.settings.production"]
+    command: >
+      sh -c "uv run python manage.py migrate --settings=config.settings.production &&
+             uv run python manage.py run_ingestion_worker --settings=config.settings.production"
 
 volumes:
   postgres_data:
