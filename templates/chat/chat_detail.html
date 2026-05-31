@@ -175,6 +175,42 @@
   let buf = contentEl.textContent || '';
   let started = false;
 
+  /* ── tool call / result rendering ── */
+  function showToolCall(tc) {
+    const el = document.createElement('div');
+    el.className = 'tool-call-block';
+    el.id = 'tc-' + tc.id;
+    const argsStr = typeof tc.arguments === 'object'
+      ? JSON.stringify(tc.arguments, null, 2)
+      : String(tc.arguments);
+    el.innerHTML =
+      '<span class="tc-icon">🔧</span>' +
+      '<span class="tc-name">' + escHtml(tc.name) + '</span>' +
+      '<code class="tc-args">' + escHtml(argsStr) + '</code>' +
+      '<span class="tc-status" id="tcs-' + tc.id + '">calling…</span>';
+    document.getElementById('msgs-inner').appendChild(el);
+    scrollBot(false);
+  }
+
+  function showToolResult(data) {
+    const statusEl = document.getElementById('tcs-' + data.tool_call_id);
+    if (statusEl) statusEl.textContent = '✓ done';
+    const el = document.getElementById('tc-' + data.tool_call_id);
+    if (el) {
+      const res = document.createElement('div');
+      res.className = 'tc-result';
+      let content = data.content || '';
+      try { content = JSON.stringify(JSON.parse(content), null, 2); } catch {}
+      res.textContent = content.length > 400 ? content.slice(0, 400) + '…' : content;
+      el.appendChild(res);
+    }
+    scrollBot(false);
+  }
+
+  function escHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
   function render(text) {
     const esc = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     const withPre = esc.replace(/```[\w]*\n?([\s\S]*?)```/g, function(_, c) {
@@ -191,7 +227,14 @@
   es.onmessage = function (e) {
     let d; try { d = JSON.parse(e.data); } catch { return; }
 
-    if (d.type === 'text') {
+    if (d.type === 'tool_call') {
+      if (!started) { started = true; if (typingEl) typingEl.style.display = 'none'; }
+      showToolCall(d.tool_call);
+
+    } else if (d.type === 'tool_result') {
+      showToolResult(d);
+
+    } else if (d.type === 'text') {
       if (!started) {
         started = true;
         if (typingEl) typingEl.style.display = 'none';

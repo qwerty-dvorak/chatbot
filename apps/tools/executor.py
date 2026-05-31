@@ -7,8 +7,9 @@ from .models import ToolCall, ToolDefinition, ToolExecution, ToolResult
 
 
 class ToolExecutor:
-    def __init__(self, tool_registry):
+    def __init__(self, tool_registry, context: dict | None = None):
         self.registry = tool_registry
+        self.context  = context or {}
 
     def execute(self, tool_call: ToolCall) -> ToolResult:
         tool_def = self.registry.get(tool_call.name_snapshot)
@@ -68,7 +69,7 @@ class ToolExecutor:
         if not handler:
             raise ValueError(f"No handler registered for tool: {tool_def.name}")
 
-        result = handler(arguments)
+        result = handler(arguments, self.context)
         if isinstance(result, dict):
             return json.dumps(result)
         return str(result)

@@ -147,13 +147,16 @@ docker-compose up postgres
 ```
 
 Services:
-| Service  | Port  | Description |
-|----------|-------|-------------|
-| postgres | 5432  | PostgreSQL 16 (official postgres:16-alpine image) |
-| web      | 8000  | Django + gunicorn (4 workers) |
-| worker   | —     | Ingestion background worker |
+| Service     | Port  | Description |
+|-------------|-------|-------------|
+| postgres    | 5432  | PostgreSQL 16 (official postgres:16-alpine) |
+| mock        | 9000  | Mock LLM server — chat completions with tool calls |
+| mock        | 9001  | Mock LLM server — embeddings |
+| file-server | 8888  | Local file server — documents organised by user/date |
+| web         | 8000  | Django + gunicorn |
+| worker      | —     | Ingestion background worker |
 
-Persistent volumes: `postgres_data`, `media_data`.
+Persistent volumes: `postgres_data`, `media_data`, `docs_data`.
 
 ---
 
@@ -244,6 +247,63 @@ uv run python manage.py rag_search "your query here"
 # Collect static files
 uv run python manage.py collectstatic --noinput
 ```
+
+---
+
+## Tool Calls
+
+Tool calls are enabled by default in the docker-compose stack. The mock server picks the correct tool from the registered list based on keywords in the user's message.
+
+### Triggering tools from the chat UI
+
+Type any of the following in a chat message:
+
+| What you type | Tool invoked |
+|---|---|
+| `Search my memory for Python` | `memory.search` |
+| `What do you remember about me?` | `memory.search` |
+| `Remember that I prefer dark mode` | `memory.save` |
+| `Search the knowledge base for climate` | `rag.search` |
+| `What's the ingestion status?` | `knowledge.ingest_status` |
+| `Analyze my latest document` | `document.analyze` |
+
+### What happens in the UI
+
+1. You send a message → Django creates a PENDING assistant message
+2. Browser opens `EventSource` to `/chats/<id>/stream/`
+3. Mock LLM streams a `tool_calls` finish — you'll see a **🔧 tool_name(args)** block appear
+4. Django executes the tool against the real database (memory, knowledge chunks, etc.)
+5. A **tool result** is shown under the tool block
+6. Django calls the mock LLM again with the tool result → it streams a plain text follow-up
+
+### Enabling/disabling individual tools
+
+Go to **Settings** (`/settings/`) and use the toggle next to each tool name.
+
+---
+
+## Local Document Storage
+
+Files uploaded through the **Knowledge** page are stored locally — no cloud buckets.
+
+Path structure:
+```
+data/docs/<user-id>/<YYYY-MM-DD>/knowledge/<filename>
+```
+
+The `file-server` service provides HTTP access to these files:
+```bash
+# List all files
+curl http://localhost:8888/browse
+
+# List files for a specific user
+curl http://localhost:8888/browse?user=<user-uuid>
+
+# Download a file
+curl http://localhost:8888/files/<user>/<date>/knowledge/<filename>
+```
+
+The `docs_data` Docker volume is shared between `file-server`, `web`, and `worker`.
 
 ---
 
