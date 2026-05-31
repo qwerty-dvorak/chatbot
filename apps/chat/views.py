@@ -151,8 +151,11 @@ class ChatShareView(LoginRequiredMixin, CreateView):
 class ChatStreamView(LoginRequiredMixin, View):
     def get(self, request, chat_id):
         chat = get_object_or_404(Chat, id=chat_id, user=request.user)
+        # Include STREAMING so a retry doesn't create a second orphan message
         pending_msg = Message.objects.filter(
-            chat=chat, role=Message.Role.ASSISTANT, status=Message.Status.PENDING
+            chat=chat,
+            role=Message.Role.ASSISTANT,
+            status__in=[Message.Status.PENDING, Message.Status.STREAMING],
         ).last()
         if not pending_msg:
             pending_msg = Message.objects.create(

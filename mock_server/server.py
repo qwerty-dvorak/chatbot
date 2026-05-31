@@ -53,11 +53,17 @@ def _fake_embedding(text: str, dim: int) -> list[float]:
 
 # ── tool selection logic ───────────────────────────────────────────────────────
 
-# keyword sets → tool name
+# keyword sets → tool name  (checked in order; first match wins)
 _TOOL_KEYWORDS: list[tuple[list[str], str]] = [
-    (["save memory", "remember that", "note that", "memorize", "store memory"],  "memory.save"),
-    (["memory", "recall", "what do you know", "what did i tell"],                "memory.search"),
-    (["knowledge base", "search document", "find document", "rag"],              "rag.search"),
+    # memory.save — "remember", "note", "store", "prefer" triggers
+    (["remember", "save memory", "note that", "memorize", "store memory",
+      "i like", "i prefer", "i use", "i want you to know", "keep in mind"],     "memory.save"),
+    # memory.search — explicit search queries on memory
+    (["search my memory", "search memory", "recall", "what do you remember",
+      "what do you know about me", "what did i tell"],                           "memory.search"),
+    # rag.search
+    (["knowledge base", "search document", "find document", "rag",
+      "search knowledge", "look up"],                                            "rag.search"),
     (["compact", "summarize chat", "compress"],                                  "chat.compact"),
     (["ingest status", "ingestion"],                                             "knowledge.ingest_status"),
     (["analyze document", "analyse document", "document analysis"],              "document.analyze"),
@@ -168,10 +174,9 @@ def _stream_text_response(wfile, model: str, messages: list[dict], flush):
     last_role = messages[-1].get("role") if messages else ""
     answer = AFTER_TOOL_ANSWER if last_role == "tool" else PLAIN_ANSWER
 
-    _stream_chunks(wfile, base, [
-        ("reasoning_content", THINKING),
-        ("content", answer),
-    ], flush)
+    # Stream only content (not reasoning_content — LiteLLM maps it to .content
+    # in streaming mode, which conflicts with actual text deltas)
+    _stream_chunks(wfile, base, [("content", answer)], flush)
 
     done = {**base, "choices": [{
         "index": 0, "finish_reason": "stop", "delta": {},
@@ -191,10 +196,10 @@ def _stream_tool_call_response(wfile, model: str, messages: list[dict],
     tool_name, args_dict = _pick_tool(messages, tools)
     args_str = json.dumps(args_dict)
 
-    # 1. Reasoning
-    _stream_chunks(wfile, base, [("reasoning_content", THINKING)], flush)
+    # No reasoning_content in streaming — LiteLLM treats it as content text
+    # which corrupts the text accumulator and causes sequence conflicts on retry.
 
-    # 2. First tool-call delta: id + name (arguments = "" per OpenAI spec)
+    # First tool-call delta: id + name (arguments = "" per OpenAI spec)
     wfile.write(_sse({**base, "choices": [{
         "index": 0, "finish_reason": None,
         "delta": {"tool_calls": [{
