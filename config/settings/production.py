@@ -15,6 +15,9 @@ DATABASES = {
     }
 }
 
-SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
-SESSION_COOKIE_SECURE = True
-CSRF_COOKIE_SECURE = True
+# For intranet HTTP-only deployment, disable secure cookie flags
+# (set HTTPS=true env var to re-enable when running behind TLS)
+_https = os.environ.get("HTTPS", "false").lower() in ("true", "1", "yes")  # noqa: F405
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https") if _https else None
+SESSION_COOKIE_SECURE = _https
+CSRF_COOKIE_SECURE = _https

@@ -1,0 +1,73 @@
+{% load static %}
+{% with ns=request.resolver_match.app_name %}
+<aside class="sidebar">
+
+  <div class="sb-header">
+    <a href="{% url 'chat:list' %}" class="sb-brand">
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+        <rect width="20" height="20" rx="5" fill="#0071e3"/>
+        <path d="M4 13.5l3.5-7 2.5 5 2-2.5 3.5 5" stroke="#fff" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      Chatbot
+    </a>
+    <a href="{% url 'chat:new' %}" class="sb-new-btn">
+      <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor">
+        <path d="M8 2a.75.75 0 01.75.75v4.5h4.5a.75.75 0 010 1.5h-4.5v4.5a.75.75 0 01-1.5 0v-4.5h-4.5a.75.75 0 010-1.5h4.5v-4.5A.75.75 0 018 2z"/>
+      </svg>
+      New chat
+    </a>
+  </div>
+
+  <div class="sb-nav">
+    <div class="sb-nav-label">Menu</div>
+    <a href="{% url 'chat:list' %}"      class="sb-link {% if ns == 'chat' %}active{% endif %}">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M2.5 2A2.5 2.5 0 000 4.5v6A2.5 2.5 0 002.5 13H3v1.543a.5.5 0 00.79.407L6.5 13H13.5A2.5 2.5 0 0016 10.5v-6A2.5 2.5 0 0013.5 2h-11z"/></svg>
+      Chats
+    </a>
+    <a href="{% url 'knowledge:list' %}" class="sb-link {% if ns == 'knowledge' %}active{% endif %}">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M2 2.5A2.5 2.5 0 014.5 0h8.75a.75.75 0 01.75.75v12.5a.75.75 0 01-.75.75h-2.5a.75.75 0 010-1.5h1.75v-2h-8a1 1 0 00-.714 1.7.75.75 0 01-1.072 1.05A2.495 2.495 0 012 11.5v-9zm10.5-1V9h-8c-.356 0-.694.074-1 .208V2.5a1 1 0 011-1h8z"/></svg>
+      Knowledge
+    </a>
+    <a href="{% url 'memory:list' %}"    class="sb-link {% if ns == 'memory' %}active{% endif %}">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path fill-rule="evenodd" d="M8 1.5a6.5 6.5 0 100 13 6.5 6.5 0 000-13zM0 8a8 8 0 1116 0A8 8 0 010 8zm9 3a1 1 0 11-2 0 1 1 0 012 0zm-.25-6.25a.75.75 0 00-1.5 0v3.5a.75.75 0 001.5 0v-3.5z"/></svg>
+      Memory
+    </a>
+    <a href="{% url 'tools:list' %}"     class="sb-link {% if ns == 'tools' %}active{% endif %}">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path fill-rule="evenodd" d="M6.5 1.75a.25.25 0 01.25-.25h2.5a.25.25 0 01.25.25V3h-3V1.75zm4.5 0V3h2.25a.75.75 0 010 1.5H.75a.75.75 0 010-1.5H3V1.75C3 .784 3.784 0 4.75 0h6.5C12.216 0 13 .784 13 1.75zM1.5 4.854l.647 8.22a.5.5 0 00.498.426h10.71a.5.5 0 00.498-.426l.647-8.22H1.5z"/></svg>
+      Tools
+    </a>
+    <a href="{% url 'settings' %}"       class="sb-link {% if request.resolver_match.url_name == 'settings' %}active{% endif %}">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path fill-rule="evenodd" d="M7.429 1.525a6.593 6.593 0 011.142 0c.036.003.108.036.137.146l.289 1.105c.147.56.55.967.997 1.189.174.086.341.183.501.29.417.273.97.301 1.43.03l.96-.561a.161.161 0 01.167.008 6.455 6.455 0 01.808.806.161.161 0 01.008.167l-.563.963c-.272.462-.244 1.013.03 1.43.107.16.204.327.29.502.22.446.626.848 1.186.996l1.103.289a.153.153 0 01.146.137 6.593 6.593 0 010 1.142.153.153 0 01-.137.146l-1.105.289c-.56.147-.967.55-1.189.997a5.036 5.036 0 01-.29.501c-.274.417-.302.97-.03 1.43l.561.96a.161.161 0 01-.008.167 6.455 6.455 0 01-.806.808.161.161 0 01-.167.008l-.963-.563c-.462-.272-1.013-.244-1.43.03a5.036 5.036 0 01-.502.29c-.446.22-.848.626-.996 1.186l-.289 1.103a.153.153 0 01-.137.146 6.593 6.593 0 01-1.142 0 .153.153 0 01-.146-.137l-.289-1.105c-.147-.56-.55-.967-.997-1.189a5.036 5.036 0 01-.501-.29c-.417-.273-.97-.301-1.43-.03l-.96.561a.161.161 0 01-.167-.008 6.455 6.455 0 01-.808-.806.161.161 0 01-.008-.167l.563-.963c.272-.462.244-1.013-.03-1.43a5.036 5.036 0 01-.29-.502c-.22-.446-.626-.848-1.186-.996L1.525 8.57a.153.153 0 01-.146-.137 6.593 6.593 0 010-1.142.153.153 0 01.137-.146l1.105-.289c.56-.147.967-.55 1.189-.997.086-.174.183-.341.29-.501.273-.417.301-.97.03-1.43l-.561-.96a.161.161 0 01.008-.167 6.455 6.455 0 01.806-.808.161.161 0 01.167-.008l.963.563c.462.272 1.013.244 1.43-.03.16-.107.327-.204.502-.29.446-.22.848-.626.996-1.186l.289-1.103a.153.153 0 01.137-.146zM8 10.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z"/></svg>
+      Settings
+    </a>
+  </div>
+
+  <div class="sb-chats-label">Recent</div>
+  <div class="sb-chats">
+    {% for c in sidebar_chats %}
+      <a href="{% url 'chat:detail' c.id %}"
+         class="sb-chat-item{% if request.resolver_match.kwargs.chat_id == c.id %} active{% endif %}">
+        <span class="sb-chat-title" title="{{ c.title }}">{{ c.title }}</span>
+        <span class="sb-chat-time">{{ c.updated_at|timesince|truncatewords:2 }}</span>
+      </a>
+    {% empty %}
+      <div style="padding:6px 10px;font-size:.8rem;color:var(--sb-muted)">No chats yet</div>
+    {% endfor %}
+  </div>
+
+  <div class="sb-footer">
+    <div class="sb-user-row">
+      <div class="sb-avatar">{{ request.user.email|first|upper }}</div>
+      <span class="sb-email">{{ request.user.email }}</span>
+    </div>
+    <form method="post" action="{% url 'logout' %}">
+      {% csrf_token %}
+      <button type="submit" class="sb-logout">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path fill-rule="evenodd" d="M2 2.75C2 1.784 2.784 1 3.75 1h4.5a.75.75 0 010 1.5h-4.5a.25.25 0 00-.25.25v10.5c0 .138.112.25.25.25h4.5a.75.75 0 010 1.5h-4.5A1.75 1.75 0 012 13.25V2.75zm10.44 4.5H6.75a.75.75 0 000 1.5h5.69l-1.97 1.97a.75.75 0 101.06 1.06l3.25-3.25a.75.75 0 000-1.06l-3.25-3.25a.75.75 0 10-1.06 1.06l1.97 1.97z"/></svg>
+        Sign out
+      </button>
+    </form>
+  </div>
+
+</aside>
+{% endwith %}

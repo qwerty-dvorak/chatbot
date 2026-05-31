@@ -1,18 +1,43 @@
 {% extends "base.html" %}
-{% block title %}Knowledge Documents{% endblock %}
+{% block title %}Knowledge — Chatbot{% endblock %}
 {% block content %}
-<h1>Knowledge Documents</h1>
-<a href="{% url 'knowledge:upload' %}" class="btn">Upload Document</a>
+<div class="page-header">
+  <h1>Knowledge</h1>
+  <a href="{% url 'knowledge:upload' %}" class="btn btn-primary">
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M8 2a.75.75 0 01.75.75v4.5h4.5a.75.75 0 010 1.5h-4.5v4.5a.75.75 0 01-1.5 0v-4.5h-4.5a.75.75 0 010-1.5h4.5v-4.5A.75.75 0 018 2z"/></svg>
+    Upload
+  </a>
+</div>
+
 {% if documents %}
-    <ul class="document-list">
+  <div class="doc-list">
     {% for doc in documents %}
-        <li>
-            <a href="{% url 'knowledge:detail' doc.id %}">{{ doc.title }}</a>
-            <span class="meta">{{ doc.mime_type }} | {{ doc.status }} | {{ doc.created_at|timesince }} ago</span>
-        </li>
+      <div class="doc-item">
+        <a href="{% url 'knowledge:detail' doc.id %}" style="display:flex;align-items:center;gap:12px;flex:1;min-width:0;text-decoration:none">
+          <div class="doc-icon">
+            {% if "pdf" in doc.mime_type %}PDF
+            {% elif "image" in doc.mime_type %}IMG
+            {% else %}TXT{% endif %}
+          </div>
+          <div class="doc-body">
+            <div class="doc-title" style="color:var(--text)">{{ doc.title }}</div>
+            <div class="doc-meta">{{ doc.original_filename }} · {{ doc.created_at|timesince }} ago</div>
+          </div>
+        </a>
+        <div class="doc-actions">
+          <span class="badge badge-{{ doc.status }}">{{ doc.status }}</span>
+          <form method="post" action="{% url 'knowledge:delete' doc.id %}" onsubmit="return confirm('Delete this document?')">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-danger btn-sm">Delete</button>
+          </form>
+        </div>
+      </div>
     {% endfor %}
-    </ul>
+  </div>
 {% else %}
-    <p>No documents yet. <a href="{% url 'knowledge:upload' %}">Upload one</a>.</p>
+  <div class="empty">
+    <p>No documents yet.</p>
+    <a href="{% url 'knowledge:upload' %}" class="btn btn-primary">Upload your first document</a>
+  </div>
 {% endif %}
 {% endblock %}

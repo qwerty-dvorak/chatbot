@@ -1,299 +1,218 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{{ chat.title }} — Chatbot</title>
-  {% load static %}
-  <link rel="stylesheet" href="{% static 'css/app.css' %}">
-</head>
-<body>
+{% extends "base.html" %}
+{% block title %}{{ chat.title }} — Chatbot{% endblock %}
+{% block main_class %}full-h{% endblock %}
 
-<div class="app-shell">
+{% block body %}
+<div class="chat-container">
 
-  <!-- ── Sidebar ── -->
-  <aside class="sidebar">
-    <div class="sidebar-top">
-      <a href="{% url 'chat:list' %}" class="sidebar-brand">
-        <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
-          <rect width="20" height="20" rx="5" fill="#2563eb"/>
-          <path d="M5 13l3-6 2 4 2-2 3 4" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-        Chatbot
-      </a>
-      <a href="{% url 'chat:new' %}" class="sidebar-new-btn">
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-          <path d="M8 2a.75.75 0 01.75.75v4.5h4.5a.75.75 0 010 1.5h-4.5v4.5a.75.75 0 01-1.5 0v-4.5h-4.5a.75.75 0 010-1.5h4.5v-4.5A.75.75 0 018 2z"/>
-        </svg>
-        New chat
-      </a>
-    </div>
-
-    <div class="sidebar-section">
-      <div class="sidebar-section-label">Recent</div>
-    </div>
-    <div class="sidebar-chats">
-      {% for c in user_chats %}
-        <a href="{% url 'chat:detail' c.id %}"
-           class="sidebar-chat-item{% if c.id == chat.id %} active{% endif %}">
-          <span class="chat-item-title" title="{{ c.title }}">{{ c.title }}</span>
-          <span class="chat-item-time">{{ c.updated_at|timesince|truncatewords:2 }}</span>
-        </a>
-      {% empty %}
-        <div style="padding:8px 10px;font-size:.8rem;color:var(--sb-muted)">No chats yet</div>
-      {% endfor %}
-    </div>
-
-    <div class="sidebar-bottom">
-      <a href="{% url 'knowledge:list' %}" class="sidebar-nav-link">
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" opacity=".7">
-          <path d="M2 2.5A2.5 2.5 0 014.5 0h8.75a.75.75 0 01.75.75v12.5a.75.75 0 01-.75.75h-2.5a.75.75 0 010-1.5h1.75v-2h-8a1 1 0 00-.714 1.7.75.75 0 01-1.072 1.05A2.495 2.495 0 012 11.5v-9zm10.5-1V9h-8c-.356 0-.694.074-1 .208V2.5a1 1 0 011-1h8z"/>
-        </svg>
-        Knowledge
-      </a>
-      <a href="{% url 'memory:list' %}" class="sidebar-nav-link">
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" opacity=".7">
-          <path d="M8 0a8 8 0 110 16A8 8 0 018 0zm.75 4.75a.75.75 0 00-1.5 0v3.5l-2 1.5a.75.75 0 00.9 1.2l2.35-1.763A.75.75 0 008.75 8.5V4.75z"/>
-        </svg>
-        Memory
-      </a>
-      <a href="{% url 'tools:list' %}" class="sidebar-nav-link">
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" opacity=".7">
-          <path fill-rule="evenodd" d="M6.5 1.75a.25.25 0 01.25-.25h2.5a.25.25 0 01.25.25V3h-3V1.75zm4.5 0V3h2.25a.75.75 0 010 1.5H.75a.75.75 0 010-1.5H3V1.75C3 .784 3.784 0 4.75 0h6.5C12.216 0 13 .784 13 1.75zM1.5 4.854l.647 8.22a.5.5 0 00.498.426h10.71a.5.5 0 00.498-.426l.647-8.22H1.5z"/>
-        </svg>
-        Tools
-      </a>
-      <div style="height:8px"></div>
-      <div class="sidebar-user">
-        <div class="sidebar-avatar">{{ request.user.email|first|upper }}</div>
-        <span class="sidebar-email">{{ request.user.email }}</span>
-      </div>
-      <form method="post" action="{% url 'logout' %}">
+  <!-- Top bar -->
+  <div class="chat-topbar">
+    <span class="chat-topbar-title">
+      {{ chat.title }}
+      {% if chat.archived %}<span class="badge badge-pending" style="margin-left:8px">archived</span>{% endif %}
+    </span>
+    <div class="chat-topbar-actions">
+      <a href="{% url 'chat:share' chat.id %}" class="btn btn-ghost btn-sm">Share</a>
+      <form method="post" action="{% url 'chat:archive' chat.id %}" style="display:inline">
         {% csrf_token %}
-        <button type="submit" class="sidebar-logout">
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" opacity=".7">
-            <path fill-rule="evenodd" d="M2 2.75C2 1.784 2.784 1 3.75 1h4.5a.75.75 0 010 1.5h-4.5a.25.25 0 00-.25.25v10.5c0 .138.112.25.25.25h4.5a.75.75 0 010 1.5h-4.5A1.75 1.75 0 012 13.25V2.75zm10.44 4.5H6.75a.75.75 0 000 1.5h5.69l-1.97 1.97a.75.75 0 101.06 1.06l3.25-3.25a.75.75 0 000-1.06l-3.25-3.25a.75.75 0 10-1.06 1.06l1.97 1.97z"/>
-          </svg>
-          Sign out
+        <input type="hidden" name="next" value="{% url 'chat:detail' chat.id %}">
+        <button type="submit" class="btn btn-ghost btn-sm">
+          {% if chat.archived %}Restore{% else %}Archive{% endif %}
         </button>
       </form>
     </div>
-  </aside>
+  </div>
 
-  <!-- ── Chat main ── -->
-  <div class="chat-main">
+  <!-- Messages -->
+  <div class="msgs-wrap" id="msgs-wrap">
+    <div class="msgs-inner" id="msgs-inner">
 
-    <!-- Header -->
-    <div class="chat-header">
-      <div class="chat-header-title">
-        {{ chat.title }}
-        {% if chat.archived %}
-          <span class="badge-archived" style="font-size:.75rem;margin-left:8px">archived</span>
-        {% endif %}
-      </div>
-      <div class="chat-header-actions">
-        <a href="{% url 'chat:share' chat.id %}" class="btn btn-ghost btn-sm">Share</a>
-        <form method="post" action="{% url 'chat:archive' chat.id %}" style="display:inline">
-          {% csrf_token %}
-          <input type="hidden" name="next" value="{% url 'chat:detail' chat.id %}">
-          <button type="submit" class="btn btn-ghost btn-sm">
-            {% if chat.archived %}Restore{% else %}Archive{% endif %}
-          </button>
-        </form>
-      </div>
-    </div>
+      {% if not chat_messages %}
+        <div class="chat-welcome">
+          <svg width="44" height="44" viewBox="0 0 20 20" fill="none">
+            <rect width="20" height="20" rx="5" fill="#eff6ff"/>
+            <path d="M4 13.5l3.5-7 2.5 5 2-2.5 3.5 5" stroke="#0071e3" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <h2>Start a conversation</h2>
+          <p>Type a message below to get started.</p>
+        </div>
+      {% endif %}
 
-    <!-- Messages -->
-    <div class="messages-container" id="messages-container">
-      <div class="messages-inner" id="messages-inner">
-
-        {% if not chat_messages %}
-          <div class="chat-welcome">
-            <svg width="40" height="40" viewBox="0 0 20 20" fill="none">
-              <rect width="20" height="20" rx="5" fill="#eff6ff"/>
-              <path d="M5 13l3-6 2 4 2-2 3 4" stroke="#2563eb" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-            <h2>Start a conversation</h2>
-            <p>Type a message below to begin.</p>
-          </div>
-        {% endif %}
-
-        {% for msg in chat_messages %}
-          {% if msg.role == 'user' %}
-            <div class="msg msg-user">
-              <div class="msg-bubble">{{ msg.content }}</div>
-              {% if msg.attachments %}
-                <div class="msg-attachments">
-                  {% for att in msg.attachments %}
-                    <span class="attachment-chip">📎 {{ att.original_filename }}</span>
-                  {% endfor %}
-                </div>
-              {% endif %}
-              <div class="msg-meta">{{ msg.created_at|time:"H:i" }}</div>
-            </div>
-
-          {% elif msg.role == 'assistant' %}
-            {% if msg.status == 'pending' or msg.status == 'streaming' %}
-              <!-- This message will be filled by the stream -->
-              <div class="msg msg-assistant"
-                   id="streaming-msg"
-                   data-stream-url="{% url 'chat:stream' chat.id %}">
-                <div class="msg-assistant-inner">
-                  <div class="msg-avatar">
-                    <svg width="14" height="14" viewBox="0 0 20 20" fill="none">
-                      <path d="M5 13l3-6 2 4 2-2 3 4" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                    </svg>
-                  </div>
-                  <div class="msg-body">
-                    <div class="msg-content msg-streaming" id="streaming-content">{% if msg.content %}{{ msg.content }}{% endif %}</div>
-                    <div class="typing-indicator" id="typing-indicator">
-                      <div class="typing-dot"></div>
-                      <div class="typing-dot"></div>
-                      <div class="typing-dot"></div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            {% elif msg.content %}
-              <div class="msg msg-assistant">
-                <div class="msg-assistant-inner">
-                  <div class="msg-avatar">
-                    <svg width="14" height="14" viewBox="0 0 20 20" fill="none">
-                      <path d="M5 13l3-6 2 4 2-2 3 4" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                    </svg>
-                  </div>
-                  <div class="msg-body">
-                    <div class="msg-content">{{ msg.content }}</div>
-                    <div class="msg-meta">{{ msg.created_at|time:"H:i" }}</div>
-                  </div>
-                </div>
+      {% for msg in chat_messages %}
+        {% if msg.role == 'user' %}
+          <div class="msg msg-user">
+            <div class="msg-bubble">{{ msg.content }}</div>
+            {% if msg.attachments %}
+              <div class="attach-chips">
+                {% for a in msg.attachments %}<span class="attach-chip">📎 {{ a.original_filename }}</span>{% endfor %}
               </div>
             {% endif %}
-          {% endif %}
-        {% endfor %}
-
-      </div>
-    </div>
-
-    <!-- Input -->
-    <div class="input-area">
-      <div class="input-inner">
-        <form method="post" action="" id="message-form" enctype="multipart/form-data">
-          {% csrf_token %}
-          <div class="input-box">
-            <textarea
-              id="message-input"
-              name="content"
-              class="input-textarea"
-              placeholder="Message…"
-              rows="1"
-              autocomplete="off"
-              autofocus
-            ></textarea>
-            <button type="submit" class="send-btn" id="send-btn" title="Send (Enter)">
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-                <path d="M.989 8L.064 2.68a1.342 1.342 0 011.85-1.462l13 5.54a1.342 1.342 0 010 2.484l-13 5.54a1.342 1.342 0 01-1.85-1.462L.989 9H8a1 1 0 000-2H.989z"/>
-              </svg>
-            </button>
+            <div class="msg-time">{{ msg.created_at|time:"H:i" }}</div>
           </div>
-          <div class="input-hint">Enter to send · Shift+Enter for newline</div>
-        </form>
-      </div>
-    </div>
 
-  </div><!-- .chat-main -->
-</div><!-- .app-shell -->
+        {% elif msg.role == 'assistant' %}
+          {% if msg.status == 'pending' or msg.status == 'streaming' %}
+            <div class="msg msg-assistant" id="streaming-msg" data-url="{% url 'chat:stream' chat.id %}">
+              <div class="msg-bot-avatar">
+                <svg width="13" height="13" viewBox="0 0 20 20" fill="none">
+                  <path d="M4 13.5l3.5-7 2.5 5 2-2.5 3.5 5" stroke="#fff" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </div>
+              <div class="msg-bot-body">
+                <div class="msg-content msg-streaming" id="stream-content">{% if msg.content %}{{ msg.content }}{% endif %}</div>
+                <div class="typing" id="typing-ind">
+                  <div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div>
+                </div>
+              </div>
+            </div>
+          {% elif msg.content %}
+            <div class="msg msg-assistant">
+              <div class="msg-bot-avatar">
+                <svg width="13" height="13" viewBox="0 0 20 20" fill="none">
+                  <path d="M4 13.5l3.5-7 2.5 5 2-2.5 3.5 5" stroke="#fff" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </div>
+              <div class="msg-bot-body">
+                <div class="msg-content" id="msg-{{ msg.id }}">{{ msg.content }}</div>
+                <div class="msg-bot-time">{{ msg.created_at|time:"H:i" }}</div>
+              </div>
+            </div>
+          {% endif %}
+        {% endif %}
+      {% endfor %}
+
+    </div>
+  </div>
+
+  <!-- Input -->
+  <div class="input-area">
+    <div class="input-inner">
+      <div class="file-preview-strip" id="file-preview-strip"></div>
+      <form method="post" id="msg-form" enctype="multipart/form-data">
+        {% csrf_token %}
+        <div class="input-box">
+          <input type="file" id="file-input" name="attachment"
+                 accept=".pdf,.txt,.md,.csv,image/png,image/jpeg,image/webp,image/gif"
+                 style="display:none">
+          <button type="button" class="attach-btn" id="attach-btn" title="Attach file">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" color="inherit">
+              <path d="M8.914 1.372a2.75 2.75 0 013.886 3.886l-5.522 5.522A4.25 4.25 0 01.926 4.93L6.35.508a.75.75 0 01.974 1.138L1.9 6.068a2.75 2.75 0 003.888 3.888l5.52-5.52a1.25 1.25 0 00-1.767-1.768L3.824 8.386a.25.25 0 00.354.354l3.73-3.73a.75.75 0 011.06 1.06l-3.73 3.73a1.75 1.75 0 01-2.475-2.474l5.718-5.718a.074.074 0 00.003-.005z"/>
+            </svg>
+          </button>
+          <textarea id="msg-input" name="content" class="input-ta"
+                    placeholder="Message…" rows="1" autocomplete="off" autofocus></textarea>
+          <button type="submit" class="send-btn" id="send-btn" title="Send (Enter)">
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M.989 8L.064 2.68a1.342 1.342 0 011.85-1.462l13 5.54a1.342 1.342 0 010 2.484l-13 5.54a1.342 1.342 0 01-1.85-1.462L.989 9H8a1 1 0 000-2H.989z"/>
+            </svg>
+          </button>
+        </div>
+        <div class="input-hint">Enter to send · Shift+Enter for newline</div>
+      </form>
+    </div>
+  </div>
+
+</div>
 
 <script>
 (function () {
-  // ── Auto-resize textarea ──
-  const ta = document.getElementById('message-input');
+  /* ── auto-resize textarea ── */
+  const ta = document.getElementById('msg-input');
   ta.addEventListener('input', function () {
     this.style.height = 'auto';
     this.style.height = Math.min(this.scrollHeight, 180) + 'px';
   });
 
-  // ── Enter to send, Shift+Enter for newline ──
-  const form = document.getElementById('message-form');
+  /* ── enter to send ── */
+  const form = document.getElementById('msg-form');
+  const sendBtn = document.getElementById('send-btn');
   ta.addEventListener('keydown', function (e) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      if (!document.getElementById('send-btn').disabled && ta.value.trim()) {
-        form.submit();
-      }
+      if (!sendBtn.disabled && (ta.value.trim() || fileAttached)) form.submit();
     }
   });
 
-  // ── Scroll helpers ──
-  const container = document.getElementById('messages-container');
-  function scrollToBottom(smooth) {
-    container.scrollTo({ top: container.scrollHeight, behavior: smooth ? 'smooth' : 'instant' });
-  }
-  scrollToBottom(false);
+  /* ── file attachment ── */
+  const fileInput = document.getElementById('file-input');
+  const attachBtn = document.getElementById('attach-btn');
+  const strip     = document.getElementById('file-preview-strip');
+  let fileAttached = false;
 
-  // ── Streaming ──
-  const streamingMsg = document.getElementById('streaming-msg');
-  if (!streamingMsg) return;
-
-  const streamUrl   = streamingMsg.dataset.streamUrl;
-  const contentEl   = document.getElementById('streaming-content');
-  const typingEl    = document.getElementById('typing-indicator');
-  const sendBtn     = document.getElementById('send-btn');
-  sendBtn.disabled  = true;
-
-  let accumulated = contentEl.textContent || '';
-  let started     = false;
-
-  function renderText(text) {
-    // Basic escaping + paragraph / code rendering
-    const escaped = text
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;');
-    // Fenced code blocks: ```lang\n...\n```
-    const withCode = escaped.replace(/```[\w]*\n?([\s\S]*?)```/g, function(_, code) {
-      return '<pre><code>' + code.trim() + '</code></pre>';
+  attachBtn.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', function () {
+    strip.innerHTML = '';
+    fileAttached = false;
+    if (!this.files.length) return;
+    const f = this.files[0];
+    fileAttached = true;
+    const chip = document.createElement('div');
+    chip.className = 'file-preview-chip';
+    chip.innerHTML = '📎 ' + f.name +
+      ' <button type="button" title="Remove">✕</button>';
+    chip.querySelector('button').addEventListener('click', function () {
+      fileInput.value = '';
+      strip.innerHTML = '';
+      fileAttached = false;
     });
-    // Inline code
-    const withInline = withCode.replace(/`([^`]+)`/g, '<code>$1</code>');
-    // Bold
-    const withBold = withInline.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-    // Paragraphs
-    const withParas = withBold.split('\n\n').map(function(p) {
-      return '<p>' + p.replace(/\n/g, '<br>') + '</p>';
-    }).join('');
-    return withParas;
+    strip.appendChild(chip);
+  });
+
+  /* ── scroll to bottom ── */
+  const wrap = document.getElementById('msgs-wrap');
+  function scrollBot(smooth) { wrap.scrollTo({ top: wrap.scrollHeight, behavior: smooth ? 'smooth' : 'instant' }); }
+  scrollBot(false);
+
+  /* ── streaming ── */
+  const sMsg = document.getElementById('streaming-msg');
+  if (!sMsg) return;
+
+  const streamUrl = sMsg.dataset.url;
+  const contentEl = document.getElementById('stream-content');
+  const typingEl  = document.getElementById('typing-ind');
+  sendBtn.disabled = true;
+
+  let buf = contentEl.textContent || '';
+  let started = false;
+
+  function render(text) {
+    const esc = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    const withPre = esc.replace(/```[\w]*\n?([\s\S]*?)```/g, function(_, c) {
+      return '<pre><code>' + c.trim() + '</code></pre>';
+    });
+    const withCode = withPre.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+    const withBold = withCode.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+    const withEm   = withBold.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
+    return withEm.split('\n\n').map(p => '<p>' + p.replace(/\n/g,'<br>') + '</p>').join('');
   }
 
   const es = new EventSource(streamUrl);
 
   es.onmessage = function (e) {
-    let data;
-    try { data = JSON.parse(e.data); } catch { return; }
+    let d; try { d = JSON.parse(e.data); } catch { return; }
 
-    if (data.type === 'text') {
+    if (d.type === 'text') {
       if (!started) {
         started = true;
         if (typingEl) typingEl.style.display = 'none';
-        contentEl.classList.add('msg-streaming');
       }
-      accumulated += data.content;
-      contentEl.innerHTML = renderText(accumulated);
-      scrollToBottom(false);
+      buf += d.content;
+      contentEl.innerHTML = render(buf);
+      scrollBot(false);
 
-    } else if (data.type === 'done') {
+    } else if (d.type === 'done') {
       es.close();
       contentEl.classList.remove('msg-streaming');
       if (typingEl) typingEl.remove();
       sendBtn.disabled = false;
       ta.focus();
 
-    } else if (data.type === 'error') {
+    } else if (d.type === 'error') {
       es.close();
       contentEl.classList.remove('msg-streaming');
       if (typingEl) typingEl.remove();
-      contentEl.innerHTML = '<span style="color:#dc2626">⚠ ' +
-        (data.content || 'Error generating response') + '</span>';
+      contentEl.innerHTML = '<span style="color:var(--red)">⚠ ' +
+        (d.content || 'Error generating response') + '</span>';
       sendBtn.disabled = false;
     }
   };
@@ -302,13 +221,9 @@
     es.close();
     if (typingEl) typingEl.remove();
     contentEl.classList.remove('msg-streaming');
-    if (!accumulated) {
-      contentEl.innerHTML = '<span style="color:#dc2626">⚠ Connection lost</span>';
-    }
+    if (!buf) contentEl.innerHTML = '<span style="color:var(--red)">⚠ Connection lost</span>';
     sendBtn.disabled = false;
   };
 })();
 </script>
-
-</body>
-</html>
+{% endblock %}

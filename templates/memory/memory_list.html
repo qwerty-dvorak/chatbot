@@ -1,18 +1,25 @@
 {% extends "base.html" %}
-{% block title %}Memories{% endblock %}
+{% block title %}Memory — Chatbot{% endblock %}
 {% block content %}
-<h1>Memories</h1>
-<a href="{% url 'memory:settings' %}" class="btn">Settings</a>
+<div class="page-header">
+  <h1>Memory</h1>
+  <a href="{% url 'memory:settings' %}" class="btn btn-ghost btn-sm">Settings</a>
+</div>
+
 {% if memories %}
-    <ul class="memory-list">
-    {% for memory in memories %}
-        <li>
-            <p>{{ memory.content }}</p>
-            <span class="meta">Importance: {{ memory.importance }} | Last used: {{ memory.last_used_at|timesince }} ago</span>
-        </li>
+  <div class="memory-list">
+    {% for m in memories %}
+      <div class="memory-item">
+        <div class="memory-content">{{ m.content }}</div>
+        <div class="memory-meta">
+          <span><span class="importance-dot" style="opacity:{{ m.importance|divisibleby:3|yesno:'1,.6' }}"></span>Importance {{ m.importance }}</span>
+          <span>Last used {{ m.last_used_at|timesince }} ago</span>
+          <span>Saved {{ m.created_at|timesince }} ago</span>
+        </div>
+      </div>
     {% endfor %}
-    </ul>
+  </div>
 {% else %}
-    <p>No memories yet.</p>
+  <div class="empty"><p>No memories saved yet.<br>Memories are recorded automatically during conversations.</p></div>
 {% endif %}
 {% endblock %}

@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% block title %}Chats{% endblock %}
+{% block title %}Chats — Chatbot{% endblock %}
 {% block content %}
-<div class="chat-list-header">
+<div class="page-header">
   <h1>Chats</h1>
   <a href="{% url 'chat:new' %}" class="btn btn-primary">
-    <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor">
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
       <path d="M8 2a.75.75 0 01.75.75v4.5h4.5a.75.75 0 010 1.5h-4.5v4.5a.75.75 0 01-1.5 0v-4.5h-4.5a.75.75 0 010-1.5h4.5v-4.5A.75.75 0 018 2z"/>
     </svg>
     New chat
@@ -12,24 +12,24 @@
 </div>
 
 {% if chats %}
-  <div class="chat-cards">
+  <div class="doc-list">
     {% for chat in chats %}
-      <div class="chat-card" style="cursor:default">
+      <div class="doc-item">
         <a href="{% url 'chat:detail' chat.id %}" style="display:flex;align-items:center;gap:12px;flex:1;min-width:0;text-decoration:none">
-          <div class="chat-card-icon">
-            <svg width="16" height="16" viewBox="0 0 20 20" fill="none">
-              <path d="M5 13l3-6 2 4 2-2 3 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <div class="doc-icon">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M2.5 2A2.5 2.5 0 000 4.5v6A2.5 2.5 0 002.5 13H3v1.543a.5.5 0 00.79.407L6.5 13H13.5A2.5 2.5 0 0016 10.5v-6A2.5 2.5 0 0013.5 2h-11z" fill="currentColor"/>
             </svg>
           </div>
-          <div class="chat-card-body">
-            <div class="chat-card-title">{{ chat.title }}</div>
-            <div class="chat-card-meta">
+          <div class="doc-body">
+            <div class="doc-title" style="color:var(--text)">{{ chat.title }}</div>
+            <div class="doc-meta">
               {{ chat.updated_at|timesince }} ago
-              {% if chat.archived %} · <span style="color:#9ca3af">archived</span>{% endif %}
+              {% if chat.archived %} · <span>archived</span>{% endif %}
             </div>
           </div>
         </a>
-        <div class="chat-card-actions">
+        <div class="doc-actions">
           <form method="post" action="{% url 'chat:archive' chat.id %}">
             {% csrf_token %}
             <input type="hidden" name="next" value="{% url 'chat:list' %}">
@@ -42,7 +42,7 @@
     {% endfor %}
   </div>
 {% else %}
-  <div class="empty-state">
+  <div class="empty">
     <p>No chats yet.</p>
     <a href="{% url 'chat:new' %}" class="btn btn-primary">Start your first chat</a>
   </div>

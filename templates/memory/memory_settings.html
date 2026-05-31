@@ -1,11 +1,17 @@
 {% extends "base.html" %}
-{% block title %}Memory Settings{% endblock %}
+{% block title %}Memory Settings — Chatbot{% endblock %}
 {% block content %}
-<h1>Memory Settings</h1>
-<form method="post">
-    {% csrf_token %}
-    {{ form.as_p }}
-    <button type="submit">Save</button>
-</form>
-<a href="{% url 'memory:list' %}">Back to Memories</a>
+<div style="max-width:520px">
+  <div class="page-header">
+    <h1>Memory settings</h1>
+    <a href="{% url 'memory:list' %}" class="btn btn-ghost btn-sm">← Memory</a>
+  </div>
+  <div class="card">
+    <form method="post">
+      {% csrf_token %}
+      <div class="as-p-form">{{ form.as_p }}</div>
+      <button type="submit" class="btn btn-primary mt-16">Save</button>
+    </form>
+  </div>
+</div>
 {% endblock %}
