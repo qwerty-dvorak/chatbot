@@ -44,18 +44,33 @@ class ChatDetailView(LoginRequiredMixin, DetailView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
+        from apps.tools.models import ToolCall
+
         # Named chat_messages (not messages) to avoid shadowing Django's flash messages framework
-        chat_messages = Message.objects.filter(chat=self.object).order_by("created_at")
+        chat_messages = list(Message.objects.filter(chat=self.object).order_by("created_at"))
+
+        # Attach tool calls + results to each assistant message in one query
+        tc_qs = (
+            ToolCall.objects
+            .filter(chat=self.object)
+            .prefetch_related("results")
+            .order_by("sequence")
+        )
+        tc_by_msg: dict = {}
+        for tc in tc_qs:
+            tc_by_msg.setdefault(tc.message_id, []).append(tc)
+
+        for msg in chat_messages:
+            msg.tool_calls_data = tc_by_msg.get(msg.id, [])
+
         context["chat_messages"] = chat_messages
         context["form"] = MessageForm()
-        context["user_chats"] = (
-            Chat.objects.filter(user=self.request.user)
-            .order_by("-updated_at")[:40]
+        context["pending_message"] = next(
+            (m for m in reversed(chat_messages)
+             if m.role == Message.Role.ASSISTANT
+             and m.status in (Message.Status.PENDING, Message.Status.STREAMING)),
+            None,
         )
-        context["pending_message"] = chat_messages.filter(
-            role=Message.Role.ASSISTANT,
-            status__in=[Message.Status.PENDING, Message.Status.STREAMING],
-        ).last()
         return context
 
     def post(self, request, *args, **kwargs):

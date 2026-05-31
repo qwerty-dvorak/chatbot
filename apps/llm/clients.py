@@ -50,7 +50,7 @@ class LiteLLMClient:
     def chat_completion_stream(self, messages: list[dict[str, str]], **kwargs):
         try:
             completion = self._get_client()
-            response = completion(
+            call_kwargs = dict(
                 model=self.chat_model,
                 messages=messages,
                 max_tokens=kwargs.get("max_tokens", settings.CHAT_RESPONSE_MAX_TOKENS),
@@ -60,6 +60,12 @@ class LiteLLMClient:
                 api_base=self.base_url,
                 api_key=self.api_key,
             )
+            # Pass tools/tool_choice through so the model can call them
+            if "tools" in kwargs:
+                call_kwargs["tools"] = kwargs["tools"]
+            if "tool_choice" in kwargs:
+                call_kwargs["tool_choice"] = kwargs["tool_choice"]
+            response = completion(**call_kwargs)
             for chunk in response:
                 yield chunk
         except Exception as e:

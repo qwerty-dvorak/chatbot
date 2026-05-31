@@ -23,6 +23,16 @@ class ToolRegistry:
     def get_schemas(self, user=None) -> list[dict[str, Any]]:
         from django.conf import settings as django_settings
 
+        # Auto-load from DB on first call (each gunicorn worker starts with empty registry)
+        if not self._tools:
+            try:
+                self.refresh_from_db()
+            except Exception:
+                return []
+
+        if not getattr(django_settings, "TOOL_CALLS_ENABLED", True):
+            return []
+
         rag_enabled = getattr(django_settings, "RAG_ENABLED", True)
         rag_prefixes = ("rag.", "knowledge.")
 

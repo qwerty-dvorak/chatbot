@@ -716,6 +716,7 @@ input[type=number]:focus, input[type=url]:focus, textarea:focus, select:focus {
   margin-top: 4px;
 }
 .tc-status { font-size: .75rem; color: var(--text3); margin-left: auto; }
+.tc-done   { color: #4a7c08; font-weight: 500; }
 .tc-result {
   flex-basis: 100%;
   margin-top: 6px;
