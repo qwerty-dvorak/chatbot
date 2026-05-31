@@ -4,7 +4,7 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse
 from django.views import View
-from django.views.generic import CreateView, DetailView, ListView, TemplateView, UpdateView
+from django.views.generic import CreateView, DetailView, ListView, TemplateView
 
 from .forms import MessageForm
 from .models import Chat, ChatShare, Message
@@ -44,8 +44,18 @@ class ChatDetailView(LoginRequiredMixin, DetailView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        context["messages"] = Message.objects.filter(chat=self.object).order_by("created_at")
+        # Named chat_messages (not messages) to avoid shadowing Django's flash messages framework
+        chat_messages = Message.objects.filter(chat=self.object).order_by("created_at")
+        context["chat_messages"] = chat_messages
         context["form"] = MessageForm()
+        context["user_chats"] = (
+            Chat.objects.filter(user=self.request.user)
+            .order_by("-updated_at")[:40]
+        )
+        context["pending_message"] = chat_messages.filter(
+            role=Message.Role.ASSISTANT,
+            status__in=[Message.Status.PENDING, Message.Status.STREAMING],
+        ).last()
         return context
 
     def post(self, request, *args, **kwargs):
@@ -58,7 +68,7 @@ class ChatDetailView(LoginRequiredMixin, DetailView):
                 content=form.cleaned_data.get("content", ""),
                 status=Message.Status.COMPLETED,
             )
-            assistant_message = Message.objects.create(
+            Message.objects.create(
                 chat=self.object,
                 role=Message.Role.ASSISTANT,
                 content="",
@@ -85,18 +95,15 @@ class ChatDetailView(LoginRequiredMixin, DetailView):
         return self.render_to_response(context)
 
 
-class ChatArchiveView(LoginRequiredMixin, UpdateView):
-    model = Chat
-    fields = []
-    pk_url_kwarg = "chat_id"
+class ChatArchiveView(LoginRequiredMixin, View):
+    """Toggle archived status. Accepts POST only (called from a form button)."""
 
-    def get_queryset(self):
-        return Chat.objects.filter(user=self.request.user)
-
-    def form_valid(self, form):
-        form.instance.archived = not form.instance.archived
-        form.instance.save(update_fields=["archived"])
-        return redirect("chat:list")
+    def post(self, request, chat_id):
+        chat = get_object_or_404(Chat, id=chat_id, user=request.user)
+        chat.archived = not chat.archived
+        chat.save(update_fields=["archived"])
+        next_url = request.POST.get("next") or reverse("chat:list")
+        return redirect(next_url)
 
 
 class ChatShareView(LoginRequiredMixin, CreateView):
@@ -151,5 +158,5 @@ class SharedChatView(TemplateView):
         share = get_object_or_404(ChatShare, token=kwargs["token"], revoked=False)
         context["share"] = share
         context["chat"] = share.chat
-        context["messages"] = Message.objects.filter(chat=share.chat).order_by("created_at")
+        context["chat_messages"] = Message.objects.filter(chat=share.chat).order_by("created_at")
         return context

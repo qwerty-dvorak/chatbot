@@ -1,22 +1,50 @@
 {% extends "base.html" %}
 {% block title %}Chats{% endblock %}
 {% block content %}
-<h1>Chats</h1>
-<a href="{% url 'chat:new' %}" class="btn">New Chat</a>
+<div class="chat-list-header">
+  <h1>Chats</h1>
+  <a href="{% url 'chat:new' %}" class="btn btn-primary">
+    <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor">
+      <path d="M8 2a.75.75 0 01.75.75v4.5h4.5a.75.75 0 010 1.5h-4.5v4.5a.75.75 0 01-1.5 0v-4.5h-4.5a.75.75 0 010-1.5h4.5v-4.5A.75.75 0 018 2z"/>
+    </svg>
+    New chat
+  </a>
+</div>
+
 {% if chats %}
-    <ul class="chat-list">
+  <div class="chat-cards">
     {% for chat in chats %}
-        <li>
-            <a href="{% url 'chat:detail' chat.id %}">{{ chat.title }}</a>
-            <span class="meta">{{ chat.updated_at|timesince }} ago</span>
-            {% if chat.archived %}<span class="badge">archived</span>{% endif %}
-            <a href="{% url 'chat:archive' chat.id %}" class="btn-small">
-                {% if chat.archived %}Restore{% else %}Archive{% endif %}
-            </a>
-        </li>
+      <div class="chat-card" style="cursor:default">
+        <a href="{% url 'chat:detail' chat.id %}" style="display:flex;align-items:center;gap:12px;flex:1;min-width:0;text-decoration:none">
+          <div class="chat-card-icon">
+            <svg width="16" height="16" viewBox="0 0 20 20" fill="none">
+              <path d="M5 13l3-6 2 4 2-2 3 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </div>
+          <div class="chat-card-body">
+            <div class="chat-card-title">{{ chat.title }}</div>
+            <div class="chat-card-meta">
+              {{ chat.updated_at|timesince }} ago
+              {% if chat.archived %} · <span style="color:#9ca3af">archived</span>{% endif %}
+            </div>
+          </div>
+        </a>
+        <div class="chat-card-actions">
+          <form method="post" action="{% url 'chat:archive' chat.id %}">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{% url 'chat:list' %}">
+            <button type="submit" class="btn btn-ghost btn-sm">
+              {% if chat.archived %}Restore{% else %}Archive{% endif %}
+            </button>
+          </form>
+        </div>
+      </div>
     {% endfor %}
-    </ul>
+  </div>
 {% else %}
-    <p>No chats yet. <a href="{% url 'chat:new' %}">Start one</a>.</p>
+  <div class="empty-state">
+    <p>No chats yet.</p>
+    <a href="{% url 'chat:new' %}" class="btn btn-primary">Start your first chat</a>
+  </div>
 {% endif %}
 {% endblock %}
