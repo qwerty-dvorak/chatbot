@@ -13,8 +13,8 @@ class EmbeddingClient:
     def __init__(self):
         self.text_model = settings.TEXT_EMBEDDING_MODEL
         self.multimodal_model = settings.MULTIMODAL_EMBEDDING_MODEL
-        self.base_url = settings.LITELLM_BASE_URL
-        self.api_key = settings.LITELLM_API_KEY
+        self.base_url = settings.EMBEDDING_BASE_URL
+        self.api_key = settings.EMBEDDING_API_KEY
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         return self._embed_via_litellm(texts, self.text_model)

@@ -84,9 +84,17 @@ LOGIN_URL = "/accounts/login/"
 LOGIN_REDIRECT_URL = "/"
 LOGOUT_REDIRECT_URL = "/"
 
-# Model settings
-LITELLM_BASE_URL = os.environ.get("LITELLM_BASE_URL", "http://localhost:8000/v1")
-LITELLM_API_KEY = os.environ.get("LITELLM_API_KEY", "local-placeholder")
+# Chat model endpoint (vLLM or any OpenAI-compatible server)
+CHAT_BASE_URL = os.environ.get("CHAT_BASE_URL", "http://localhost:9000/v1")
+CHAT_API_KEY = os.environ.get("CHAT_API_KEY", "local-placeholder")
+
+# Embedding model endpoint (separate vLLM instance or same server)
+EMBEDDING_BASE_URL = os.environ.get("EMBEDDING_BASE_URL", "http://localhost:9001/v1")
+EMBEDDING_API_KEY = os.environ.get("EMBEDDING_API_KEY", "local-placeholder")
+
+# Reranker endpoint (can share the embedding server or be a separate instance)
+RERANKER_BASE_URL = os.environ.get("RERANKER_BASE_URL", "http://localhost:9001/v1")
+RERANKER_API_KEY = os.environ.get("RERANKER_API_KEY", "local-placeholder")
 
 # Chat model: Gemma 4 26B A4B IT (MoE, 256K context)
 CHAT_MODEL = os.environ.get("CHAT_MODEL", "gemma-4-26b-a4b-it")
@@ -126,6 +134,9 @@ CHAT_CONTEXT_MAX_TOKENS_LARGE = int(os.environ.get("CHAT_CONTEXT_MAX_TOKENS_LARG
 CHAT_RESPONSE_MAX_TOKENS = int(os.environ.get("CHAT_RESPONSE_MAX_TOKENS", "4096"))
 CHAT_COMPACTION_THRESHOLD_TOKENS = int(os.environ.get("CHAT_COMPACTION_THRESHOLD_TOKENS", "14000"))
 CHAT_STREAMING_ENABLED = os.environ.get("CHAT_STREAMING_ENABLED", "true").lower() in ("true", "1", "yes")
+
+# RAG feature flag
+RAG_ENABLED = os.environ.get("RAG_ENABLED", "true").lower() in ("true", "1", "yes")
 
 # RAG settings
 RAG_TOP_K = int(os.environ.get("RAG_TOP_K", "8"))

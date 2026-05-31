@@ -10,8 +10,8 @@ logger = logging.getLogger(__name__)
 class RerankerClient:
     def __init__(self):
         self.model = settings.RERANKER_MODEL
-        self.base_url = settings.LITELLM_BASE_URL
-        self.api_key = settings.LITELLM_API_KEY
+        self.base_url = settings.RERANKER_BASE_URL
+        self.api_key = settings.RERANKER_API_KEY
 
     def rerank(self, query: str, documents: list[str], top_k: int = None) -> list[dict]:
         try:

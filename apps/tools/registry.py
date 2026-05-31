@@ -21,8 +21,15 @@ class ToolRegistry:
         return [t for t in self._tools.values() if t.is_enabled]
 
     def get_schemas(self, user=None) -> list[dict[str, Any]]:
+        from django.conf import settings as django_settings
+
+        rag_enabled = getattr(django_settings, "RAG_ENABLED", True)
+        rag_prefixes = ("rag.", "knowledge.")
+
         schemas = []
         for tool in self.get_enabled():
+            if not rag_enabled and any(tool.name.startswith(p) for p in rag_prefixes):
+                continue
             if not self._is_permitted(tool, user):
                 continue
             schemas.append({
