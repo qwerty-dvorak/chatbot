@@ -12,8 +12,8 @@ logger = logging.getLogger(__name__)
 
 class LiteLLMClient:
     def __init__(self):
-        self.base_url = settings.LITELLM_BASE_URL
-        self.api_key = settings.LITELLM_API_KEY
+        self.base_url = settings.CHAT_BASE_URL
+        self.api_key = settings.CHAT_API_KEY
         self.chat_model = settings.CHAT_MODEL
         self.vision_model = settings.VISION_MODEL
 
