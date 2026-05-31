@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: pgvector/pgvector:pg16
+    image: postgres:16-alpine
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-chatbot}
       POSTGRES_USER: ${POSTGRES_USER:-chatbot}
@@ -10,82 +10,86 @@ services:
     ports:
       - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U chatbot -d chatbot"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-chatbot} -d ${POSTGRES_DB:-chatbot}"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
 
-  milvus:
-    image: milvusdb/milvus:v2.4.0
-    environment:
-      ETCD_ENDPOINTS: etcd:2379
-      MINIO_ADDRESS: minio:9000
-    ports:
-      - "19530:19530"
-    depends_on:
-      - etcd
-      - minio
-    volumes:
-      - milvus_data:/var/lib/milvus
-
-  etcd:
-    image: quay.io/coreos/etcd:v3.5.5
-    environment:
-      ETCD_AUTO_COMPACTION_MODE: revision
-      ETCD_AUTO_COMPACTION_RETENTION: "1000"
-      ETCD_QUOTA_BACKEND_BYTES: "4294967296"
-      ETCD_SNAPSHOT_COUNT: "50000"
-    command: >
-      etcd
-      --advertise-client-urls http://0.0.0.0:2379
-      --listen-client-urls http://0.0.0.0:2379
-      --data-dir /etcd
-
-  minio:
-    image: minio/minio:latest
-    environment:
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
-    command: server /data --console-address ":9001"
-    volumes:
-      - minio_data:/data
+  # Milvus vector store and its dependencies (etcd + MinIO) are disabled while
+  # RAG_ENABLED=false.  Uncomment all three services and the volumes below,
+  # then set RAG_ENABLED=true in .env to re-enable the full RAG stack.
+  #
+  # milvus:
+  #   image: milvusdb/milvus:v2.4.0
+  #   environment:
+  #     ETCD_ENDPOINTS: etcd:2379
+  #     MINIO_ADDRESS: minio:9000
+  #   ports:
+  #     - "19530:19530"
+  #   depends_on:
+  #     - etcd
+  #     - minio
+  #   volumes:
+  #     - milvus_data:/var/lib/milvus
+  #
+  # etcd:
+  #   image: quay.io/coreos/etcd:v3.5.5
+  #   environment:
+  #     ETCD_AUTO_COMPACTION_MODE: revision
+  #     ETCD_AUTO_COMPACTION_RETENTION: "1000"
+  #     ETCD_QUOTA_BACKEND_BYTES: "4294967296"
+  #     ETCD_SNAPSHOT_COUNT: "50000"
+  #   command: >
+  #     etcd
+  #     --advertise-client-urls http://0.0.0.0:2379
+  #     --listen-client-urls http://0.0.0.0:2379
+  #     --data-dir /etcd
+  #
+  # minio:
+  #   image: minio/minio:latest
+  #   environment:
+  #     MINIO_ACCESS_KEY: minioadmin
+  #     MINIO_SECRET_KEY: minioadmin
+  #   command: server /data --console-address ":9001"
+  #   volumes:
+  #     - minio_data:/data
 
   web:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     env_file: .env
     environment:
       DJANGO_SETTINGS_MODULE: config.settings.production
+      POSTGRES_HOST: postgres
     volumes:
-      - .:/app
       - media_data:/app/media
     ports:
       - "8000:8000"
     depends_on:
       postgres:
         condition: service_healthy
-      milvus:
-        condition: service_started
     command: >
       sh -c "uv run python manage.py migrate --settings=config.settings.production &&
              uv run gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 4"
 
   worker:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     env_file: .env
     environment:
       DJANGO_SETTINGS_MODULE: config.settings.production
+      POSTGRES_HOST: postgres
     volumes:
-      - .:/app
       - media_data:/app/media
     depends_on:
       postgres:
         condition: service_healthy
-      milvus:
-        condition: service_started
     command: ["uv", "run", "python", "manage.py", "run_ingestion_worker", "--settings=config.settings.production"]
 
 volumes:
   postgres_data:
   media_data:
-  milvus_data:
-  minio_data:
+  # milvus_data:
+  # minio_data:
