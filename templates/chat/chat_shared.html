@@ -1,15 +1,71 @@
-{% extends "base.html" %}
-{% block title %}{{ chat.title }}{% endblock %}
-{% block content %}
-<h1>{{ chat.title }}</h1>
-<p class="meta">Shared by {{ share.user.email }} | Read-only view</p>
-<div class="message-list">
-    {% for msg in messages %}
-        <div class="message-item message-{{ msg.role }}">
-            <strong>{{ msg.role|capfirst }}</strong>
-            <p>{{ msg.content|linebreaksbr }}</p>
-            <span class="meta">{{ msg.created_at|time:"H:i" }}</span>
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ chat.title }} — Shared</title>
+  <link rel="stylesheet" href="{% static 'css/app.css' %}">
+</head>
+<body style="background:var(--surface);min-height:100vh">
+
+<div style="max-width:760px;margin:0 auto;padding:24px 20px">
+
+  <!-- header -->
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;padding-bottom:16px;border-bottom:1px solid var(--bd)">
+    <div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+          <rect width="20" height="20" rx="5" fill="#0071e3"/>
+          <path d="M4 13.5l3.5-7 2.5 5 2-2.5 3.5 5" stroke="#fff" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span style="font-weight:700;font-size:.9375rem">Chatbot</span>
+      </div>
+      <h1 style="font-size:1.25rem;font-weight:700">{{ chat.title }}</h1>
+      <p style="font-size:.8125rem;color:var(--text2);margin-top:4px">
+        Shared by {{ share.user.email }} · read-only
+      </p>
+    </div>
+    {% if user.is_authenticated %}
+      <a href="{% url 'chat:list' %}" class="btn btn-ghost btn-sm">My chats</a>
+    {% else %}
+      <a href="{% url 'login' %}" class="btn btn-primary btn-sm">Sign in</a>
+    {% endif %}
+  </div>
+
+  <!-- messages -->
+  <div>
+    {% if not chat_messages %}
+      <div class="empty"><p>No messages in this chat yet.</p></div>
+    {% endif %}
+
+    {% for msg in chat_messages %}
+      {% if msg.role == 'user' %}
+        <div class="msg msg-user" style="margin-bottom:20px">
+          <div class="msg-bubble">{{ msg.content }}</div>
+          <div class="msg-time">{{ msg.created_at|time:"H:i" }}</div>
         </div>
+
+      {% elif msg.role == 'assistant' and msg.content %}
+        <div class="msg msg-assistant" style="margin-bottom:20px">
+          <div class="msg-bot-avatar">
+            <svg width="13" height="13" viewBox="0 0 20 20" fill="none">
+              <path d="M4 13.5l3.5-7 2.5 5 2-2.5 3.5 5" stroke="#fff" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </div>
+          <div class="msg-bot-body">
+            <div class="msg-content">{{ msg.content }}</div>
+            <div class="msg-bot-time">{{ msg.created_at|time:"H:i" }}</div>
+          </div>
+        </div>
+      {% endif %}
     {% endfor %}
+  </div>
+
+  <div style="margin-top:32px;padding-top:16px;border-top:1px solid var(--bd);text-align:center;font-size:.8125rem;color:var(--text3)">
+    This is a read-only shared view. <a href="{% url 'login' %}">Sign in</a> to start your own conversation.
+  </div>
+
 </div>
-{% endblock %}
+</body>
+</html>

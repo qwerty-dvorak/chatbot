@@ -25,13 +25,16 @@ class StreamHandler:
 
     def __init__(self, message: Message):
         self.message   = message
-        self.sequence  = 0
         self.accumulated_content = ""
-
-        # Accumulator: {delta_index: {id, name, args_str}}
         self._tc_acc: dict[int, dict] = {}
-        # Populated when finish_reason == "tool_calls"
         self.completed_tool_calls: list[dict] = []
+
+        # Start sequence after any existing deltas so retries don't conflict
+        from django.db.models import Max
+        existing = MessageDelta.objects.filter(message=message).aggregate(
+            mx=Max("sequence")
+        )["mx"]
+        self.sequence = (existing + 1) if existing is not None else 0
 
     # ── public interface ───────────────────────────────────────────────────────
 
