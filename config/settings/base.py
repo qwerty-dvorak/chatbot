@@ -50,6 +50,7 @@ TEMPLATES = [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
+                "apps.chat.context_processors.sidebar",
             ],
         },
     },
@@ -74,7 +75,10 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
 MEDIA_URL = "media/"
-MEDIA_ROOT = os.environ.get("MEDIA_ROOT", BASE_DIR / "media")
+MEDIA_ROOT = os.environ.get("MEDIA_ROOT", str(BASE_DIR / "media"))
+
+# Local document storage root — organised as docs/<user_id>/<date>/<category>/<file>
+DOCS_ROOT = os.environ.get("DOCS_ROOT", str(BASE_DIR / "data" / "docs"))
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 

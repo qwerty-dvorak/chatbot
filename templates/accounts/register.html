@@ -1,50 +1,31 @@
-{% load static %}
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Register — Chatbot</title>
-  <link rel="stylesheet" href="{% static 'css/app.css' %}">
-  <style> body { background: var(--surface); } </style>
-</head>
-<body>
-<div class="auth-wrap">
-  <div class="auth-card">
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:28px">
-      <svg width="28" height="28" viewBox="0 0 20 20" fill="none">
-        <rect width="20" height="20" rx="5" fill="#2563eb"/>
-        <path d="M5 13l3-6 2 4 2-2 3 4" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-      </svg>
-      <span style="font-weight:700;font-size:1.1rem">Chatbot</span>
+{% extends "base_auth.html" %}
+{% block title %}Register — Chatbot{% endblock %}
+{% block content %}
+<div class="auth-card">
+  <div class="auth-logo">
+    <svg width="26" height="26" viewBox="0 0 20 20" fill="none">
+      <rect width="20" height="20" rx="5" fill="#0071e3"/>
+      <path d="M4 13.5l3.5-7 2.5 5 2-2.5 3.5 5" stroke="#fff" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    Chatbot
+  </div>
+  <h1>Create account</h1>
+  <p class="auth-sub">Get started in seconds.</p>
+
+  {% if form.non_field_errors %}
+    <div class="flash flash-error" style="margin-bottom:16px">
+      {% for e in form.non_field_errors %}{{ e }}{% endfor %}
     </div>
-    <h1>Create account</h1>
-    <p class="auth-sub">Get started in seconds.</p>
+  {% endif %}
 
-    {% if form.non_field_errors %}
-      <div class="flash flash-error" style="margin-bottom:16px">
-        {% for err in form.non_field_errors %}{{ err }}{% endfor %}
-      </div>
-    {% endif %}
+  <form method="post">
+    {% csrf_token %}
+    <div class="as-p-form">{{ form.as_p }}</div>
+    <button type="submit" class="btn btn-primary btn-full" style="margin-top:6px">Create account</button>
+  </form>
 
-    <form method="post">
-      {% csrf_token %}
-      {% for field in form %}
-        <div class="form-group">
-          <label for="{{ field.id_for_label }}">{{ field.label }}</label>
-          {{ field }}
-          {% if field.errors %}
-            {% for err in field.errors %}<div class="form-error">{{ err }}</div>{% endfor %}
-          {% endif %}
-        </div>
-      {% endfor %}
-      <button type="submit" class="btn btn-primary btn-full" style="margin-top:4px">Create account</button>
-    </form>
-
-    <div class="auth-footer">
-      Already have an account? <a href="{% url 'login' %}">Sign in</a>
-    </div>
+  <div class="auth-footer">
+    Already have an account? <a href="{% url 'login' %}">Sign in</a>
   </div>
 </div>
-</body>
-</html>
+{% endblock %}

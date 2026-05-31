@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}Settings — Chatbot{% endblock %}
+{% block content %}
+<div class="page-header"><h1>Settings</h1></div>
+
+<!-- System info (read-only) -->
+<div class="settings-section">
+  <h2>System</h2>
+  <div class="card">
+    <div class="settings-row">
+      <div><div class="settings-row-label">Chat endpoint</div></div>
+      <span class="settings-val">{{ sys.chat_base_url }}</span>
+    </div>
+    <div class="settings-row">
+      <div><div class="settings-row-label">Chat model</div></div>
+      <span class="settings-val">{{ sys.chat_model }}</span>
+    </div>
+    <div class="settings-row">
+      <div><div class="settings-row-label">Embedding endpoint</div></div>
+      <span class="settings-val">{{ sys.embedding_base_url }}</span>
+    </div>
+    <div class="settings-row">
+      <div><div class="settings-row-label">Embedding model</div></div>
+      <span class="settings-val">{{ sys.text_embedding_model }}</span>
+    </div>
+    <div class="settings-row">
+      <div><div class="settings-row-label">RAG enabled</div></div>
+      <span class="badge {% if sys.rag_enabled %}badge-ready{% else %}badge-failed{% endif %}">{{ sys.rag_enabled|yesno:"yes,no" }}</span>
+    </div>
+    <div class="settings-row">
+      <div><div class="settings-row-label">Tool calls enabled</div></div>
+      <span class="badge {% if sys.tool_calls_enabled %}badge-ready{% else %}badge-failed{% endif %}">{{ sys.tool_calls_enabled|yesno:"yes,no" }}</span>
+    </div>
+    <div class="settings-row">
+      <div><div class="settings-row-label">Documents root</div></div>
+      <span class="settings-val">{{ sys.docs_root }}</span>
+    </div>
+  </div>
+</div>
+
+<!-- Memory settings -->
+<div class="settings-section">
+  <h2>Memory</h2>
+  <div class="card">
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="memory">
+      <div class="as-p-form">{{ mem_form.as_p }}</div>
+      <button type="submit" class="btn btn-primary btn-sm mt-8">Save memory settings</button>
+    </form>
+  </div>
+</div>
+
+<!-- Tools -->
+<div class="settings-section">
+  <h2>Tools</h2>
+  <div class="card">
+    {% for tool in tools %}
+      <div class="settings-row">
+        <div>
+          <div class="settings-row-label">{{ tool.display_name }}</div>
+          <div class="settings-row-desc">{{ tool.name }}</div>
+        </div>
+        <form method="post" style="display:inline">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="toggle_tool">
+          <input type="hidden" name="tool_id" value="{{ tool.id }}">
+          <label class="toggle" title="{% if tool.is_enabled %}Disable{% else %}Enable{% endif %}">
+            <input type="checkbox" {% if tool.is_enabled %}checked{% endif %}
+                   onchange="this.form.submit()">
+            <span class="toggle-slider"></span>
+          </label>
+        </form>
+      </div>
+    {% empty %}
+      <p class="text-muted" style="font-size:.875rem">No tools found. Run <code>manage.py sync_builtin_tools</code>.</p>
+    {% endfor %}
+  </div>
+</div>
+
+<!-- Tool testing guide -->
+<div class="settings-section">
+  <h2>Testing tool calls</h2>
+  <div class="card">
+    <p style="font-size:.875rem;color:var(--text2);line-height:1.7">
+      With <strong>Tool calls enabled</strong> and the mock server running, trigger tools by typing in chat:<br>
+      <br>
+      • <code>Search my memories for Python</code> → invokes <strong>memory.search</strong><br>
+      • <code>Remember that I prefer dark mode</code> → invokes <strong>memory.save</strong><br>
+      • <code>Search the knowledge base for climate</code> → invokes <strong>rag.search</strong><br>
+      • <code>What tools do you have?</code> → the model lists available tools<br>
+      <br>
+      The mock server supports tool-call streaming. Check <a href="{% url 'tools:list' %}">Tools</a> to see registered tools.
+    </p>
+  </div>
+</div>
+
+{% endblock %}

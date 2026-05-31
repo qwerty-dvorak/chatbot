@@ -1,18 +1,30 @@
 {% extends "base.html" %}
-{% block title %}Tools{% endblock %}
+{% block title %}Tools — Chatbot{% endblock %}
 {% block content %}
-<h1>Available Tools</h1>
+<div class="page-header">
+  <h1>Tools</h1>
+</div>
+<p class="text-muted" style="margin-bottom:20px;font-size:.875rem">
+  These tools are available to the assistant. Enable them in <a href="{% url 'settings' %}">Settings</a>.
+  To test a tool, mention it in a chat — e.g. <em>"search my memory for climate change"</em> or <em>"search knowledge base for Python"</em>.
+</p>
+
 {% if tools %}
-    <ul class="tool-list">
-    {% for tool in tools %}
-        <li>
-            <strong>{{ tool.display_name }}</strong>
-            <p>{{ tool.description }}</p>
-            <span class="meta">{{ tool.name }} v{{ tool.version }}</span>
-        </li>
+  <div class="tool-list">
+    {% for t in tools %}
+      <div class="tool-item">
+        <div class="tool-icon">🔧</div>
+        <div class="tool-body">
+          <div class="tool-name">{{ t.display_name }}
+            {% if not t.is_enabled %}<span class="badge badge-failed" style="margin-left:6px">disabled</span>{% endif %}
+          </div>
+          <div class="tool-id">{{ t.name }} v{{ t.version }}</div>
+          <div class="tool-desc">{{ t.description }}</div>
+        </div>
+      </div>
     {% endfor %}
-    </ul>
+  </div>
 {% else %}
-    <p>No tools available.</p>
+  <div class="empty"><p>No tools registered. Run <code>manage.py sync_builtin_tools</code>.</p></div>
 {% endif %}
 {% endblock %}
