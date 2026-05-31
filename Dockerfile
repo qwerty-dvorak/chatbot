@@ -37,7 +37,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     postgresql-16 \
     && rm -rf /var/lib/apt/lists/* \
-    && pip install --no-cache-dir uv
+    && pip install --no-cache-dir --break-system-packages uv
 
 # Drop the auto-created cluster; the entrypoint manages PGDATA at runtime
 RUN pg_dropcluster 16 main --stop 2>/dev/null || true && \
