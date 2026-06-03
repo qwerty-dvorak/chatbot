@@ -42,14 +42,13 @@ docker run -d \
   -e POSTGRES_DB="$DB_NAME" \
   -e POSTGRES_USER="$DB_USER" \
   -e POSTGRES_PASSWORD="$DB_PASS" \
-  -e POSTGRES_HOST="localhost" \
   -v postgres_data:/var/lib/postgresql/data \
   -p $EXTERNAL_DB_PORT:5432 \
   --health-cmd="su - postgres -c '/usr/lib/postgresql/16/bin/pg_isready -d $DB_NAME'" \
   --health-interval=5s \
   --health-timeout=5s \
   --health-retries=10 \
-  $IMAGE_NAME tail -f /dev/null
+  $IMAGE_NAME postgres-server
 
 echo "Starting File Server..."
 docker run -d \
@@ -87,7 +86,9 @@ docker run -d \
   --tensor-parallel-size 2 \
   --max-model-len 32768 \
   --gpu-memory-utilization 0.85 \
-  --enable-prefix-caching
+  --enable-prefix-caching \
+  --enable-auto-tool-choice \
+  --tool-call-parser gemma4
 
 # --- Step 5: Wait for Dependencies ---
 wait_for_health() {
@@ -116,8 +117,8 @@ docker run -d \
   -e POSTGRES_PASSWORD="$DB_PASS" \
   -e DOCS_ROOT=/data/docs \
   -e CHAT_BASE_URL=http://gemma-inference-server:8000/v1 \
-  -e CHAT_MODEL=/gemma4-26B-A4b \
-  -e VISION_MODEL=/gemma4-26B-A4b \
+  -e CHAT_MODEL=openai//gemma4-26B-A4b \
+  -e VISION_MODEL=openai//gemma4-26B-A4b \
   -e RAG_ENABLED="false" \
   -e TOOL_CALLS_ENABLED="true" \
   -v media_data:/app/media \
@@ -141,7 +142,8 @@ docker run -d \
   -e POSTGRES_PASSWORD="$DB_PASS" \
   -e DOCS_ROOT=/data/docs \
   -e CHAT_BASE_URL=http://gemma-inference-server:8000/v1 \
-  -e CHAT_MODEL=/gemma4-26B-A4b \
+  -e CHAT_MODEL=openai//gemma4-26B-A4b \
+  -e VISION_MODEL=openai//gemma4-26B-A4b \
   -e RAG_ENABLED="false" \
   -e TOOL_CALLS_ENABLED="true" \
   -v media_data:/app/media \
