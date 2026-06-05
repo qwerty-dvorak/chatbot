@@ -11,11 +11,11 @@ DATA_DIR="$SCRIPT_DIR/data"
 # Load .env if present
 [ -f "$SCRIPT_DIR/.env" ] && export $(grep -v '^#' "$SCRIPT_DIR/.env" | xargs)
 
-# Configurable ports (with defaults)
-TEXT_EMBED_PORT="${TEXT_EMBED_PORT:-8001}"
-MULTIMODAL_PORT="${MULTIMODAL_PORT:-8002}"
-RERANKER_PORT="${RERANKER_PORT:-8003}"
-API_PORT="${API_PORT:-8080}"
+# Configurable ports (starting from 8090 onwards)
+TEXT_EMBED_PORT="${TEXT_EMBED_PORT:-8090}"
+MULTIMODAL_PORT="${MULTIMODAL_PORT:-8091}"
+RERANKER_PORT="${RERANKER_PORT:-8092}"
+API_PORT="${API_PORT:-8093}"
 MILVUS_PORT="${MILVUS_PORT:-19530}"
 MINIO_PORT="${MINIO_PORT:-9000}"
 MINIO_CONSOLE_PORT="${MINIO_CONSOLE_PORT:-9001}"
@@ -40,7 +40,7 @@ echo "Creating network '$NETWORK_NAME'..."
 docker network inspect "$NETWORK_NAME" >/dev/null 2>&1 || docker network create "$NETWORK_NAME"
 
 # ── Volume directories ────────────────────────────────────────────────────────
-mkdir -p "$VOL_DIR/volumes/etcd" "$VOL_DIR/volumes/minio" "$VOL_DIR/volumes/milvus"
+mkdir -p "$VOL_DIR/etcd" "$VOL_DIR/minio" "$VOL_DIR/milvus"
 
 # ── etcd ─────────────────────────────────────────────────────────────────────
 echo "Starting etcd..."
@@ -52,11 +52,12 @@ docker run -d \
   -e ETCD_AUTO_COMPACTION_RETENTION=1000 \
   -e ETCD_QUOTA_BACKEND_BYTES=4294967296 \
   -e ETCD_SNAPSHOT_COUNT=50000 \
-  -v "$VOL_DIR/volumes/etcd:/etcd" \
-  --health-cmd="etcdctl endpoint health" \
-  --health-interval=30s \
-  --health-timeout=20s \
-  --health-retries=3 \
+  -v "$VOL_DIR/etcd:/etcd" \
+  --health-cmd="wget -q -O - http://127.0.0.1:2379/readyz || etcdctl endpoint health || exit 1" \
+  --health-interval=10s \
+  --health-timeout=10s \
+  --health-retries=5 \
+  --health-start-period=30s \
   quay.io/coreos/etcd:v3.7.0-rc.0 \
   etcd -advertise-client-urls=http://etcd:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
 
@@ -94,7 +95,7 @@ wait_for_health() {
   echo "$name is healthy!"
 }
 
-wait_for_health milvus-etcd
+#wait_for_health milvus-etcd
 wait_for_health milvus-minio
 
 # ── Milvus standalone ─────────────────────────────────────────────────────────
@@ -111,7 +112,7 @@ docker run -d \
   -e MINIO_ADDRESS=minio:9000 \
   -e MQ_TYPE=woodpecker \
   -v "$VOL_DIR/volumes/milvus:/var/lib/milvus" \
-  milvusdb/milvus:v3.0-beta-gpu-amd64 \
+  milvusdb/milvus:latest \
   milvus run standalone
 
 echo "Milvus starting (skipping health wait — sleeping 15s instead)..."
@@ -127,11 +128,13 @@ docker run -d \
   -v "$MODEL_DIR/llama-embed-nemotron-8b:/model" \
   -p "$TEXT_EMBED_PORT:8000" \
   --health-cmd='python3 -c "import urllib.request; urllib.request.urlopen(\"http://localhost:8000/health\")" 2>/dev/null && echo ok' \
-  --health-interval=15s --health-timeout=10s --health-retries=20 --health-start-period=60s \
+  --health-interval=15s \
+  --health-timeout=10s \
+  --health-retries=20 \
+  --health-start-period=60s \
   vllm/vllm-openai:latest \
   --model /model \
   --trust-remote-code \
-  --task embed \
   --tensor-parallel-size "$TP_SIZE" \
   --gpu-memory-utilization 0.90 \
   --max-model-len 8192
@@ -146,14 +149,19 @@ docker run -d \
   -v "$MODEL_DIR/nemotron-colembed-vl-8b-v2:/model" \
   -p "$MULTIMODAL_PORT:8000" \
   --health-cmd='python3 -c "import urllib.request; urllib.request.urlopen(\"http://localhost:8000/health\")" 2>/dev/null && echo ok' \
-  --health-interval=15s --health-timeout=10s --health-retries=20 --health-start-period=60s \
+  --health-interval=15s \
+  --health-timeout=10s \
+  --health-retries=20 \
+  --health-start-period=60s \
   vllm/vllm-openai:latest \
   --model /model \
   --trust-remote-code \
-  --task embed \
   --tensor-parallel-size "$TP_SIZE" \
   --gpu-memory-utilization 0.90 \
-  --max-model-len 8192
+  --max-model-len 8192 \
+  --limit-mm-per-prompt '{"image": 1, "video": 0}' \
+  --skip-mm-profiling \
+  --runner pooling
 
 # ── Reranker server ───────────────────────────────────────────────────────────
 echo "Starting reranker server (GPU $RERANKER_GPU, port $RERANKER_PORT)..."
@@ -169,7 +177,6 @@ docker run -d \
   vllm/vllm-openai:latest \
   --model /model \
   --trust-remote-code \
-  --task score \
   --tensor-parallel-size "$TP_SIZE" \
   --gpu-memory-utilization 0.90 \
   --hf-overrides '{"architectures":["Qwen3VLForSequenceClassification"],"classifier_from_token":["no","yes"],"is_original_qwen3_reranker":true}'
