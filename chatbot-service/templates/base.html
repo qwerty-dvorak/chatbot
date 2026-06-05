@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Chatbot{% endblock %}</title>
+  {% load static %}
+  <link rel="stylesheet" href="{% static 'css/app.css' %}">
+  {% block head %}{% endblock %}
+</head>
+<body>
+
+<div class="app">
+  {% include "sidebar.html" %}
+
+  <div class="app-main {% block main_class %}{% endblock %}">
+
+    {% if messages %}
+      <div class="flash-wrap">
+        {% for msg in messages %}
+          <div class="flash flash-{{ msg.tags }}">{{ msg }}</div>
+        {% endfor %}
+      </div>
+    {% endif %}
+
+    {% block body %}
+    <div class="page-content">
+      {% block content %}{% endblock %}
+    </div>
+    {% endblock %}
+
+  </div>
+</div>
+
+</body>
+</html>

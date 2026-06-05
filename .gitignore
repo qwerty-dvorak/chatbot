@@ -1,8 +1,0 @@
-__pycache__/
-*.pyc
-.env
-media/uploads/
-staticfiles/
-*.egg-info/
-dist/
-.venv/

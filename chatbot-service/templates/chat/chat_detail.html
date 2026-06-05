@@ -1,0 +1,285 @@
+{% extends "base.html" %}
+{% block title %}{{ chat.title }} — Chatbot{% endblock %}
+{% block main_class %}full-h{% endblock %}
+
+{% block body %}
+<div class="chat-container">
+
+  <!-- Top bar -->
+  <div class="chat-topbar">
+    <span class="chat-topbar-title">
+      {{ chat.title }}
+      {% if chat.archived %}<span class="badge badge-pending" style="margin-left:8px">archived</span>{% endif %}
+    </span>
+    <div class="chat-topbar-actions">
+      <a href="{% url 'chat:share' chat.id %}" class="btn btn-ghost btn-sm">Share</a>
+      <form method="post" action="{% url 'chat:archive' chat.id %}" style="display:inline">
+        {% csrf_token %}
+        <input type="hidden" name="next" value="{% url 'chat:detail' chat.id %}">
+        <button type="submit" class="btn btn-ghost btn-sm">
+          {% if chat.archived %}Restore{% else %}Archive{% endif %}
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Messages -->
+  <div class="msgs-wrap" id="msgs-wrap">
+    <div class="msgs-inner" id="msgs-inner">
+
+      {% if not chat_messages %}
+        <div class="chat-welcome">
+          <svg width="44" height="44" viewBox="0 0 20 20" fill="none">
+            <rect width="20" height="20" rx="5" fill="#eff6ff"/>
+            <path d="M4 13.5l3.5-7 2.5 5 2-2.5 3.5 5" stroke="#0071e3" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <h2>Start a conversation</h2>
+          <p>Type a message below to get started.</p>
+        </div>
+      {% endif %}
+
+      {% for msg in chat_messages %}
+        {% if msg.role == 'user' %}
+          <div class="msg msg-user">
+            <div class="msg-bubble">{{ msg.content }}</div>
+            {% if msg.attachments %}
+              <div class="attach-chips">
+                {% for a in msg.attachments %}<span class="attach-chip">📎 {{ a.original_filename }}</span>{% endfor %}
+              </div>
+            {% endif %}
+            <div class="msg-time">{{ msg.created_at|time:"H:i" }}</div>
+          </div>
+
+        {% elif msg.role == 'assistant' %}
+          {% if msg.status == 'pending' or msg.status == 'streaming' %}
+            <div class="msg msg-assistant" id="streaming-msg" data-url="{% url 'chat:stream' chat.id %}">
+              <div class="msg-bot-avatar">
+                <svg width="13" height="13" viewBox="0 0 20 20" fill="none">
+                  <path d="M4 13.5l3.5-7 2.5 5 2-2.5 3.5 5" stroke="#fff" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </div>
+              <div class="msg-bot-body">
+                <div class="msg-content msg-streaming" id="stream-content">{% if msg.content %}{{ msg.content }}{% endif %}</div>
+                <div class="typing" id="typing-ind">
+                  <div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div>
+                </div>
+              </div>
+            </div>
+          {% elif msg.content or msg.tool_calls_data %}
+            <div class="msg msg-assistant">
+              <div class="msg-bot-avatar">
+                <svg width="13" height="13" viewBox="0 0 20 20" fill="none">
+                  <path d="M4 13.5l3.5-7 2.5 5 2-2.5 3.5 5" stroke="#fff" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </div>
+              <div class="msg-bot-body">
+                {% for tc in msg.tool_calls_data %}
+                  <div class="tool-call-block">
+                    <span class="tc-icon">🔧</span>
+                    <span class="tc-name">{{ tc.name_snapshot }}</span>
+                    <code class="tc-args">{{ tc.arguments|default:"{}" }}</code>
+                    <span class="tc-status tc-done">✓ done</span>
+                    {% for result in tc.results.all %}
+                      <div class="tc-result">{{ result.content }}</div>
+                    {% endfor %}
+                  </div>
+                {% endfor %}
+                {% if msg.content %}
+                  <div class="msg-content">{{ msg.content }}</div>
+                {% endif %}
+                <div class="msg-bot-time">{{ msg.created_at|time:"H:i" }}</div>
+              </div>
+            </div>
+          {% endif %}
+        {% endif %}
+      {% endfor %}
+
+    </div>
+  </div>
+
+  <!-- Input -->
+  <div class="input-area">
+    <div class="input-inner">
+      <div class="file-preview-strip" id="file-preview-strip"></div>
+      <form method="post" id="msg-form" enctype="multipart/form-data">
+        {% csrf_token %}
+        <div class="input-box">
+          <input type="file" id="file-input" name="attachment"
+                 accept=".pdf,.txt,.md,.csv,image/png,image/jpeg,image/webp,image/gif"
+                 style="display:none">
+          <button type="button" class="attach-btn" id="attach-btn" title="Attach file">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" color="inherit">
+              <path d="M8.914 1.372a2.75 2.75 0 013.886 3.886l-5.522 5.522A4.25 4.25 0 01.926 4.93L6.35.508a.75.75 0 01.974 1.138L1.9 6.068a2.75 2.75 0 003.888 3.888l5.52-5.52a1.25 1.25 0 00-1.767-1.768L3.824 8.386a.25.25 0 00.354.354l3.73-3.73a.75.75 0 011.06 1.06l-3.73 3.73a1.75 1.75 0 01-2.475-2.474l5.718-5.718a.074.074 0 00.003-.005z"/>
+            </svg>
+          </button>
+          <textarea id="msg-input" name="content" class="input-ta"
+                    placeholder="Message…" rows="1" autocomplete="off" autofocus></textarea>
+          <button type="submit" class="send-btn" id="send-btn" title="Send (Enter)">
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M.989 8L.064 2.68a1.342 1.342 0 011.85-1.462l13 5.54a1.342 1.342 0 010 2.484l-13 5.54a1.342 1.342 0 01-1.85-1.462L.989 9H8a1 1 0 000-2H.989z"/>
+            </svg>
+          </button>
+        </div>
+        <div class="input-hint">Enter to send · Shift+Enter for newline</div>
+      </form>
+    </div>
+  </div>
+
+</div>
+
+<script>
+(function () {
+  /* ── auto-resize textarea ── */
+  const ta = document.getElementById('msg-input');
+  ta.addEventListener('input', function () {
+    this.style.height = 'auto';
+    this.style.height = Math.min(this.scrollHeight, 180) + 'px';
+  });
+
+  /* ── enter to send ── */
+  const form = document.getElementById('msg-form');
+  const sendBtn = document.getElementById('send-btn');
+  ta.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      if (!sendBtn.disabled && (ta.value.trim() || fileAttached)) form.submit();
+    }
+  });
+
+  /* ── file attachment ── */
+  const fileInput = document.getElementById('file-input');
+  const attachBtn = document.getElementById('attach-btn');
+  const strip     = document.getElementById('file-preview-strip');
+  let fileAttached = false;
+
+  attachBtn.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', function () {
+    strip.innerHTML = '';
+    fileAttached = false;
+    if (!this.files.length) return;
+    const f = this.files[0];
+    fileAttached = true;
+    const chip = document.createElement('div');
+    chip.className = 'file-preview-chip';
+    chip.innerHTML = '📎 ' + f.name +
+      ' <button type="button" title="Remove">✕</button>';
+    chip.querySelector('button').addEventListener('click', function () {
+      fileInput.value = '';
+      strip.innerHTML = '';
+      fileAttached = false;
+    });
+    strip.appendChild(chip);
+  });
+
+  /* ── scroll to bottom ── */
+  const wrap = document.getElementById('msgs-wrap');
+  function scrollBot(smooth) { wrap.scrollTo({ top: wrap.scrollHeight, behavior: smooth ? 'smooth' : 'instant' }); }
+  scrollBot(false);
+
+  /* ── streaming ── */
+  const sMsg = document.getElementById('streaming-msg');
+  if (!sMsg) return;
+
+  const streamUrl = sMsg.dataset.url;
+  const contentEl = document.getElementById('stream-content');
+  const typingEl  = document.getElementById('typing-ind');
+  sendBtn.disabled = true;
+
+  let buf = contentEl.textContent || '';
+  let started = false;
+
+  /* ── tool call / result rendering ── */
+  function showToolCall(tc) {
+    const el = document.createElement('div');
+    el.className = 'tool-call-block';
+    el.id = 'tc-' + tc.id;
+    const argsStr = typeof tc.arguments === 'object'
+      ? JSON.stringify(tc.arguments, null, 2)
+      : String(tc.arguments);
+    el.innerHTML =
+      '<span class="tc-icon">🔧</span>' +
+      '<span class="tc-name">' + escHtml(tc.name) + '</span>' +
+      '<code class="tc-args">' + escHtml(argsStr) + '</code>' +
+      '<span class="tc-status" id="tcs-' + tc.id + '">calling…</span>';
+    document.getElementById('msgs-inner').appendChild(el);
+    scrollBot(false);
+  }
+
+  function showToolResult(data) {
+    const statusEl = document.getElementById('tcs-' + data.tool_call_id);
+    if (statusEl) statusEl.textContent = '✓ done';
+    const el = document.getElementById('tc-' + data.tool_call_id);
+    if (el) {
+      const res = document.createElement('div');
+      res.className = 'tc-result';
+      let content = data.content || '';
+      try { content = JSON.stringify(JSON.parse(content), null, 2); } catch {}
+      res.textContent = content.length > 400 ? content.slice(0, 400) + '…' : content;
+      el.appendChild(res);
+    }
+    scrollBot(false);
+  }
+
+  function escHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  function render(text) {
+    const esc = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    const withPre = esc.replace(/```[\w]*\n?([\s\S]*?)```/g, function(_, c) {
+      return '<pre><code>' + c.trim() + '</code></pre>';
+    });
+    const withCode = withPre.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+    const withBold = withCode.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+    const withEm   = withBold.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
+    return withEm.split('\n\n').map(p => '<p>' + p.replace(/\n/g,'<br>') + '</p>').join('');
+  }
+
+  const es = new EventSource(streamUrl);
+
+  es.onmessage = function (e) {
+    let d; try { d = JSON.parse(e.data); } catch { return; }
+
+    if (d.type === 'tool_call') {
+      if (!started) { started = true; if (typingEl) typingEl.style.display = 'none'; }
+      showToolCall(d.tool_call);
+
+    } else if (d.type === 'tool_result') {
+      showToolResult(d);
+
+    } else if (d.type === 'text') {
+      if (!started) {
+        started = true;
+        if (typingEl) typingEl.style.display = 'none';
+      }
+      buf += d.content;
+      contentEl.innerHTML = render(buf);
+      scrollBot(false);
+
+    } else if (d.type === 'done') {
+      es.close();
+      contentEl.classList.remove('msg-streaming');
+      if (typingEl) typingEl.remove();
+      sendBtn.disabled = false;
+      ta.focus();
+
+    } else if (d.type === 'error') {
+      es.close();
+      contentEl.classList.remove('msg-streaming');
+      if (typingEl) typingEl.remove();
+      contentEl.innerHTML = '<span style="color:var(--red)">⚠ ' +
+        (d.content || 'Error generating response') + '</span>';
+      sendBtn.disabled = false;
+    }
+  };
+
+  es.onerror = function () {
+    es.close();
+    if (typingEl) typingEl.remove();
+    contentEl.classList.remove('msg-streaming');
+    if (!buf) contentEl.innerHTML = '<span style="color:var(--red)">⚠ Connection lost</span>';
+    sendBtn.disabled = false;
+  };
+})();
+</script>
+{% endblock %}

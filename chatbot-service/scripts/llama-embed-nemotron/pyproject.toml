@@ -1,0 +1,11 @@
+[project]
+name = "llama-embed-nemotron-server"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "sentence-transformers>=3.4,<4",
+    "transformers>=4.51,<5",
+]
+
+[project.optional-dependencies]
+gpu = ["flash-attn>=2.6.3,<3"]

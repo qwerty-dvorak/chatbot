@@ -1,0 +1,44 @@
+{% extends "base_auth.html" %}
+{% block title %}Sign in — Chatbot{% endblock %}
+{% block content %}
+<div class="auth-card">
+  <div class="auth-logo">
+    <svg width="26" height="26" viewBox="0 0 20 20" fill="none">
+      <rect width="20" height="20" rx="5" fill="#0071e3"/>
+      <path d="M4 13.5l3.5-7 2.5 5 2-2.5 3.5 5" stroke="#fff" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    Chatbot
+  </div>
+  <h1>Welcome back</h1>
+  <p class="auth-sub">Sign in to your account.</p>
+
+  {% if form.non_field_errors %}
+    <div class="flash flash-error" style="margin-bottom:16px">
+      {% for e in form.non_field_errors %}{{ e }}{% endfor %}
+    </div>
+  {% endif %}
+
+  <form method="post">
+    {% csrf_token %}
+    <div class="form-group">
+      <label for="id_username">Email</label>
+      <input type="email" name="username" id="id_username"
+             placeholder="you@example.com" autofocus autocomplete="email"
+             value="{{ form.username.value|default:'' }}">
+      {% if form.username.errors %}
+        {% for e in form.username.errors %}<div class="form-error">{{ e }}</div>{% endfor %}
+      {% endif %}
+    </div>
+    <div class="form-group">
+      <label for="id_password">Password</label>
+      <input type="password" name="password" id="id_password"
+             placeholder="••••••••" autocomplete="current-password">
+    </div>
+    <button type="submit" class="btn btn-primary btn-full" style="margin-top:6px">Sign in</button>
+  </form>
+
+  <div class="auth-footer">
+    No account? <a href="{% url 'accounts:register' %}">Register</a>
+  </div>
+</div>
+{% endblock %}
