@@ -11,7 +11,7 @@ ENV_FILE="$SCRIPT_DIR/.env.runpod"
 SAMPLE_PDF="$SCRIPT_DIR/data/sample_data/2025-0910-newsletter.pdf"
 API_IMAGE="rag-api-test"
 CONTAINER_NAME="rag-api-test"
-API_PORT=8080
+API_PORT=${API_PORT:-8093}
 API_URL="http://localhost:$API_PORT"
 
 [[ -f "$ENV_FILE" ]] || { echo "ERROR: .env.runpod not found. Run runpod_wait.sh first."; exit 1; }
@@ -30,7 +30,7 @@ docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
 echo "Starting rag-api container (env from .env.runpod)..."
 # --network host: container shares host network stack so it can reach
 # localhost services (mock server ports 9000-9003, Milvus port 19530).
-# The API binds to :8080 on the host directly; -p flag not needed.
+# The API binds to :8093 on the host directly; -p flag not needed.
 docker run -d \
   --name "$CONTAINER_NAME" \
   --network host \

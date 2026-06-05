@@ -25,6 +25,13 @@ No model weights are fetched automatically. No cloud APIs are called. No interne
 - **PostgreSQL 16** runs embedded inside the chatbot-service Docker image.
 - **Adding Python dependencies** — always use `uv add <package>` inside the relevant subdirectory (`chatbot-service/` or `rag-pipeline/`). Never edit `pyproject.toml` or `uv.lock` manually.
 
+## Port conventions
+
+| Range | Subsystem | Typical services |
+|-------|-----------|-----------------|
+| 8080+ | `chatbot-service/` | Web app, file server, LLM inference, embedding APIs |
+| 8090+ | `rag-pipeline/` | Text embed, multimodal embed, reranker, RAG API |
+
 ## Quick start
 
 ```bash
@@ -35,10 +42,10 @@ cd rag-pipeline && bash clone_models.sh
 cd rag-pipeline && bash start-services.sh
 
 # 3. Ingest documents (via API)
-curl -X POST http://localhost:8080/v1/ingest -F "files=@/path/to/doc.pdf"
+curl -X POST http://localhost:8093/v1/ingest -F "files=@/path/to/doc.pdf"
 
 # 4. Search
-curl -X POST http://localhost:8080/v1/search \
+curl -X POST http://localhost:8093/v1/search \
   -H "Content-Type: application/json" \
   -d '{"query": "your question", "top_k": 5}'
 

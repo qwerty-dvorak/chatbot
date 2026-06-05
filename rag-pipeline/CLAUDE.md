@@ -13,18 +13,18 @@ bash start-services.sh
 bash start-services.sh --clean   # tear down and restart
 
 # 3. Ingest documents via API
-curl -X POST http://localhost:8080/v1/ingest -F "files=@document.pdf"
-curl -X POST http://localhost:8080/v1/ingest \
+curl -X POST http://localhost:8093/v1/ingest -F "files=@document.pdf"
+curl -X POST http://localhost:8093/v1/ingest \
   -F "files=@report.pdf" -F "files=@notes.md" \
   -F "strategy=sentence_window"
 
 # 4. Search via API
-curl -X POST http://localhost:8080/v1/search \
+curl -X POST http://localhost:8093/v1/search \
   -H "Content-Type: application/json" \
   -d '{"query": "vector databases", "top_k": 5, "mode": "hybrid"}'
 
 # 5. Browse API docs
-open http://localhost:8080/docs
+open http://localhost:8093/docs
 ```
 
 ## RunPod testing (cloud, no local GPU needed)
@@ -38,14 +38,14 @@ bash runpod_teardown.sh         # stop pods + delete templates when done
 
 See `TESTING.md` for full details, manual curl examples, and troubleshooting.
 
-## Services
+## Services (port range 8090+)
 
 | Service | Port | Image | Purpose |
 |---------|------|-------|---------|
-| rag-text-embed | 8001 | vllm/vllm-openai:latest | nvidia/llama-embed-nemotron-8b text embeddings |
-| rag-multimodal-embed | 8002 | vllm/vllm-openai:latest | nvidia/nemotron-colembed-vl-8b-v2 multimodal embeddings |
-| rag-reranker | 8003 | vllm/vllm-openai:latest | Qwen3-VL-Reranker-8B scoring via /score endpoint |
-| rag-api | 8080 | rag-api (ubuntu:24.04) | FastAPI ingestion + search service |
+| rag-text-embed | 8090 | vllm/vllm-openai:latest | nvidia/llama-embed-nemotron-8b text embeddings |
+| rag-multimodal-embed | 8091 | vllm/vllm-openai:latest | nvidia/nemotron-colembed-vl-8b-v2 multimodal embeddings |
+| rag-reranker | 8092 | vllm/vllm-openai:latest | Qwen3-VL-Reranker-2B scoring via /score endpoint |
+| rag-api | 8093 | rag-api (ubuntu:24.04) | FastAPI ingestion + search service |
 | milvus-standalone | 19530 | milvusdb/milvus:latest | Vector store |
 
 ## Architecture

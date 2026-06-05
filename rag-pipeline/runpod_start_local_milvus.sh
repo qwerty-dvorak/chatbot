@@ -57,7 +57,7 @@ docker run -d --name test-milvus --network "$NET" \
   -e ETCD_ENDPOINTS=etcd:2379 \
   -e MINIO_ADDRESS=minio:9000 \
   -e MQ_TYPE=woodpecker \
-  milvusdb/milvus:v3.0-beta-amd64 \
+  milvusdb/milvus:latest \
   milvus run standalone
 
 echo ""

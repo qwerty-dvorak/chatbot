@@ -170,7 +170,7 @@ docker run -d \
   --network "$NETWORK_NAME" \
   --gpus "\"device=$RERANKER_GPU\"" \
   --shm-size=16g \
-  -v "$MODEL_DIR/Qwen3-VL-Reranker-8B:/model" \
+  -v "$MODEL_DIR/Qwen3-VL-Reranker-2B:/model" \
   -p "$RERANKER_PORT:8000" \
   --health-cmd='python3 -c "import urllib.request; urllib.request.urlopen(\"http://localhost:8000/health\")" 2>/dev/null && echo ok' \
   --health-interval=15s --health-timeout=10s --health-retries=20 --health-start-period=60s \
@@ -201,8 +201,8 @@ docker run -d \
   -e MILVUS_HOST="milvus-standalone" \
   -e MILVUS_PORT="19530" \
   -v "$DATA_DIR:/app/data" \
-  -p "$API_PORT:8080" \
-  --health-cmd='python3 -c "import urllib.request; urllib.request.urlopen(\"http://localhost:8080/health\")" 2>/dev/null && echo ok' \
+  -p "$API_PORT:8093" \
+  --health-cmd='python3 -c "import urllib.request; urllib.request.urlopen(\"http://localhost:8093/health\")" 2>/dev/null && echo ok' \
   --health-interval=10s --health-timeout=5s --health-retries=10 --health-start-period=15s \
   "$API_IMAGE"
 

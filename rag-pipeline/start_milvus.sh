@@ -65,7 +65,7 @@ docker run -d \
   -e MINIO_ADDRESS=minio:9000 \
   -e MQ_TYPE=woodpecker \
   -v "${VOL_DIR}/volumes/milvus:/var/lib/milvus" \
-  milvusdb/milvus:v3.0-beta-gpu-amd64 \
+  milvusdb/milvus:latest \
   milvus run standalone
 
 echo "Milvus cluster deployment initiated successfully!"

@@ -2,8 +2,8 @@
 # Deploy 3 RunPod GPU pods for RAG pipeline testing + start local Milvus:
 #   - text-embed: H100 SXM,  vllm/vllm-openai:latest + nvidia/llama-embed-nemotron-8b
 #   - mm-embed:   H100 SXM,  vllm/vllm-openai:latest + nvidia/nemotron-colembed-vl-8b-v2
-#   - reranker:   H100 SXM,  vllm/vllm-openai:latest + Qwen/Qwen3-VL-Reranker-8B
-#   - milvus:     local Docker (milvusdb/milvus:v3.0-beta-amd64) via runpod_start_local_milvus.sh
+#   - reranker:   H100 SXM,  vllm/vllm-openai:latest + Qwen/Qwen3-VL-Reranker-2B
+#   - milvus:     local Docker (milvusdb/milvus:latest) via runpod_start_local_milvus.sh
 #
 # NOTE: RTX 5090 (Blackwell CC 10.0) requires CUDA 12.8+ which vllm:latest may
 #       not include; H100 SXM (Hopper CC 9.0) is fully supported. Override via:
@@ -95,11 +95,11 @@ create_pod() {
 # more option flags, not as the script argument).
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 1. LOCAL MILVUS — milvusdb/milvus:v3.0-beta-amd64 via Docker on this machine
+# 1. LOCAL MILVUS — milvusdb/milvus:latest via Docker on this machine
 #    RunPod community cloud CPU pods don't expose TCP ports reliably; local Docker
 #    is the pragmatic solution for testing.
 # ─────────────────────────────────────────────────────────────────────────────
-echo "Starting local Milvus (milvusdb/milvus:v3.0-beta-amd64)..."
+echo "Starting local Milvus (milvusdb/milvus:latest)..."
 bash "$SCRIPT_DIR/runpod_start_local_milvus.sh"
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -145,7 +145,7 @@ MM_POD=$(create_pod "rag-mm-embed" \
 echo "  pod: $MM_POD"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 4. RERANKER — Qwen/Qwen3-VL-Reranker-8B (vLLM /score endpoint)
+# 4. RERANKER — Qwen/Qwen3-VL-Reranker-2B (vLLM /score endpoint)
 #    hf-overrides JSON goes in env var HF_OVERRIDES to avoid shell-quoting issues.
 # ─────────────────────────────────────────────────────────────────────────────
 RERANKER_ENV_JSON=$(python3 -c "
@@ -161,7 +161,7 @@ echo "Creating reranker template..."
 RERANKER_TPL=$(create_template "rag-reranker-$TS" \
   --image "vllm/vllm-openai:latest" \
   --docker-entrypoint "/bin/bash" \
-  --docker-start-cmd '-c,exec python3 -m vllm.entrypoints.openai.api_server --model Qwen/Qwen3-VL-Reranker-8B --trust-remote-code --task score --port 8000 --gpu-memory-utilization 0.90 --hf-overrides "$HF_OVERRIDES"' \
+  --docker-start-cmd '-c,exec python3 -m vllm.entrypoints.openai.api_server --model Qwen/Qwen3-VL-Reranker-2B --trust-remote-code --task score --port 8000 --gpu-memory-utilization 0.90 --hf-overrides "$HF_OVERRIDES"' \
   --env "$RERANKER_ENV_JSON" \
   --ports "8000/http" \
   --container-disk-in-gb 50)

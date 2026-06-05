@@ -6,15 +6,15 @@ End-to-end testing of the RAG ingestion and search API using 4 RunPod pods.
 
 ```
 Local machine
-  └─ Docker: rag-api (FastAPI, port 8080)
+  └─ Docker: rag-api (FastAPI, port 8093)
        ├─ POST /v1/ingest  → text/multimodal embed → Milvus + BM25
        └─ POST /v1/search  → embed → hybrid retrieve → rerank → results
 
 RunPod (4 pods, all RTX 5090)
-  ├─ rag-milvus      port 19530/TCP  milvusdb/milvus:v3.0-beta-gpu-amd64
+  ├─ rag-milvus      port 19530/TCP  milvusdb/milvus:latest
   ├─ rag-text-embed  port 8000/HTTP  vllm/vllm-openai + nvidia/llama-embed-nemotron-8b
   ├─ rag-mm-embed    port 8000/HTTP  vllm/vllm-openai + nvidia/nemotron-colembed-vl-8b-v2
-  └─ rag-reranker    port 8000/HTTP  vllm/vllm-openai + Qwen/Qwen3-VL-Reranker-8B
+  └─ rag-reranker    port 8000/HTTP  vllm/vllm-openai + Qwen/Qwen3-VL-Reranker-2B
 ```
 
 The RAG API runs locally via Docker and connects to the RunPod services over the internet.
@@ -77,7 +77,7 @@ Creates 4 RunPod pods and templates:
 
 | Pod | GPU | Image | Purpose |
 |-----|-----|-------|---------|
-| rag-milvus | CPU | milvusdb/milvus:v3.0-beta-amd64 | Vector store (etcd + minio bundled in startup script) |
+| rag-milvus | CPU | milvusdb/milvus:latest | Vector store (etcd + minio bundled in startup script) |
 | rag-text-embed | RTX 5090 | vllm/vllm-openai:latest | `BAAI/bge-large-en-v1.5` embeddings (1024-dim) |
 | rag-mm-embed | RTX 5090 | vllm/vllm-openai:latest | `BAAI/bge-large-en-v1.5` embeddings (testing fallback) |
 | rag-reranker | RTX 5090 | vllm/vllm-openai:latest | `BAAI/bge-reranker-v2-m3` scoring via `/score` |
@@ -125,42 +125,23 @@ docker run -d \
   --name rag-api \
   --env-file .env.runpod \
   -v "$PWD/data:/app/data" \
-  -p 8080:8080 \
-  rag-api
+  -p 8093:8093 \
 
-# Health check
-curl http://localhost:8080/health
+curl http://localhost:8093/health
 
-# Ingest the sample PDF
-curl -X POST http://localhost:8080/v1/ingest \
-  -F "files=@data/sample_data/2025-0910-newsletter.pdf" \
-  -F "strategy=recursive"
+curl -X POST http://localhost:8093/v1/ingest \
 
-# Ingest with sentence_window chunking
-curl -X POST http://localhost:8080/v1/ingest \
-  -F "files=@data/sample_data/2025-0910-newsletter.pdf" \
-  -F "strategy=sentence_window"
+curl -X POST http://localhost:8093/v1/ingest \
 
-# Hybrid search with reranking
-curl -X POST http://localhost:8080/v1/search \
-  -H "Content-Type: application/json" \
-  -d '{"query": "what are the key highlights", "top_k": 5, "mode": "hybrid", "use_reranker": true}'
+curl -X POST http://localhost:8093/v1/search \
 
-# Vector-only search
-curl -X POST http://localhost:8080/v1/search \
-  -H "Content-Type: application/json" \
-  -d '{"query": "main announcements", "top_k": 5, "mode": "vector", "use_reranker": false}'
+curl -X POST http://localhost:8093/v1/search \
 
-# BM25 search
-curl -X POST http://localhost:8080/v1/search \
-  -H "Content-Type: application/json" \
-  -d '{"query": "newsletter updates", "top_k": 5, "mode": "bm25", "use_reranker": false}'
+curl -X POST http://localhost:8093/v1/search \
 
-# List collections
-curl http://localhost:8080/v1/collections
+curl http://localhost:8093/v1/collections
 
-# API docs
-open http://localhost:8080/docs
+open http://localhost:8093/docs
 ```
 
 ## Troubleshooting

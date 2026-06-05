@@ -30,6 +30,6 @@ COPY api.py ingest.py search.py ./
 
 RUN mkdir -p /app/data /app/models
 
-EXPOSE 8080
+EXPOSE 8093
 
-CMD ["uv", "run", "uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "2"]
+CMD ["uv", "run", "uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8093", "--workers", "2"]
