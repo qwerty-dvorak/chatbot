@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.env
+
+# Model directories (standalone HF git repos, cloned by clone_models.sh)
+rag-pipeline/models/
+
+# Docker runtime data
+rag-pipeline/volumes/
+
+# Generated files
+rag-pipeline/data/bm25_index.pkl
+rag-pipeline/data/ingested_registry.json
+rag-pipeline/bm25_index.pkl
+rag-pipeline/bm25_index_mock.pkl
+
+# RunPod testing
+rag-pipeline/.runpod_state
+rag-pipeline/.env.runpod
