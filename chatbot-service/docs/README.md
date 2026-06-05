@@ -39,7 +39,7 @@ These are planning documents only. They intentionally do not add application cod
 - Chat and multimodal reasoning model: `Gemma 4 26B A4B IT`, 256K context window.
 - Text embedding model: `nvidia/llama-embed-nemotron-8b` (dim: 4096).
 - Multimodal embedding model: `nvidia/nemotron-colembed-vl-8b-v2` (dim: 4096).
-- Reranker: `Qwen3-VL-Reranker-8B`.
+- Reranker: `Qwen3-VL-Reranker-2B`.
 - Vector store: Milvus (two collections: document_chunks, user_memories).
 - All models will be reached through LiteLLM using local OpenAI-compatible endpoints.
 - The first frontend should be Django server-rendered HTML using forms and standard browser navigation.

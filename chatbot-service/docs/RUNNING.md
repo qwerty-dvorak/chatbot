@@ -210,7 +210,7 @@ TEXT_EMBEDDING_MODEL=openai/nvidia/llama-embed-nemotron-8b
 TEXT_EMBEDDING_DIM=4096
 MULTIMODAL_EMBEDDING_MODEL=openai/nvidia/nemotron-colembed-vl-8b-v2
 MULTIMODAL_EMBEDDING_DIM=4096
-RERANKER_MODEL=openai/Qwen/Qwen3-VL-Reranker-8B
+RERANKER_MODEL=openai/Qwen/Qwen3-VL-Reranker-2B
 
 # Enable RAG once Milvus and the embedding model are available
 RAG_ENABLED=true

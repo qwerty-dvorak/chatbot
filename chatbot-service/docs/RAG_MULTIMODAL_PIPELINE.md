@@ -116,7 +116,7 @@ Models:
 
 - **Text embedding**: `nvidia/llama-embed-nemotron-8b` (dim: 4096).
 - **Multimodal embedding**: `nvidia/nemotron-colembed-vl-8b-v2` (dim: 4096, late-interaction ColBERT-style).
-- **Reranker**: `Qwen3-VL-Reranker-8B` (cross-encoder, score output).
+- **Reranker**: `Qwen3-VL-Reranker-2B` (cross-encoder, score output).
 
 Vector dimensions:
 
@@ -156,7 +156,7 @@ Milvus is accessed through `apps/llm/milvus_store.py`, which provides:
 
 1. Embed the user query with the text embedding model.
 2. Run vector similarity search against Milvus `document_chunks` collection.
-3. Optionally rerank top results with Qwen3-VL-Reranker-8B.
+3. Optionally rerank top results with Qwen3-VL-Reranker-2B.
 4. Apply access filtering:
    - user private documents,
    - shared sources,

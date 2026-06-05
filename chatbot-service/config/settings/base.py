@@ -116,9 +116,9 @@ MULTIMODAL_EMBEDDING_MODEL = os.environ.get(
 )
 MULTIMODAL_EMBEDDING_DIM = int(os.environ.get("MULTIMODAL_EMBEDDING_DIM", "4096"))
 
-# Reranker: Qwen3-VL-Reranker-8B (score-only, no dim needed)
+# Reranker: Qwen3-VL-Reranker-2B (score-only, no dim needed)
 RERANKER_MODEL = os.environ.get(
-    "RERANKER_MODEL", "Qwen/Qwen3-VL-Reranker-8B"
+    "RERANKER_MODEL", "Qwen/Qwen3-VL-Reranker-2B"
 )
 
 # Milvus settings

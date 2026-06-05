@@ -11,7 +11,7 @@ These were the original open questions and their current answers. Only implement
    Answered:
    - Text embedding: `nvidia/llama-embed-nemotron-8b` (dim: 4096)
    - Multimodal embedding: `nvidia/nemotron-colembed-vl-8b-v2` (dim: 4096, late-interaction)
-   - Reranker: `Qwen3-VL-Reranker-8B` (cross-encoder, score output)
+   - Reranker: `Qwen3-VL-Reranker-2B` (cross-encoder, score output)
 
 3. Which vector store is used?
 

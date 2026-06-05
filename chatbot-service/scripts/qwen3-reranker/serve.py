@@ -1,5 +1,5 @@
 """
-OpenAI-compatible reranker API for Qwen3-VL-Reranker-8B.
+OpenAI-compatible reranker API for Qwen3-VL-Reranker-2B.
 
 Cross-encoder reranker that scores query-document pairs.
 Outputs relevance scores (not embeddings).
@@ -14,7 +14,7 @@ import torch
 from transformers import AutoModelForSequenceClassification, AutoProcessor
 
 MODEL_NAME = os.environ.get(
-    "RERANKER_MODEL", "Qwen/Qwen3-VL-Reranker-8B"
+    "RERANKER_MODEL", "Qwen/Qwen3-VL-Reranker-2B"
 )
 DEVICE = os.environ.get("DEVICE", "cuda")
 HOST = os.environ.get("HOST", "0.0.0.0")

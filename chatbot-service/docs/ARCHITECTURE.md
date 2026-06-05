@@ -15,7 +15,7 @@ The system should replace the JavaScript/Prisma/Node shape from the reference sc
 - Chat/vision model: Gemma 4 26B A4B IT.
 - Text embeddings: nvidia/llama-embed-nemotron-8b (dim: 4096).
 - Multimodal embeddings: nvidia/nemotron-colembed-vl-8b-v2 (dim: 4096).
-- Reranker: Qwen3-VL-Reranker-8B.
+- Reranker: Qwen3-VL-Reranker-2B.
 - Auth: email/password only.
 - Frontend: Django templates and forms.
 - Streaming responses are required.
@@ -132,7 +132,7 @@ Initial built-in tools:
 5. Embedding generator creates vectors (text: llama-embed-nemotron-8b, multimodal: nemotron-colembed-vl-8b-v2).
 6. Chunks are stored in Milvus with their vectors and metadata.
 7. Queries embed the user question and rank chunks by vector similarity in Milvus.
-8. Reranker (Qwen3-VL-Reranker-8B) optionally re-ranks top results.
+8. Reranker (Qwen3-VL-Reranker-2B) optionally re-ranks top results.
 9. Full text search is used as fallback or hybrid boost.
 
 ### Chat Compaction

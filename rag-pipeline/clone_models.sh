@@ -27,11 +27,11 @@ clone_or_pull "https://huggingface.co/nvidia/llama-embed-nemotron-8b" \
 clone_or_pull "https://huggingface.co/nvidia/nemotron-colembed-vl-8b-v2" \
   "$MODELS_DIR/nemotron-colembed-vl-8b-v2" "nemotron-colembed-vl-8b-v2"
 
-clone_or_pull "https://huggingface.co/Qwen/Qwen3-VL-Reranker-8B" \
-  "$MODELS_DIR/Qwen3-VL-Reranker-8B" "Qwen3-VL-Reranker-8B"
+clone_or_pull "https://huggingface.co/Qwen/Qwen3-VL-Reranker-2B" \
+  "$MODELS_DIR/Qwen3-VL-Reranker-2B" "Qwen3-VL-Reranker-2B"
 
 echo ""
 echo "All models cloned to $MODELS_DIR"
 echo "  Text embedding:        $MODELS_DIR/llama-embed-nemotron-8b"
 echo "  Multimodal embedding:  $MODELS_DIR/nemotron-colembed-vl-8b-v2"
-echo "  Reranker:              $MODELS_DIR/Qwen3-VL-Reranker-8B"
+echo "  Reranker:              $MODELS_DIR/Qwen3-VL-Reranker-2B"

@@ -86,9 +86,9 @@ TEXT_EMBEDDING_DIM=4096
 # Multimodal embedding: nvidia/nemotron-colembed-vl-8b-v2 (dim: 4096)
 MULTIMODAL_EMBEDDING_MODEL=nvidia/nemotron-colembed-vl-8b-v2
 MULTIMODAL_EMBEDDING_DIM=4096
+# Reranker: Qwen3-VL-Reranker-2B
 
-# Reranker: Qwen3-VL-Reranker-8B
-RERANKER_MODEL=Qwen/Qwen3-VL-Reranker-8B
+RERANKER_MODEL=Qwen/Qwen3-VL-Reranker-2B
 
 # Milvus vector store
 MILVUS_HOST=localhost
@@ -159,7 +159,7 @@ Each model has a dedicated server in the `scripts/` directory:
 | `scripts/gemma4/` | Gemma 4 26B A4B IT | 8001 | Chat/vision (GGUF via llama.cpp) |
 | `scripts/llama-embed-nemotron/` | llama-embed-nemotron-8b | 8002 | Text embeddings |
 | `scripts/nemotron-colembed/` | nemotron-colembed-vl-8b-v2 | 8003 | Multimodal embeddings |
-| `scripts/qwen3-reranker/` | Qwen3-VL-Reranker-8B | 8004 | Re-ranking |
+| `scripts/qwen3-reranker/` | Qwen3-VL-Reranker-2B | 8004 | Re-ranking |
 
 All model servers expose OpenAI-compatible endpoints.
 
@@ -190,7 +190,7 @@ POST /v1/rerank
 The selected chat/vision model is `Gemma 4 26B A4B IT` with 256K context window.
 Text embedding: `nvidia/llama-embed-nemotron-8b` (dim: 4096).
 Multimodal embedding: `nvidia/nemotron-colembed-vl-8b-v2` (dim: 4096).
-Reranker: `Qwen3-VL-Reranker-8B`.
+Reranker: `Qwen3-VL-Reranker-2B`.
 
 ## Management Commands
 
