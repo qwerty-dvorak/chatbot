@@ -5,7 +5,7 @@ Standalone document ingestion and advanced RAG pipeline. All LLM/embedding/reran
 ## Quick start
 
 ```bash
-# 1. Clone models (one-time, requires git-lfs, ~24GB per model)
+# 1. Clone models to sibling ../models/ repo (one-time, requires git-lfs, ~24GB per model)
 bash clone_models.sh
 
 # 2. Start all services (Milvus + vLLM servers + RAG API)

@@ -1,7 +1,7 @@
 # CLAUDE.md — Monorepo Root
 
 Everything in this repository runs **fully locally** with no external dependencies.
-No model weights are fetched automatically. No cloud APIs are called. No internet access is required at runtime.
+No cloud APIs are called. No internet access is required at runtime.
 
 ## Structure
 
@@ -9,6 +9,27 @@ No model weights are fetched automatically. No cloud APIs are called. No interne
 |-----------|---------|
 | `chatbot-service/` | Django chatbot with streaming LLM, RAG, memory, tool calling |
 | `rag-pipeline/` | Standalone document ingestion + advanced RAG pipeline |
+
+## Models
+
+Model files live in a **separate git repo** at the same level as this repo (`../models/`).
+They are mounted as Docker volumes at runtime — never copied into this repo.
+See `rag-pipeline/start-services.sh` and `chatbot-service/start-services.sh` for mount paths.
+
+```
+barc/
+├── chatbot/          ← this repo
+└── models/           ← separate git repo (HF model configs, tokenizers, safetensors)
+    ├── gemma-4-26B-A4B-it/
+    ├── llama-embed-nemotron-8b/
+    ├── nemotron-colembed-vl-8b-v2/
+    └── Qwen3-VL-Reranker-2B/
+```
+
+To clone models locally:
+```bash
+bash rag-pipeline/clone_models.sh
+```
 
 ## Requirements
 
@@ -18,7 +39,7 @@ No model weights are fetched automatically. No cloud APIs are called. No interne
 
 ## Key principles
 
-- **No external model downloads** — all LLM / embedding / reranker calls go to local endpoints (real vLLM or mock servers).
+- **Models outside repo** — all model files live in a sibling `../models/` git repo; cloned once via `rag-pipeline/clone_models.sh`. Docker volumes mount them at runtime.
 - **No Docker Compose** — services are started with plain `docker run` commands or native processes.
 - **Python images** always use `FROM ubuntu:24.04` as base; dependencies managed with `uv`.
 - **Reproducible uv resolution** — every `pyproject.toml` contains `[tool.uv]` with `exclude-newer = "2025-10-23T12:36:00Z"`.
