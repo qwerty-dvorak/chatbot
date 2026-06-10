@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 NETWORK_NAME="rag_net"
 API_IMAGE="rag-api"
 VOL_DIR="${DOCKER_VOLUME_DIRECTORY:-$SCRIPT_DIR/volumes}"
-MODEL_DIR="$SCRIPT_DIR/models"
+MODEL_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)/models"
 DATA_DIR="$SCRIPT_DIR/data"
 
 # Load .env if present

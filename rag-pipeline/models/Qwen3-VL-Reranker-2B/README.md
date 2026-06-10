@@ -3,14 +3,14 @@ license: apache-2.0
 library_name: transformers
 pipeline_tag: text-ranking
 base_model:
-- Qwen/Qwen3-VL-8B-Instruct
+- Qwen/Qwen3-VL-2B-Instruct
 tags:
 - sentence-transformers
 - transformers
 - multimodal rerank
 - text rerank
 ---
-# Qwen3-VL-Reranker-8B
+# Qwen3-VL-Reranker-2B
 
 <p align="center">
     <img src="https://model-demo.oss-cn-hangzhou.aliyuncs.com/Qwen3-VL-Reranker.png" width="400"/>
@@ -30,15 +30,15 @@ While the Embedding model generates high-dimensional vectors for broad applicati
 
 - **Exceptional Practicality**: Inheriting Qwen3-VL’s multilingual capabilities, the series supports over 30 languages, making it ideal for global applications. It is highly practical for real-world scenarios, offering flexible vector dimensions, customizable instructions for specific use cases, and strong performance even with quantized embeddings. These capabilities enable developers to seamlessly integrate both models into existing pipelines, unlocking powerful cross-lingual and cross-modal understanding.
 
-**Qwen3-VL-Reranker-8B** has the following features:
+**Qwen3-VL-Reranker-2B** has the following features:
 
 - Model Type: MultiModal Rerank
 - Supported Languages: 30+ Languages
 - Supported Input Modalities: Text, images, screenshots, videos, and arbitrary multimodal combinations (e.g., text + image, text + video)
-- Number of Parameters: 8B
+- Number of Parameters: 2B
 - Context Length: 32k
 
-For more details, including benchmark evaluation, hardware requirements, and inference performance, please refer to our [technical report](https://arxiv.org/abs/2601.04720), [blog](https://qwenlm.github.io/blog/qwen3-embedding/), [GitHub](https://github.com/QwenLM/Qwen3-VL-Embedding).
+For more details, including benchmark evaluation, hardware requirements, and inference performance, please refer to our [technical report](https://arxiv.org/abs/2601.04720), [blog](https://qwen.ai/blog?id=qwen3-vl-embedding), [GitHub](https://github.com/QwenLM/Qwen3-VL-Embedding).
 
 ## Qwen3-VL-Embedding and Qwen3-VL-Reranker Model list
 
@@ -78,7 +78,7 @@ pip install sentence_transformers
 ```python
 from sentence_transformers import CrossEncoder
 
-model = CrossEncoder("Qwen/Qwen3-VL-Reranker-8B")
+model = CrossEncoder("Qwen/Qwen3-VL-Reranker-2B")
 
 query = "A woman playing with her dog on a beach at sunset."
 documents = [
@@ -94,11 +94,11 @@ prompt = "Retrieve images or text relevant to the user's query."
 pairs = [(query, doc) for doc in documents]
 scores = model.predict(pairs, prompt=prompt)
 print(scores)
-# [1.3125, 0.25, 0.4375]
+# [1.8125, 0.5625, 1.3125]
 
 rankings = model.rank(query, documents, prompt=prompt)
 print(rankings)
-# [{'corpus_id': 0, 'score': 1.3125}, {'corpus_id': 2, 'score': 0.4375}, {'corpus_id': 1, 'score': 0.25}]
+# [{'corpus_id': 0, 'score': 1.8125}, {'corpus_id': 2, 'score': 1.3125}, {'corpus_id': 1, 'score': 0.5625}]
 ```
 
 You can map scores to 0...1 with a sigmoid activation:
@@ -106,7 +106,7 @@ You can map scores to 0...1 with a sigmoid activation:
 ```python
 scores = model.predict(pairs, activation_fn=torch.nn.Sigmoid(), prompt=prompt)
 print(scores)
-# [0.7891, 0.5625, 0.6094]
+# [0.8594, 0.6367, 0.7891]
 ```
 
 The default prompt is `"query"` with instruction `"Retrieve text relevant to the user's query."`. You can customize the instruction for your use case via the `prompt` parameter as shown above.
@@ -124,16 +124,17 @@ torch==2.8.0
 from scripts.qwen3_vl_reranker import Qwen3VLReranker
 
 # Specify the model path
-model_name_or_path = "Qwen/Qwen3-VL-Reranker-8B"
+model_name_or_path = "Qwen/Qwen3-VL-Reranker-2B"
 
 # Initialize the Qwen3VLEmbedder model
 model = Qwen3VLReranker(model_name_or_path=model_name_or_path)
 # We recommend enabling flash_attention_2 for better acceleration and memory saving,
 # model = Qwen3VLReranker(model_name_or_path=model_name_or_path, torch_dtype=torch.bfloat16, attn_implementation="flash_attention_2")
+
 # Combine queries and documents into a single input list
 
 inputs = {
-    "instruction": "Retrieval relevant image or text with user's query",
+    "instruction": "Retrieve images or text relevant to the user's query.",
     "query": {"text": "A woman playing with her dog on a beach at sunset."},
     "documents": [
         {"text": "A woman shares a joyful moment with her golden retriever on a sun-drenched beach at sunset, as the dog offers its paw in a heartwarming display of companionship and trust."},
@@ -145,7 +146,7 @@ inputs = {
 
 scores = model.process(inputs)
 print(scores)
-# [0.7838293313980103, 0.585621178150177, 0.6147719025611877]
+# [0.8613124489784241, 0.6757137179374695, 0.8125371336936951]
 ```
 
 ### Using vLLM
@@ -206,7 +207,7 @@ def format_document_to_score_param(doc_dict: Dict[str, Any]) -> ScoreMultiModalP
 
 def main():
     parser = argparse.ArgumentParser(description="Offline Reranker with vLLM")
-    parser.add_argument("--model-path", type=str, default="models/Qwen3-VL-Reranker-8B", help="Path to the reranker model")
+    parser.add_argument("--model-path", type=str, default="models/Qwen3-VL-Reranker-2B", help="Path to the reranker model")
     parser.add_argument("--dtype", type=str, default="bfloat16", help="Data type (e.g., bfloat16)")
     parser.add_argument("--template-path", type=str, default="vllm/examples/pooling/score/template/qwen3_vl_reranker.jinja", 
                         help="Path to chat template file")
@@ -249,6 +250,7 @@ if __name__ == "__main__":
     main()
 
 ```
+
 For more usage examples, please visit our [GitHub repository](https://github.com/QwenLM/Qwen3-VL-Embedding).
 
 ## Citation

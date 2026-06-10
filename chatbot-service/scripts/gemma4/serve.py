@@ -1,8 +1,8 @@
 """
 Gemma 4 26B A4B IT OpenAI-compatible API server via llama.cpp GGUF.
 
-Expects GEMMA4_MODEL_PATH env var pointing to a GGUF file
-or mount models/gemma4-26b-a4b-it-q4_k_m.gguf at /models/gemma4.gguf
+Expects GEMMA4_MODEL_PATH env var pointing to a GGUF file.
+Models live in the sibling ../models/ directory (separate git repo).
 """
 
 import json

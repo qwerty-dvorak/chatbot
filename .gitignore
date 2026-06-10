@@ -4,8 +4,7 @@ __pycache__/
 .venv/
 .env
 
-# Model directories (standalone HF git repos, cloned by clone_models.sh)
-rag-pipeline/models/
+# Model directories live in sibling ../models/ repo (not in this repo)
 
 # Docker runtime data
 rag-pipeline/volumes/

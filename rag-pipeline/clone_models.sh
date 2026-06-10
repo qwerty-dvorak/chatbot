@@ -5,7 +5,7 @@ echo "Installing git-lfs if not present..."
 which git-lfs >/dev/null 2>&1 || (apt-get install -y git-lfs 2>/dev/null || yum install -y git-lfs 2>/dev/null || brew install git-lfs 2>/dev/null || { echo "Please install git-lfs manually: https://git-lfs.github.com/"; exit 1; })
 git lfs install
 
-MODELS_DIR="$(cd "$(dirname "$0")" && pwd)/models"
+MODELS_DIR="$(cd "$(dirname "$0")/../.." && pwd)/models"
 
 clone_or_pull() {
   local repo_url=$1

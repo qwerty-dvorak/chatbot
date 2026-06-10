@@ -74,7 +74,7 @@ docker run -d \
   --shm-size="16gb" \
   --gpus all \
   -e NVIDIA_VISIBLE_DEVICES=0,1 \
-  -v /home/lus04/rajs/trainee_26/gemma4-26B-A4b:/gemma4-26B-A4b \
+  -v "$(cd "$(dirname "$0")/../.." && pwd)/models/gemma-4-26B-A4B-it:/gemma4-26B-A4b" \
   -p 8430:8000 \
   --health-cmd='python3 -c "import urllib.request; urllib.request.urlopen('\''http://localhost:8000/v1/models'\'')" 2>/dev/null && echo ok' \
   --health-interval=10s \
