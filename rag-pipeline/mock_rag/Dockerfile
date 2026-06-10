@@ -7,6 +7,10 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
+# BEGIN BARC APT SOURCES
+# Public Ubuntu sources from the base image remain enabled.
+# END BARC APT SOURCES
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     && rm -rf /var/lib/apt/lists/*
