@@ -47,7 +47,7 @@ public_blocks = {
 }
 
 barc_blocks = {
-    "BARC BASE IMAGE": "FROM dregistry.barc.gov.in/ubuntu:24.04",
+    "BARC BASE IMAGE": "FROM dregistry.megh.barc.gov.in/ubuntu:24.04",
     "BARC APT SOURCES": apt_barc,
     "BARC UV ENV": """ENV UV_INDEX_URL=http://osrepo.barc.gov.in/python-pypi/simple \\
     UV_INSECURE_HOST=osrepo.barc.gov.in""",
