@@ -10,14 +10,14 @@ background when time allows.
 |---|---------|------|--------|
 | **Use case** | Chat-session file upload | Single-file deep processing | Global knowledge base |
 | **Latency target** | < 2 s/page | Minutes | Hours (batch) |
-| **PDF extraction** | PyMuPDF text layer (no OCR) | PaddleOCR-VL @ 150 DPI | PaddleOCR-VL @ 200 DPI |
+| **PDF extraction** | pypdf text layer | Text plus OCR for extracted images | Text plus OCR for extracted images |
 | **Text embedding** | ✓ | ✓ | ✓ |
 | **Multimodal embedding** | ✗ | ✓ | ✓ |
 | **Chunking strategy** | `recursive` | `sentence_window` | `hierarchical` |
 | **Hypothetical questions** | 0 (disabled) | 2 per chunk | 3 per chunk |
 | **Query enhancements** | None | HyDE only | HyDE + sub-queries + stepback |
 | **Reranker** | ✗ | ✓ | ✓ |
-| **LLM for enhancements** | — | `CHAT_*` | `CHATBOT_LLM_*` |
+| **LLM for enhancements** | — | `CHAT_*` | `CHAT_*` |
 
 ## Tier Details
 
@@ -26,7 +26,7 @@ background when time allows.
 Optimised for immediate availability in user chat sessions.
 
 **Ingestion:**
-- PDFs: `PyMuPDF.get_text("text")` — reads the text layer directly, skipping image rendering and OCR entirely.  Scanned PDFs with no embedded text return empty content.
+- PDFs: reads the existing text layer with pypdf and skips OCR.
 - Images: stored as raw bytes but NOT multimodal-embedded (no GPU call).
 - Chunking: `recursive` (parent 2048 chars → children 512 chars).
 - No hypothetical-question augmentation (avoids LLM round-trips at ingest time).
@@ -47,7 +47,7 @@ Optimised for immediate availability in user chat sessions.
 Full quality for a single file; suitable for document-management uploads.
 
 **Ingestion:**
-- PDFs: render all pages as PNG at 150 DPI, then OCR via PaddleOCR-VL-1.6 concurrently.
+- PDFs: preserve pypdf text and OCR images that pypdf can extract from the document.
 - Both text embedding (Track A) and multimodal/image embedding (Track B) run.
 - Chunking: `sentence_window` (one sentence per chunk + N surrounding sentences as context).
 - 2 hypothetical questions generated per text chunk at index time.
@@ -68,8 +68,8 @@ Full quality for a single file; suitable for document-management uploads.
 Maximum quality; designed for batch processing of a global knowledge base.
 
 **Ingestion:**
-- PDFs rendered at 200 DPI for better OCR accuracy.
-- Full OCR + both embedding tracks.
+- Uses the same text-plus-extracted-image OCR path as slow tier.
+- Both embedding tracks are enabled.
 - Chunking: `hierarchical` (paragraph-grouped summaries + fine-grained children).
 - 3 hypothetical questions per chunk using the default chat model.
 
@@ -78,7 +78,7 @@ Maximum quality; designed for batch processing of a global knowledge base.
   1. **HyDE** — generates a hypothetical answer passage and embeds it.
   2. **Sub-queries** — decomposes the question into 2-4 focused sub-questions.
   3. **Stepback** — reformulates to a broader question for better recall.
-- All enhancements use `CHATBOT_LLM_*` (the real chatbot-service LLM) for higher-quality reformulations.
+- Enhancements use the configured local `CHAT_*` endpoint.
 - Reranker always on.
 
 **When to use:**
@@ -132,8 +132,8 @@ Chat upload → admin decision → promote to global (add to shared knowledge ba
 Slow → time passes → promote to global (batch quality upgrade)
 ```
 
-The promotion itself is synchronous.  For background promotion, wrap it in a task queue
-(Celery, ARQ, etc.) or an asyncio background task.
+The API always queues promotion through the same durable worker used for
+ingestion. Poll the returned `/v1/ingestions/{id}` resource for completion.
 
 ## Configuration
 
@@ -145,9 +145,9 @@ Environment variables that affect tier behaviour:
 
 | Variable | Used by | Effect |
 |----------|---------|--------|
-| `CHATBOT_LLM_BASE_URL` | global tier search | LLM endpoint for HyDE/sub-queries |
-| `CHATBOT_LLM_MODEL` | global tier search | Model name for chatbot LLM |
-| `OCR_PDF_DPI` | slow/global ingest | Default DPI (overridden per tier) |
+| `CHAT_BASE_URL` | slow/global search | LLM endpoint for query enhancements |
+| `CHAT_MODEL` | slow/global search | Model name for query enhancements |
+| `OCR_PDF_DPI` | future page-rendering extractor | Reserved OCR render DPI |
 | `CHUNK_SIZE` | all tiers | Child chunk size in characters |
 | `CHUNK_OVERLAP` | all tiers | Overlap between adjacent chunks |
 | `HYPOTHETICAL_QUESTIONS_PER_CHUNK` | slow/global | Fallback if not overridden in options |

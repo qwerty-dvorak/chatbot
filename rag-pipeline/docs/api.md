@@ -1,220 +1,262 @@
-# RAG Pipeline API Reference
+# RAG Pipeline API
 
 Base URL: `http://localhost:8093`
 
-Interactive docs (Swagger UI): `http://localhost:8093/docs`
+OpenAPI:
 
----
+- Swagger UI: `http://localhost:8093/docs`
+- Schema: `http://localhost:8093/openapi.json`
 
-## `GET /health`
+## Ingestion Contract
 
-Returns service health and Milvus connection details.
+Ingestion is asynchronous. `POST /v1/ingest` persists the uploads, creates a
+durable SQLite job, and returns `202 Accepted`. A single background worker
+processes queued jobs in creation order. The HTTP request does not remain open
+while extraction, OCR, embedding, and indexing run.
 
-**Response**
+Job statuses:
+
+| Status | Meaning |
+|--------|---------|
+| `queued` | Persisted and waiting for the worker |
+| `running` | Claimed by the ingestion worker |
+| `succeeded` | Pipeline completed; `result` contains statistics |
+| `failed` | Pipeline raised an error; `error` contains a traceback |
+| `cancelled` | Cancelled before the worker claimed it |
+
+Uploads and queue state are stored under `INGESTION_DATA_DIR`. The default is
+`./data/ingestion`; the Docker container uses the mounted `/app/data` tree.
+Jobs left in `running` state by a process restart are requeued at startup.
+
+## Health
+
+### `GET /health/live`
+
+Process liveness. This endpoint does not test Milvus.
+
+```json
+{"status": "ok"}
+```
+
+### `GET /health/ready`
+
+Checks Milvus, the worker, and queue counters. Returns `503` when Milvus is not
+available.
 
 ```json
 {
-  "status": "ok",
-  "milvus_host": "localhost",
-  "milvus_port": 19530
+  "status": "ready",
+  "worker_running": true,
+  "queue": {
+    "queued": 0,
+    "running": 1,
+    "succeeded": 12,
+    "failed": 0,
+    "cancelled": 0
+  },
+  "collections": 2
 }
 ```
 
----
+### `GET /health`
 
-## `POST /v1/ingest`
+Compatibility health endpoint. It reports configuration and queue state but
+does not fail when Milvus is unavailable. Use `/health/ready` for readiness
+probes.
 
-Upload one or more files and ingest them into the RAG index.
+## Queue Ingestion
 
-**Parameters** (multipart form)
+### `POST /v1/ingest`
 
-| Name | Type | Default | Description |
-|------|------|---------|-------------|
-| `files` | file[] | required | Files to ingest |
-| `tier` | string | `slow` | Processing depth: `instant`, `slow`, or `global` |
-| `strategy` | string | null | Chunk strategy override: `recursive`, `sentence_window`, `hierarchical` |
-| `hypothetical_questions` | bool | `false` | Add hypothetical questions at index time |
+Persist one or more files and enqueue ingestion.
 
-When `tier` is provided, the tier's default chunk strategy and hypothetical-question
-settings apply.  Explicit `strategy` or `hypothetical_questions` values override
-the tier defaults.
+Content type: `multipart/form-data`
 
-**Tier behaviour:**
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `files` | file[] | required | One or more supported documents |
+| `tier` | enum | `slow` | `instant`, `slow`, or `global` |
+| `strategy` | enum/null | tier default | `recursive`, `sentence_window`, or `hierarchical` |
+| `hypothetical_questions` | bool/null | tier default | Explicitly enable or disable index-time question generation |
 
-| Tier | Extraction | Multimodal | Chunking | Hyp. Qs |
-|------|-----------|-----------|---------|---------|
-| `instant` | PyMuPDF text (no OCR) | No | recursive | 0 |
-| `slow` | OCR @ 150 DPI | Yes | sentence_window | 2 |
-| `global` | OCR @ 200 DPI | Yes | hierarchical | 3 |
+Tier defaults:
 
-**Example — instant upload for chat RAG**
+| Tier | Extraction | Image embedding | Chunking | Hypothetical questions |
+|------|------------|-----------------|----------|------------------------|
+| `instant` | Existing text layer | No | `recursive` | Disabled |
+| `slow` | Text plus OCR for extracted images | Yes | `sentence_window` | 2 per text chunk |
+| `global` | Text plus OCR for extracted images | Yes | `hierarchical` | 3 per text chunk |
+
+Example:
 
 ```bash
-curl -X POST http://localhost:8093/v1/ingest \
+curl -i -X POST http://localhost:8093/v1/ingest \
   -F "files=@report.pdf" \
-  -F "tier=instant"
-```
-
-**Example — slow ingestion with explicit strategy**
-
-```bash
-curl -X POST http://localhost:8093/v1/ingest \
-  -F "files=@manual.pdf" \
   -F "files=@notes.md" \
-  -F "tier=slow" \
-  -F "strategy=recursive"
+  -F "tier=slow"
 ```
 
-**Example — global batch with hypothetical questions**
-
-```bash
-curl -X POST http://localhost:8093/v1/ingest \
-  -F "files=@paper.pdf" \
-  -F "tier=global"
-```
-
-**Response**
+Response: `202 Accepted`
 
 ```json
 {
-  "status": "ok",
-  "files": ["report.pdf"],
-  "tier": "instant",
-  "stats": {
-    "tier": "instant",
-    "files_processed": 1,
-    "files_skipped_duplicate": 0,
-    "chunks_created": 24,
-    "embeddings_indexed": 24
+  "id": "daaa89d8131946138f87b84ef9fa291b",
+  "kind": "ingest",
+  "status": "queued",
+  "files": ["report.pdf", "notes.md"],
+  "request": {
+    "tier": "slow",
+    "strategy": null,
+    "hypothetical_questions": null
+  },
+  "result": null,
+  "error": null,
+  "created_at": "2026-06-10T00:10:32.123456+00:00",
+  "started_at": null,
+  "completed_at": null,
+  "links": {
+    "self": "/v1/ingestions/daaa89d8131946138f87b84ef9fa291b",
+    "collection": "/v1/ingestions"
   }
 }
 ```
 
----
+Poll the job:
 
-## `POST /v1/promote`
+```bash
+curl http://localhost:8093/v1/ingestions/daaa89d8131946138f87b84ef9fa291b
+```
 
-Re-ingest a document at a higher tier, deleting the old chunks.
+A successful result includes persistent source paths that can later be passed
+to `/v1/promote`:
 
-**Request body (JSON)**
+```json
+{
+  "status": "succeeded",
+  "result": {
+    "tier": "slow",
+    "files_processed": 2,
+    "files_failed": 0,
+    "files_skipped_duplicate": 0,
+    "chunks_created": 84,
+    "embeddings_indexed": 88,
+    "errors": [],
+    "source_paths": [
+      "/app/data/ingestion/uploads/daaa89d8131946138f87b84ef9fa291b/notes.md",
+      "/app/data/ingestion/uploads/daaa89d8131946138f87b84ef9fa291b/report.pdf"
+    ]
+  }
+}
+```
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `source_path` | string | required | Absolute path to the file on disk |
-| `to_tier` | string | required | Target tier: `instant`, `slow`, or `global` |
-| `delete_old_chunks` | bool | `true` | Delete existing Milvus vectors before re-ingesting |
+### `GET /v1/ingestions`
 
-**Example**
+List recent ingestion and promotion jobs.
+
+Query parameters:
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `status` | enum/null | null | Filter by one job status |
+| `limit` | int | `50` | Number of jobs, from 1 to 200 |
+
+```bash
+curl "http://localhost:8093/v1/ingestions?status=failed&limit=20"
+```
+
+```json
+{
+  "jobs": [],
+  "total": 0
+}
+```
+
+### `GET /v1/ingestions/{job_id}`
+
+Return one complete job record. Returns `404` for an unknown identifier.
+
+### `DELETE /v1/ingestions/{job_id}`
+
+Cancel a `queued` job. Running jobs cannot be interrupted because extraction
+and index writes do not provide transaction-safe cancellation points.
+
+- `200`: queued job changed to `cancelled`
+- `404`: job does not exist
+- `409`: job is running or already terminal
+
+## Queue Promotion
+
+### `POST /v1/promote`
+
+Queue replacement of a document's existing vectors with a higher-quality tier.
+The source file must still exist in persistent storage.
 
 ```bash
 curl -X POST http://localhost:8093/v1/promote \
   -H "Content-Type: application/json" \
   -d '{
-    "source_path": "/data/uploads/report.pdf",
+    "source_path": "/app/data/ingestion/uploads/JOB_ID/report.pdf",
     "to_tier": "global",
     "delete_old_chunks": true
   }'
 ```
 
-**Response**
+Response: `202 Accepted` with the same job resource shape as ingestion and
+`"kind": "promote"`.
 
-```json
-{
-  "status": "ok",
-  "stats": {
-    "tier": "global",
-    "files_processed": 1,
-    "files_skipped_duplicate": 0,
-    "chunks_created": 142,
-    "embeddings_indexed": 142,
-    "deleted_text_chunks": 24,
-    "deleted_image_chunks": 8
-  }
-}
-```
+Promotion runs through the same single worker. When `delete_old_chunks` is
+true, it removes matching Milvus rows and matching BM25 chunks before indexing
+the new representation.
 
-**Error — file not found**
+## Search
 
-```json
-{
-  "detail": "Source file not found: '/data/uploads/report.pdf'"
-}
-```
+### `POST /v1/search`
 
----
-
-## `POST /v1/search`
-
-Search the RAG index.
-
-**Request body (JSON)**
+Search remains synchronous because it is expected to be short-lived.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `query` | string | required | Search query |
-| `top_k` | int | `5` | Maximum results to return |
-| `mode` | string | `hybrid` | `hybrid`, `vector`, or `bm25` |
-| `use_reranker` | bool | `true` | Run reranker after fusion |
-| `tier` | string | null | Set search defaults from tier: `instant`, `slow`, `global` |
-| `enhancements` | string | null | Comma-separated enhancement names (overrides tier) |
+| `query` | string | required | Non-empty search query |
+| `top_k` | int | `5` | Result count, from 1 to 100 |
+| `mode` | enum | `hybrid` | `hybrid`, `vector`, or `bm25` |
+| `tier` | enum/null | null | Applies tier search defaults |
+| `use_reranker` | bool/null | null | Explicit override; otherwise tier/default behavior |
+| `enhancements` | string/null | null | Comma-separated `hyde`, `sub_queries`, `stepback`; overrides tier |
 
-**Tier search defaults:**
+Tier search defaults:
 
-| Tier | Enhancements | Reranker | LLM |
-|------|-------------|---------|-----|
-| `instant` | none | no | — |
-| `slow` | hyde | yes | CHAT_* |
-| `global` | hyde, sub_queries, stepback | yes | CHATBOT_LLM_* |
-
-**Example — instant search (no enhancements)**
-
-```bash
-curl -X POST http://localhost:8093/v1/search \
-  -H "Content-Type: application/json" \
-  -d '{"query": "transformer attention mechanism", "tier": "instant"}'
-```
-
-**Example — global search (all enhancements)**
+| Tier | Enhancements | Reranker |
+|------|--------------|----------|
+| `instant` | none | off |
+| `slow` | `hyde` | on |
+| `global` | `hyde,sub_queries,stepback` | on |
 
 ```bash
 curl -X POST http://localhost:8093/v1/search \
   -H "Content-Type: application/json" \
   -d '{
-    "query": "how does self-attention scale with sequence length",
-    "top_k": 10,
+    "query": "How does self-attention scale?",
+    "top_k": 5,
+    "mode": "hybrid",
     "tier": "global"
   }'
 ```
 
-**Example — explicit enhancements (override tier)**
-
-```bash
-curl -X POST http://localhost:8093/v1/search \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "attention mechanism",
-    "enhancements": "hyde,sub_queries",
-    "use_reranker": true
-  }'
-```
-
-**Response**
-
 ```json
 {
-  "query": "transformer attention mechanism",
+  "query": "How does self-attention scale?",
   "results": [
     {
       "rank": 1,
-      "score": 0.0189,
+      "score": 0.91,
       "method": "reranked",
-      "source": "/data/paper.pdf",
+      "source": "/app/data/ingestion/uploads/JOB_ID/paper.pdf",
       "chunk_type": "child",
-      "text": "Self-attention allows each position in the sequence...",
+      "text": "Self-attention has quadratic sequence-length complexity...",
       "has_image": false,
       "metadata": {
-        "ingestion_tier": "global",
-        "filename": "paper.pdf"
+        "filename": "paper.pdf",
+        "ingestion_tier": "global"
       }
     }
   ],
@@ -222,45 +264,33 @@ curl -X POST http://localhost:8093/v1/search \
 }
 ```
 
----
+## Collection Administration
 
-## `GET /v1/collections`
+### `GET /v1/collections`
 
-List all Milvus collections.
-
-**Response**
+Returns Milvus collection names.
 
 ```json
 ["rag_text_chunks", "rag_image_chunks"]
 ```
 
----
+### `DELETE /v1/collections/{name}`
 
-## `DELETE /v1/collections/{name}`
+Drops a complete Milvus collection. This is destructive and does not remove
+the BM25 index, registry, uploaded files, or job history.
 
-Drop a Milvus collection by name.  Use with caution — all indexed data is lost.
+## Errors
 
-**Response**
-
-```json
-{"dropped": "rag_text_chunks"}
-```
-
----
-
-## Error responses
-
-All endpoints return standard HTTP status codes:
+FastAPI validation errors use `422`. Runtime failures use:
 
 | Status | Meaning |
 |--------|---------|
-| `200` | Success |
-| `404` | Resource not found (e.g. file for `/v1/promote`) |
-| `422` | Validation error (e.g. unknown tier name) |
-| `500` | Internal error — check server logs |
+| `404` | Job or promotion source not found |
+| `409` | Requested job transition is not allowed |
+| `422` | Invalid request field, tier, strategy, mode, or bound |
+| `500` | Search or collection operation failed |
+| `503` | Readiness check cannot reach Milvus |
 
-Error body:
-
-```json
-{"detail": "error message"}
-```
+Background pipeline failures do not change the polling endpoint's HTTP status.
+The job resource returns `200` with `"status": "failed"` and diagnostic text in
+`error`.

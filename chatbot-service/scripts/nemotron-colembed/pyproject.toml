@@ -10,3 +10,6 @@ dependencies = [
 
 [project.optional-dependencies]
 gpu = ["flash-attn>=2.6.3,<3"]
+
+[tool.uv]
+exclude-newer = "2025-10-23T12:36:00Z"

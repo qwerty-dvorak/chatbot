@@ -130,7 +130,7 @@ echo "Creating multimodal-embed template..."
 MM_TPL=$(create_template "rag-mm-embed-$TS" \
   --image "vllm/vllm-openai:latest" \
   --docker-entrypoint "/bin/bash" \
-  --docker-start-cmd "-c,exec python3 -m vllm.entrypoints.openai.api_server --model nvidia/nemotron-colembed-vl-8b-v2 --trust-remote-code --task embed --port 8000 --gpu-memory-utilization 0.90" \
+  --docker-start-cmd '-c,exec python3 -m vllm.entrypoints.openai.api_server --model nvidia/nemotron-colembed-vl-8b-v2 --trust-remote-code --runner pooling --port 8000 --gpu-memory-utilization 0.90 --max-model-len 8192 --limit-mm-per-prompt '"'"'{"image":1,"video":0}'"'"' --skip-mm-profiling' \
   --env "$HF_ENV_JSON" \
   --ports "8000/http" \
   --container-disk-in-gb 50)

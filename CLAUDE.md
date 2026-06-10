@@ -21,9 +21,21 @@ No model weights are fetched automatically. No cloud APIs are called. No interne
 - **No external model downloads** — all LLM / embedding / reranker calls go to local endpoints (real vLLM or mock servers).
 - **No Docker Compose** — services are started with plain `docker run` commands or native processes.
 - **Python images** always use `FROM ubuntu:24.04` as base; dependencies managed with `uv`.
+- **Reproducible uv resolution** — every `pyproject.toml` contains `[tool.uv]` with `exclude-newer = "2025-10-23T12:36:00Z"`.
 - **Milvus** is the vector store, started via `rag-pipeline/start-services.sh`.
 - **PostgreSQL 16** runs embedded inside the chatbot-service Docker image.
 - **Adding Python dependencies** — always use `uv add <package>` inside the relevant subdirectory (`chatbot-service/` or `rag-pipeline/`). Never edit `pyproject.toml` or `uv.lock` manually.
+
+## Docker source configuration
+
+All repository Dockerfiles use public Ubuntu and PyPI sources by default. The
+root helper discovers every Dockerfile and switches its marked base-image,
+Ubuntu apt, and Python package source blocks together:
+
+```bash
+bash configure-build-sources.sh revert  # BARC sources
+bash configure-build-sources.sh apply   # public sources
+```
 
 ## Port conventions
 
@@ -31,24 +43,3 @@ No model weights are fetched automatically. No cloud APIs are called. No interne
 |-------|-----------|-----------------|
 | 8080+ | `chatbot-service/` | Web app, file server, LLM inference, embedding APIs |
 | 8090+ | `rag-pipeline/` | Text embed, multimodal embed, reranker, RAG API |
-
-## Quick start
-
-```bash
-# 1. Clone models (requires git-lfs, ~24GB per model)
-cd rag-pipeline && bash clone_models.sh
-
-# 2. Start all services (Milvus + vLLM embedding/reranker servers + RAG API)
-cd rag-pipeline && bash start-services.sh
-
-# 3. Ingest documents (via API)
-curl -X POST http://localhost:8093/v1/ingest -F "files=@/path/to/doc.pdf"
-
-# 4. Search
-curl -X POST http://localhost:8093/v1/search \
-  -H "Content-Type: application/json" \
-  -d '{"query": "your question", "top_k": 5}'
-
-# 5. Start chatbot (separate services)
-cd chatbot-service && bash start-services.sh
-```

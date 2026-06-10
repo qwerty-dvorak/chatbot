@@ -1,144 +1,340 @@
-# RAG Pipeline — Architecture
+# RAG Pipeline Architecture
 
-## Overview
+## Goals
 
-The RAG pipeline is a standalone FastAPI service that provides document ingestion and semantic search. It is designed to run fully locally: all LLM, embedding, reranker, and OCR calls go to local vLLM endpoints.
+The service provides local document ingestion and retrieval without cloud
+APIs. Long-running ingestion is separated from request handling so uploads can
+return immediately, survive API restarts, and avoid concurrent BM25 writers.
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        FastAPI (port 8093)                       │
-│  POST /v1/ingest  │  POST /v1/search  │  POST /v1/promote       │
-└──────────┬──────────────────┬───────────────────┬───────────────┘
-           │                  │                   │
-    ┌──────▼──────┐    ┌──────▼──────┐    ┌──────▼──────┐
-    │  pipeline/  │    │  pipeline/  │    │  pipeline/  │
-    │  tiers.py   │    │  search.py  │    │  tiers.py   │
-    │  ingest.py  │    │  query.py   │    │ (promote)   │
-    └──────┬──────┘    └──────┬──────┘    └──────┬──────┘
-           │                  │                   │
-    ┌──────▼──────────────────▼───────────────────▼──────┐
-    │                  Pipeline Modules                    │
-    │  extract → ocr → chunk → embed → index → retrieve  │
-    └──────────────────────────┬──────────────────────────┘
-                               │
-          ┌────────────────────┼────────────────────┐
-          ▼                    ▼                    ▼
-    ┌───────────┐      ┌───────────────┐    ┌──────────────┐
-    │  Milvus   │      │ BM25 (pickle) │    │  vLLM pods   │
-    │  :19530   │      │ bm25_index.   │    │ embed/rerank │
-    │ text+img  │      │    pkl        │    │ /ocr/chat    │
-    └───────────┘      └───────────────┘    └──────────────┘
-```
+Primary constraints:
 
-## Module Map
+- Plain `docker run`; no Docker Compose.
+- Models and Milvus are local services.
+- One API process and one ingestion worker per deployment.
+- Durable uploads, job state, registry, and BM25 data under `data/`.
+- Search remains available while ingestion jobs run.
 
-| Module | Role |
-|--------|------|
-| `pipeline/config.py` | Global `Config` dataclass loaded from `.env` |
-| `pipeline/models.py` | Data classes: `RawDocument`, `Chunk`, `EmbeddedChunk`, `SearchResult`; enums: `IngestionTier`, `ChunkType`, `ContentType` |
-| `pipeline/extract.py` | File content extraction (text, PDF, image).  `extract()` renders PDFs as PNG; `extract_fast()` uses PyMuPDF text layer |
-| `pipeline/ocr.py` | PaddleOCR-VL-1.6 via vLLM — converts page images to text |
-| `pipeline/chunk.py` | Three chunking strategies: `recursive`, `sentence_window`, `hierarchical` |
-| `pipeline/embed.py` | Text embedding (`/v1/embeddings`) and multimodal embedding (`/pooling`) |
-| `pipeline/index.py` | Milvus collection management, BM25 index persistence |
-| `pipeline/retrieve.py` | Vector search, BM25 search, RRF hybrid fusion, reranker |
-| `pipeline/query.py` | Query enhancements: HyDE, sub-queries, stepback, hypothetical questions |
-| `pipeline/search.py` | End-to-end search orchestrator |
-| `pipeline/tiers.py` | Three-tier ingestion system + tier promotion |
-| `pipeline/ingest.py` | Legacy ingestion entry point (wraps tier system) |
-| `api.py` | FastAPI application |
-| `mock_server/server.py` | Five-port stdlib mock server for local dev/testing |
+## Runtime Topology
 
-## Data Flow
-
-### Ingestion
-
-```
-File
-  │
-  ▼ extract.py / extract_fast.py
-RawDocument {path, content_type, text, images[(bytes, "")], metadata}
-  │
-  ├─ (PDFs, slow/global tier) ──► ocr.py ──► page texts
-  │
-  ▼ chunk.py
-list[Chunk] {id, source_path, text, chunk_type, metadata, image_data?}
-  │
-  ├─ text chunks ──► embed.py (embed_text) ──► EmbeddedChunk
-  └─ image chunks ─► embed.py (embed_multimodal) ──► EmbeddedChunk
-  │
-  ▼ index.py
-Milvus (text_collection / image_collection) + BM25 pickle
+```text
+Client
+  |
+  | HTTP :8093
+  v
++----------------------------- rag-api container -----------------------------+
+|                                                                             |
+|  FastAPI request layer                                                      |
+|    POST /v1/ingest ------ persist files ------+                             |
+|    POST /v1/promote --------------------------+                             |
+|    GET  /v1/ingestions/{id}                  |                             |
+|    POST /v1/search ----------------------+    |                             |
+|                                           |    v                             |
+|                                           |  SQLite jobs.sqlite3             |
+|                                           |    queued/running/result/error   |
+|                                           |                                  |
+|                                           |  single worker thread            |
+|                                           |    claim oldest queued job       |
+|                                           |    extract -> OCR -> chunk       |
+|                                           |    augment -> embed -> index     |
+|                                           |                                  |
+|                                           +-------------------------+        |
++--------------------------------------------------------------------|--------+
+                                                                     |
+                 +--------------------+--------------------+----------+
+                 |                    |                    |
+                 v                    v                    v
+          model endpoints          Milvus           local data volume
+          chat/embed/OCR/           :19530           uploads/
+          reranker                                   jobs.sqlite3
+                                                     registry JSON
+                                                     BM25 pickle
 ```
 
-### Search
+The Docker image runs Uvicorn with `--workers 1`. Multiple Uvicorn processes
+would each start a worker thread and would weaken the intentional single-writer
+model. Horizontal API scaling requires extracting the worker into a separate
+process and adding a cross-process lease.
 
+## Request And Job Lifecycle
+
+### Upload
+
+1. FastAPI validates multipart fields.
+2. Each filename is reduced to its basename and de-duplicated within the
+   request.
+3. Files stream to
+   `INGESTION_DATA_DIR/uploads/<job-id>/`; the request does not buffer the
+   entire file in memory.
+4. A `queued` row is committed to SQLite only after all files are durable.
+5. The worker is notified.
+6. The API returns `202 Accepted` and a job status URL.
+
+If file persistence or job creation fails, the incomplete upload directory is
+removed and no runnable job remains.
+
+### Claim And Execution
+
+1. The worker opens `BEGIN IMMEDIATE`.
+2. It selects the oldest `queued` row.
+3. It updates that row to `running` and commits.
+4. It executes ingestion or promotion outside the SQLite transaction.
+5. It writes either `succeeded` plus JSON result or `failed` plus traceback.
+
+The worker handles one job at a time. This serializes:
+
+- ingestion registry updates;
+- BM25 read/rebuild/replace operations;
+- document promotion deletes followed by replacement indexing.
+
+Milvus can serve searches while inserts occur. BM25 persistence uses a
+temporary file plus `os.replace`, so search readers observe either the old
+complete index or the new complete index.
+
+### Restart Recovery
+
+SQLite and uploaded files are persisted on the data volume. During API startup:
+
+1. schema creation runs idempotently;
+2. jobs left in `running` state are moved back to `queued`;
+3. the worker starts and resumes oldest-first processing.
+
+This is at-least-once execution. A process can stop after a remote Milvus insert
+but before marking the job successful. Re-execution can therefore repeat work.
+Chunk IDs are generated per run, so strict exactly-once behavior would require
+stable document/chunk identifiers and transactional indexing across Milvus and
+the local job database.
+
+## Job Storage
+
+SQLite table `ingestion_jobs`:
+
+| Column | Purpose |
+|--------|---------|
+| `id` | UUID-like hexadecimal job identifier |
+| `kind` | `ingest` or `promote` |
+| `status` | Queue lifecycle state |
+| `payload_json` | Internal execution parameters and persisted path |
+| `filenames_json` | User-facing uploaded filenames |
+| `result_json` | Pipeline statistics and source paths |
+| `error` | Background exception traceback |
+| `created_at` | UTC ISO-8601 creation time |
+| `started_at` | Most recent claim time |
+| `completed_at` | Terminal transition time |
+
+SQLite uses WAL mode and a busy timeout. API reads, cancellation, and the
+worker claim operation can safely use separate connections.
+
+## Ingestion Pipeline
+
+```text
+persisted file
+  |
+  v
+extract.py
+  |-- text/Markdown/RST: decoded text
+  |-- PDF: pypdf text layer plus extractable embedded images
+  `-- image: raw bytes
+  |
+  +-- slow/global image bytes --> ocr.py --> OCR text
+  |
+  v
+RawDocument
+  |
+  v
+chunk.py
+  |-- recursive
+  |-- sentence_window
+  `-- hierarchical
+  |
+  +-- optional hypothetical questions via query.py
+  |
+  +-- text chunks  --> embed.py /v1/embeddings
+  `-- image chunks --> embed.py /pooling
+  |
+  v
+index.py
+  |-- rag_text_chunks in Milvus
+  |-- rag_image_chunks in Milvus
+  `-- atomic BM25 pickle replacement
 ```
-query string
-  │
-  ▼ query.py (enhance_query)
-[query, hyde_doc?, sub_q1?, sub_q2?, stepback?]
-  │
-  ├─ each enhanced query ──► embed.py ──► embedding
-  │                    └───► retrieve.py (vector/BM25/hybrid)
-  │
-  ▼ RRF fusion → deduplicate
-  │
-  ▼ rerank (optional)
-  │
-  ▼ parent-context fetch (CHILD chunks)
-  │
-list[SearchResult]
+
+PDF handling is intentionally described narrowly: the current extractor uses
+the existing PDF text layer and images exposed by `pypdf`. It does not render
+every PDF page at a configured DPI. `ocr_dpi` remains a tier policy value for a
+future page-rendering extractor but does not currently change pypdf output.
+
+Per-file failures are collected in the job result:
+
+```json
+{
+  "files_processed": 2,
+  "files_failed": 1,
+  "errors": [
+    {"file": "/app/data/.../broken.pdf", "error": "invalid PDF header"}
+  ]
+}
 ```
 
-## External Service Endpoints
+A job may therefore finish as `succeeded` with partial file errors. If every
+file fails, the worker marks the job `failed`.
 
-All services are started via `start-services.sh`.
+## Tier Policies
 
-| Service | Port | Endpoint | Model |
-|---------|------|----------|-------|
-| rag-text-embed | 8001 | `/v1/embeddings` | nvidia/llama-embed-nemotron-8b |
-| rag-multimodal-embed | 8002 | `/pooling` | nvidia/nemotron-colembed-vl-8b-v2 |
-| rag-reranker | 8003 | `/score` | Qwen3-VL-Reranker-2B |
-| rag-ocr | 8004 | `/v1/chat/completions` | PaddlePaddle/PaddleOCR-VL-1.6 |
-| rag-api | 8093 | `/v1/ingest`, `/v1/search` | — |
-| milvus-standalone | 19530 | gRPC | — |
+`pipeline/tiers.py` maps each `IngestionTier` to immutable options.
 
-In development, `mock_server/server.py` provides all five endpoints on ports 9000–9004 with deterministic fake responses.
+| Policy | Instant | Slow | Global |
+|--------|---------|------|--------|
+| Text extraction | yes | yes | yes |
+| OCR extracted images | no | yes | yes |
+| Text embedding | yes | yes | yes |
+| Image embedding | no | yes | yes |
+| Chunk strategy | recursive | sentence window | hierarchical |
+| Hypothetical questions | 0 | 2/chunk | 3/chunk |
+| Query enhancements | none | HyDE | HyDE, sub-query, stepback |
+| Reranker | off | on | on |
 
-## Milvus Schema
+Request form fields can override chunk strategy and hypothetical-question
+generation without mutating global configuration.
 
-Both `rag_text_chunks` and `rag_image_chunks` share the same schema:
+## Promotion
+
+Promotion is represented as a queue job, not an inline API operation:
+
+1. verify the persisted source exists;
+2. optionally delete source rows from both Milvus collections;
+3. remove matching source chunks from BM25 and atomically rebuild it;
+4. remove the source from the ingestion registry;
+5. ingest with the target tier;
+6. record deleted counts and new ingestion statistics.
+
+Deletion and replacement are not one transaction across Milvus and BM25. A
+promotion failure can temporarily leave a document absent or partially
+reindexed. A future version can use versioned document IDs and switch an active
+version only after replacement indexing completes.
+
+## Search Pipeline
+
+```text
+request query
+  |
+  +-- explicit enhancements, or tier defaults
+  v
+query.py: raw / HyDE / sub-queries / stepback
+  |
+  +-- text embedding
+  |
+  +-- vector search in Milvus
+  +-- lexical search in BM25
+  `-- hybrid weighted reciprocal-rank fusion
+  |
+  v
+deduplicate by chunk ID
+  |
+  +-- optional reranker /score
+  |
+  +-- best-effort parent context fetch
+  v
+SearchResponse
+```
+
+Enhancement selection is passed as a function argument. Request handlers do not
+mutate the global `cfg.query_enhancements`, avoiding cross-request leakage.
+
+## Milvus Collections
+
+Text and image embeddings use separate collections because their dimensions
+can differ.
 
 | Field | Type | Notes |
 |-------|------|-------|
-| `id` | VARCHAR(64) | Primary key — UUID4 hex |
-| `source_path` | VARCHAR(512) | Absolute path of the source file |
-| `text` | VARCHAR(65535) | Chunk text (OCR text for image chunks) |
-| `chunk_type` | VARCHAR(32) | `text`, `image`, `parent`, `child`, `sentence_window`, `summary` |
-| `parent_id` | VARCHAR(64) | Set for `child` and `sentence_window` chunks |
-| `window_text` | VARCHAR(65535) | Surrounding context (sentence_window strategy) |
-| `metadata_json` | VARCHAR(4096) | JSON blob: `ingestion_tier`, `image_index`, etc. |
-| `embedding` | FLOAT_VECTOR(dim) | 768-dim for text, 512-dim for image |
+| `id` | VARCHAR(64) | Chunk primary key |
+| `source_path` | VARCHAR(512) | Persisted upload path |
+| `text` | VARCHAR(65535) | Extracted, OCR, or generated text |
+| `chunk_type` | VARCHAR(32) | text/image/parent/child/window/summary |
+| `parent_id` | VARCHAR(64) | Parent context reference |
+| `window_text` | VARCHAR(65535) | Sentence window or fetched parent |
+| `metadata_json` | VARCHAR(4096) | Tier and source metadata |
+| `embedding` | FLOAT_VECTOR | Configured model dimension |
 
-Index: `IVF_FLAT` with `IP` (inner product) metric on the `embedding` field.
+The vector index is `IVF_FLAT` with inner-product distance.
 
-## BM25 Index
+## Module Ownership
 
-Stored as a pickle file at `cfg.bm25_index_path` (`./bm25_index.pkl` by default).
+| Module | Responsibility |
+|--------|----------------|
+| `api.py` | HTTP validation, upload persistence, job resources, search routes |
+| `pipeline/jobs.py` | SQLite repository and worker lifecycle |
+| `pipeline/tiers.py` | Tier policy, ingestion orchestration, promotion |
+| `pipeline/extract.py` | File-type extraction and instant-tier text-only PDF path |
+| `pipeline/ocr.py` | Concurrent calls to the local OCR endpoint |
+| `pipeline/chunk.py` | Chunking strategies |
+| `pipeline/embed.py` | Text and multimodal model adapters |
+| `pipeline/index.py` | Milvus schema/writes and atomic BM25 persistence |
+| `pipeline/query.py` | Query and index-time LLM enhancements |
+| `pipeline/retrieve.py` | Vector, BM25, hybrid fusion, reranking |
+| `pipeline/search.py` | End-to-end synchronous retrieval |
+| `mock_server/server.py` | Deterministic local model API substitutes |
 
-The pickle contains `{"bm25": BM25Okapi, "chunks": list[Chunk]}`.  Chunks are added
-incrementally; the index is rebuilt from scratch each time new documents are ingested.
+## Deployment And Persistence
 
-> **Note:** The BM25 index is not thread-safe for concurrent writes.  Concurrent ingest
-> calls may cause the second writer to overwrite the first's additions.  A file lock or
-> database-backed BM25 implementation is recommended for production multi-threaded use.
+The RAG API must mount `/app/data`:
 
-## Key Design Decisions
+```bash
+docker run -d \
+  --name rag-api \
+  --env-file .env \
+  -v "$PWD/data:/app/data" \
+  -p 8093:8093 \
+  rag-api
+```
 
-- **No Docker Compose** — services started with plain `docker run` (see `start-services.sh`).
-- **No external model downloads** — all models must be present locally before starting services.
-- **Two Milvus collections** — text (768-dim) and image (512-dim) are separate because the models have different output dimensions.
-- **Multimodal model is T/I, not T+I** — Qwen3VLNemotronEmbed supports text-only OR image-only inputs per request, never combined.  Image chunks use the image path; text chunks use the text path.
-- **RRF fusion** — weighted Reciprocal Rank Fusion (controlled by `HYBRID_ALPHA`) merges vector and BM25 results.  This avoids score-space normalization problems.
-- **Reranker on original query** — the reranker always scores against the original query, not the HyDE/enhanced variants, to avoid semantic drift.
+Recommended container values:
+
+```text
+BM25_INDEX_PATH=/app/data/bm25_index.pkl
+INGESTION_DATA_DIR=/app/data/ingestion
+```
+
+Do not run multiple `rag-api` containers against the same queue directory. The
+SQLite claim is safe, but each container also owns a worker and can execute
+different ingestion jobs concurrently, reintroducing shared-index races.
+
+## Mock Test Topology
+
+Two mock servers provide a complete offline test environment:
+
+### Mock AI Model Server (`mock_server/server.py`)
+
+Starts deterministic local substitutes for the 5 RunPod vLLM pods:
+
+| Port | Route | RunPod Equivalent |
+|------|-------|-------------------|
+| 9000 | `/v1/chat/completions` | Query and hypothetical-question LLM |
+| 9001 | `/v1/embeddings` | Text embeddings (nvidia/llama-embed-nemotron-8b) |
+| 9002 | `/pooling` | Multimodal embeddings (ColBERT-style pooling) |
+| 9003 | `/score` | Reranker (Qwen/Qwen3-VL-Reranker-2B) |
+| 9004 | `/v1/chat/completions` | OCR (PaddleOCR-VL) |
+
+All five servers run in a single Docker container using stdlib-only threading,
+matching the exact request/response shapes from `docs/runpod_api.md`.
+
+### Mock RAG API Server (`mock_rag/server.py`)
+
+Stdlib-only mock of the full RAG Pipeline API (`docs/api.md`):
+
+| Port | Route | Description |
+|------|-------|-------------|
+| 8093 | all RAG endpoints | Health, ingest, search, promote, collections |
+
+The mock RAG API simulates async ingestion with background threads, making it
+suitable for testing the full upload→poll→search flow without Milvus or any
+model endpoints.
+
+### Integration test
+
+`mock_server/test_integration.sh` starts both mock servers plus local Milvus;
+queues a text fixture; polls the job to completion; then verifies job listing,
+collections, hybrid search, vector search, and BM25 search.
+
+`start_mock_all.sh` starts all three services with a single command.
+`start_mock_all.sh --clean` tears everything down.

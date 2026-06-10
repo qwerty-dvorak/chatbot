@@ -31,13 +31,6 @@ def _text_client() -> openai.OpenAI:
     )
 
 
-def _multimodal_client() -> openai.OpenAI:
-    return openai.OpenAI(
-        base_url=cfg.multimodal_embedding_base_url,
-        api_key=cfg.multimodal_embedding_api_key,
-    )
-
-
 # ---------------------------------------------------------------------------
 # Multimodal helpers
 # ---------------------------------------------------------------------------
@@ -53,9 +46,37 @@ def _image_to_data_url(image_bytes: bytes) -> str:
     return f"data:{mime};base64,{b64}"
 
 
+def _pool_multimodal(input_payload) -> list[float]:
+    """Call the vLLM pooling API and mean-pool its token vectors."""
+    url = f"{cfg.multimodal_embedding_base_url.rstrip('/')}/pooling"
+    payload = {
+        "model": cfg.multimodal_embedding_model,
+        "input": input_payload,
+    }
+    resp = httpx.post(
+        url,
+        json=payload,
+        headers={"Authorization": f"Bearer {cfg.multimodal_embedding_api_key}"},
+        timeout=60,
+    )
+    resp.raise_for_status()
+
+    token_vectors = resp.json()["data"][0]["data"]
+    if not token_vectors:
+        raise ValueError("multimodal pooling response contained no vectors")
+
+    dimensions = {len(vector) for vector in token_vectors}
+    if len(dimensions) != 1:
+        raise ValueError("multimodal pooling response has inconsistent dimensions")
+
+    return [
+        sum(vector[dimension] for vector in token_vectors) / len(token_vectors)
+        for dimension in range(len(token_vectors[0]))
+    ]
+
+
 def _embed_multimodal_single(chunk: Chunk) -> list[float]:
-    """Embed a single image chunk via httpx POST to the multimodal endpoint."""
-    url = f"{cfg.multimodal_embedding_base_url.rstrip('/')}/embeddings"
+    """Embed one image chunk through the documented vLLM /pooling endpoint."""
 
     content = []
     if chunk.text:
@@ -72,19 +93,7 @@ def _embed_multimodal_single(chunk: Chunk) -> list[float]:
     else:
         input_payload = content
 
-    payload = {
-        "model": cfg.multimodal_embedding_model,
-        "input": input_payload,
-    }
-
-    resp = httpx.post(
-        url,
-        json=payload,
-        headers={"Authorization": f"Bearer {cfg.multimodal_embedding_api_key}"},
-        timeout=60,
-    )
-    resp.raise_for_status()
-    return resp.json()["data"][0]["embedding"]
+    return _pool_multimodal(input_payload)
 
 
 # ---------------------------------------------------------------------------
@@ -157,7 +166,6 @@ def embed_multimodal(chunks: list[Chunk], batch_size: int = 16) -> list[Embedded
     if not image_only:
         return []
 
-    multimodal_client = _multimodal_client()
     results: list[EmbeddedChunk] = []
 
     for chunk in image_only:
@@ -169,13 +177,7 @@ def embed_multimodal(chunks: list[Chunk], batch_size: int = 16) -> list[Embedded
                 chunk.id,
                 exc,
             )
-            # Fall back: embed just the text via the multimodal model
-            fallback_input = chunk.text or ""
-            response = multimodal_client.embeddings.create(
-                model=cfg.multimodal_embedding_model,
-                input=[fallback_input],
-            )
-            embedding = response.data[0].embedding
+            embedding = _pool_multimodal(chunk.text or "")
 
         results.append(
             EmbeddedChunk(

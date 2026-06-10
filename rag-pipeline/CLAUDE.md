@@ -64,7 +64,28 @@ pipeline/
   ingest.py                <- Ingestion orchestrator
   search.py                <- Search orchestrator
 mock_server/
-  server.py                <- 4-port stdlib-only mock server (for local dev/testing)
+  server.py                <- 5-port stdlib-only mock server
+  Dockerfile               <- minimal mock image
+  start.sh                 <- build/start the mock container
+  .env                     <- RAG API configuration for mock endpoints
+  test_integration.sh      <- mock + Milvus end-to-end test
+```
+
+## Local mock endpoints
+
+The mock routes match `docs/runpod_api.md`:
+
+| Port | Endpoint | Purpose |
+|------|----------|---------|
+| 9000 | `POST /v1/chat/completions` | General chat/query enhancement |
+| 9001 | `POST /v1/embeddings` | Text embedding |
+| 9002 | `POST /pooling` | Multimodal ColBERT-style pooling |
+| 9003 | `POST /score` | Reranking |
+| 9004 | `POST /v1/chat/completions` | PaddleOCR-VL |
+
+```bash
+bash mock_server/start.sh --build
+bash mock_server/test_integration.sh
 ```
 
 ## API endpoints
@@ -102,6 +123,8 @@ uv add <package>          # adds to pyproject.toml and updates uv.lock
 uv add "<package>>=1.2"   # with version constraint
 uv add --dev <package>    # dev-only dependency
 ```
+
+Keep `[tool.uv] exclude-newer = "2025-10-23T12:36:00Z"` in every uv project.
 
 ## Key environment variables
 

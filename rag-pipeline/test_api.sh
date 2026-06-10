@@ -29,7 +29,7 @@ echo "  Built $API_IMAGE"
 docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
 echo "Starting rag-api container (env from .env.runpod)..."
 # --network host: container shares host network stack so it can reach
-# localhost services (mock server ports 9000-9003, Milvus port 19530).
+# localhost services (mock server ports 9000-9004, Milvus port 19530).
 # The API binds to :8093 on the host directly; -p flag not needed.
 docker run -d \
   --name "$CONTAINER_NAME" \

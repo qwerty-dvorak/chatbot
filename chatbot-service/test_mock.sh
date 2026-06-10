@@ -24,12 +24,12 @@ trap cleanup_all EXIT
 
 # ── 1. Start mock server ────────────────────────────────────────────────────
 echo "=== Starting mock server ==="
-bash "$RAG_DIR/start-mock-server.sh" --build
+bash "$RAG_DIR/mock_server/start.sh" --build
 
 # ── 2. Start chatbot services (no gemma) ────────────────────────────────────
 echo ""
 echo "=== Starting chatbot services (no gemma) ==="
-# Override .env.mock with mock server URLs
+# Override the chatbot .env.mock values with RAG mock server URLs.
 export CHAT_BASE_URL="http://localhost:9000/v1"
 export EMBEDDING_BASE_URL="http://localhost:9001/v1"
 export RERANKER_BASE_URL="http://localhost:9003"

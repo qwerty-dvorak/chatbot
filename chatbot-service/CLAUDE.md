@@ -26,6 +26,11 @@ docker exec web uv run python manage.py rag_search "query string" --settings=con
 
 # Build standalone Docker image (PostgreSQL embedded)
 docker build -t chatbot . && docker run -p 8000:8000 chatbot
+
+# Toggle every repository Dockerfile between public and BARC sources
+cd ..
+bash configure-build-sources.sh apply
+bash configure-build-sources.sh revert
 ```
 
 ## Adding dependencies
@@ -38,6 +43,8 @@ uv add <package>          # adds to pyproject.toml and updates uv.lock
 uv add "<package>>=1.2"   # with version constraint
 uv add --dev <package>    # dev-only dependency
 ```
+
+Keep `[tool.uv] exclude-newer = "2025-10-23T12:36:00Z"` in every uv project.
 
 ## Architecture
 
@@ -77,3 +84,15 @@ POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_HOST, POSTGRES_PORT
 RAG_ENABLED, RAG_TOP_K, RAG_MIN_SIMILARITY
 TOOL_CALLS_ENABLED
 ```
+
+### RAG Pipeline Integration
+
+Document upload can be offloaded to the standalone RAG pipeline (`rag-pipeline/`):
+
+```
+RAG_API_ENABLED=true
+RAG_API_BASE_URL=http://localhost:8093
+```
+
+When enabled, `apps/knowledge/rag_client.py` handles ingest and search via the RAG API.
+Visibility maps to tier: `private` → instant, `shared` → slow, `global` → global tier.

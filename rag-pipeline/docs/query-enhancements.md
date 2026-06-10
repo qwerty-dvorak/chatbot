@@ -79,18 +79,16 @@ Not applied at search time.
 
 ## LLM Endpoints
 
-Enhancement LLM calls use one of two endpoints depending on tier:
+Enhancement LLM calls use the configured local chat endpoint:
 
 | Tier | LLM Used | Config |
 |------|---------|--------|
 | instant | — (no enhancements) | — |
 | slow | Default chat model | `CHAT_BASE_URL` / `CHAT_MODEL` |
-| global | Chatbot-service LLM | `CHATBOT_LLM_BASE_URL` / `CHATBOT_LLM_MODEL` |
+| global | Configured local chat model | `CHAT_BASE_URL` / `CHAT_MODEL` |
 
-The chatbot-service LLM (global tier) is typically the same powerful vLLM endpoint used
-by the Django chatbot.  It should be configured via `CHATBOT_LLM_BASE_URL` in the RAG
-pipeline's `.env`.  When `CHATBOT_LLM_BASE_URL` is not set, global-tier enhancements
-fall back to `CHAT_BASE_URL` gracefully.
+Configure the endpoint with `CHAT_BASE_URL`, `CHAT_API_KEY`, and `CHAT_MODEL` in
+the RAG pipeline environment. Instant-tier search makes no enhancement call.
 
 ## Configuring Enhancements
 
@@ -101,7 +99,7 @@ fall back to `CHAT_BASE_URL` gracefully.
 GLOBAL_OPTIONS = IngestOptions(
     ...
     query_enhancements=("hyde", "sub_queries", "stepback"),
-    use_chatbot_llm=True,
+    use_reranker=True,
 )
 ```
 

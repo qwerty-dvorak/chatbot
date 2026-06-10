@@ -115,15 +115,16 @@ echo " Phase 4: detecting embedding dimensions"
 echo "══════════════════════════════════════════════════"
 
 detect_dim() {
-  local url="$1" model="$2"
+  local url="$1" model="$2" endpoint="${3:-/v1/embeddings}"
   python3 - <<PYEOF 2>/dev/null || echo ""
 import urllib.request, json, sys
 payload = json.dumps({"model": "$model", "input": "test"}).encode()
-req = urllib.request.Request("$url/v1/embeddings",
+req = urllib.request.Request("$url$endpoint",
       data=payload, headers={"Content-Type": "application/json"}, method="POST")
 try:
     resp = json.loads(urllib.request.urlopen(req, timeout=30).read())
-    emb = resp["data"][0]["embedding"]
+    item = resp["data"][0]
+    emb = item.get("embedding") or item["data"][0]
     print(len(emb))
 except Exception as e:
     sys.exit(1)
@@ -133,8 +134,8 @@ PYEOF
 TEXT_DIM=$(detect_dim "$TEXT_URL" "nvidia/llama-embed-nemotron-8b")
 [[ -n "$TEXT_DIM" ]] && echo "  text-embed dim: $TEXT_DIM" || { TEXT_DIM=4096; echo "  text-embed dim: 4096 (fallback — verify manually)"; }
 
-MM_DIM=$(detect_dim "$MM_URL" "nvidia/nemotron-colembed-vl-8b-v2")
-[[ -n "$MM_DIM" ]] && echo "  mm-embed dim:   $MM_DIM" || { MM_DIM=128; echo "  mm-embed dim: 128 (fallback — verify manually)"; }
+MM_DIM=$(detect_dim "$MM_URL" "nvidia/nemotron-colembed-vl-8b-v2" "/pooling")
+[[ -n "$MM_DIM" ]] && echo "  mm-embed dim:   $MM_DIM" || { MM_DIM=4096; echo "  mm-embed dim: 4096 (fallback — verify manually)"; }
 
 # ── Write .env.runpod ─────────────────────────────────────────────────────────
 cat > "$ENV_FILE" <<EOF
@@ -154,7 +155,7 @@ TEXT_EMBEDDING_MODEL=nvidia/llama-embed-nemotron-8b
 TEXT_EMBEDDING_DIM=${TEXT_DIM}
 
 # Multimodal embedding — nvidia/nemotron-colembed-vl-8b-v2
-MULTIMODAL_EMBEDDING_BASE_URL=${MM_URL}/v1
+MULTIMODAL_EMBEDDING_BASE_URL=${MM_URL}
 MULTIMODAL_EMBEDDING_API_KEY=dummy
 MULTIMODAL_EMBEDDING_MODEL=nvidia/nemotron-colembed-vl-8b-v2
 MULTIMODAL_EMBEDDING_DIM=${MM_DIM}

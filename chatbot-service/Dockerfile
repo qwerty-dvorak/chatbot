@@ -1,14 +1,16 @@
+# BEGIN BARC BASE IMAGE
 FROM ubuntu:24.04
+# END BARC BASE IMAGE
 
 ARG DEBIAN_FRONTEND=noninteractive
 
-# BARC-specific: Clear out default public repositories
+# BEGIN BARC APT SOURCES
 # RUN rm -f /etc/apt/sources.list.d/*.sources /etc/apt/sources.list
-
-# BARC-specific: Overwrite sources.list with local BARC repository
+#
 # RUN echo "deb http://osrepo.barc.gov.in/ubuntu/ noble main restricted universe multiverse\n\
 # deb http://osrepo.barc.gov.in/ubuntu/ noble-updates main restricted universe multiverse\n\
 # deb http://osrepo.barc.gov.in/ubuntu/ noble-security main restricted universe multiverse" > /etc/apt/sources.list
+# END BARC APT SOURCES
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -23,9 +25,10 @@ ENV POSTGRES_DB=chatbot \
     PYTHONUNBUFFERED=1 \
     UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy
-# BARC-specific: UV index URL and insecure host
-#    UV_INDEX_URL=http://osrepo.barc.gov.in/python-pypi/simple \
-#    UV_INSECURE_HOST=osrepo.barc.gov.in
+
+# BEGIN BARC UV ENV
+# BARC uv mirror variables are disabled in public mode.
+# END BARC UV ENV
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
@@ -38,8 +41,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-venv \
     libpq-dev \
     postgresql-16 \
-    && rm -rf /var/lib/apt/lists/* \
-    && pip install --no-cache-dir --break-system-packages uv
+    && rm -rf /var/lib/apt/lists/*
+
+# BEGIN BARC UV INSTALL
+RUN pip install --no-cache-dir --break-system-packages uv
+# END BARC UV INSTALL
 
 # Drop the auto-created cluster; the entrypoint manages PGDATA at runtime
 RUN pg_dropcluster 16 main --stop 2>/dev/null || true && \
@@ -49,7 +55,9 @@ RUN pg_dropcluster 16 main --stop 2>/dev/null || true && \
 WORKDIR /app
 
 COPY pyproject.toml uv.lock README.md ./
-RUN uv sync --frozen --no-dev
+# BEGIN BARC UV SYNC
+RUN uv sync --upgrade --no-dev
+# END BARC UV SYNC
 
 COPY . /app/
 

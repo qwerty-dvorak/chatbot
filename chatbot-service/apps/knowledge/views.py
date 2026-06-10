@@ -15,6 +15,7 @@ from django.views.generic import DetailView, ListView
 from apps.ingestion.models import IngestionJob
 
 from .models import Document, DocumentChunk, KnowledgeSource
+from .rag_client import rag_client
 
 ALLOWED_MIME = {
     "application/pdf",
@@ -86,6 +87,9 @@ class DocumentUploadView(LoginRequiredMixin, View):
     def post(self, request):
         title = request.POST.get("title", "").strip()
         uploaded_file = request.FILES.get("file")
+        visibility = request.POST.get("visibility", request.GET.get("visibility", "private"))
+        if visibility not in ("private", "shared", "global"):
+            visibility = "private"
 
         if not uploaded_file:
             return render(request, self.template_name,
@@ -110,8 +114,13 @@ class DocumentUploadView(LoginRequiredMixin, View):
         source, _ = KnowledgeSource.objects.get_or_create(
             owner=request.user,
             name=f"Uploads – {request.user.email}",
-            defaults={"source_type": "upload", "visibility": "private"},
+            defaults={"source_type": "upload", "visibility": visibility},
         )
+        if source.visibility != visibility:
+            source.visibility = visibility
+            source.save(update_fields=["visibility"])
+
+        rag_tier = "global" if visibility == "global" else "slow" if visibility == "shared" else "instant"
         doc = Document.objects.create(
             source=source,
             owner=request.user,
@@ -122,9 +131,23 @@ class DocumentUploadView(LoginRequiredMixin, View):
             sha256=sha256,
             status=Document.Status.PENDING,
         )
-        IngestionJob.objects.create(document=doc)
 
-        messages.success(request, f"'{title}' uploaded — processing started.")
+        if rag_client.is_enabled():
+            full_path = os.path.join(settings.MEDIA_ROOT, "docs", rel_path)
+            job = rag_client.ingest(full_path, tier=rag_tier)
+            if job:
+                doc.metadata["rag_job_id"] = job.get("id")
+                doc.metadata["rag_api_url"] = rag_client.base_url
+                doc.save(update_fields=["metadata"])
+                msg = f"'{title}' uploaded — RAG API processing started (tier={rag_tier})."
+            else:
+                msg = f"'{title}' uploaded — RAG API unavailable, local ingestion queued."
+                IngestionJob.objects.create(document=doc)
+        else:
+            IngestionJob.objects.create(document=doc)
+            msg = f"'{title}' uploaded — processing started."
+
+        messages.success(request, msg)
         return redirect("knowledge:list")
 
 

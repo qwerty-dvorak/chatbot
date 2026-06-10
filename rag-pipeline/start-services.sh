@@ -192,7 +192,7 @@ docker run -d \
   -e EMBEDDING_BASE_URL="http://rag-text-embed:8000/v1" \
   -e EMBEDDING_API_KEY="dummy" \
   -e TEXT_EMBEDDING_MODEL="/model" \
-  -e MULTIMODAL_EMBEDDING_BASE_URL="http://rag-multimodal-embed:8000/v1" \
+  -e MULTIMODAL_EMBEDDING_BASE_URL="http://rag-multimodal-embed:8000" \
   -e MULTIMODAL_EMBEDDING_API_KEY="dummy" \
   -e MULTIMODAL_EMBEDDING_MODEL="/model" \
   -e RERANKER_BASE_URL="http://rag-reranker:8000" \
@@ -212,6 +212,6 @@ echo "All services started."
 echo ""
 echo "  Milvus          -> localhost:$MILVUS_PORT"
 echo "  Text Embedding  -> http://localhost:$TEXT_EMBED_PORT/v1"
-echo "  Multimodal Emb  -> http://localhost:$MULTIMODAL_PORT/v1"
+echo "  Multimodal Emb  -> http://localhost:$MULTIMODAL_PORT/pooling"
 echo "  Reranker        -> http://localhost:$RERANKER_PORT"
 echo "  RAG API         -> http://localhost:$API_PORT  (docs: /docs)"
