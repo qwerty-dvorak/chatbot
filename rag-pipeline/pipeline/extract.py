@@ -96,6 +96,29 @@ def _extract_pdf(path: Path) -> RawDocument:
     )
 
 
+def _extract_pdf_text_only(path: Path) -> RawDocument:
+    """Extract a PDF text layer without enumerating embedded images."""
+    reader = pypdf.PdfReader(str(path))
+    pages_text: list[str] = []
+    for page in reader.pages:
+        try:
+            pages_text.append(page.extract_text() or "")
+        except Exception:
+            pages_text.append("")
+    return RawDocument(
+        path=str(path),
+        content_type=ContentType.PDF,
+        text="\n\n".join(pages_text),
+        images=[],
+        metadata={
+            "filename": path.name,
+            "extension": path.suffix.lower(),
+            "size_bytes": path.stat().st_size,
+            "page_count": len(reader.pages),
+        },
+    )
+
+
 def _extract_image(path: Path) -> RawDocument:
     """Read an image file as raw bytes; no text extraction."""
     raw_bytes = path.read_bytes()
@@ -134,3 +157,11 @@ def extract(path: str) -> RawDocument:
 
     # Unknown extension — fall back to plain-text extraction
     return _extract_text(p)
+
+
+def extract_fast(path: str) -> RawDocument:
+    """Extract text without PDF image enumeration for latency-sensitive ingestion."""
+    p = Path(path)
+    if p.suffix.lower() == ".pdf":
+        return _extract_pdf_text_only(p)
+    return extract(path)

@@ -67,6 +67,19 @@ class RagApiClient:
             logger.error("RAG API ingest failed: %s", exc)
             return None
 
+    def get_job(self, job_id: str) -> dict | None:
+        """Fetch current job status from the RAG API (single request, no polling)."""
+        try:
+            resp = requests.get(
+                f"{self.base_url}/v1/ingestions/{job_id}",
+                timeout=10,
+            )
+            resp.raise_for_status()
+            return resp.json()
+        except requests.RequestException as exc:
+            logger.warning("RAG API get_job failed: %s", exc)
+            return None
+
     def poll_job(self, job_id: str, max_retries: int = 120, interval: float = 1.0) -> dict | None:
         """Poll a job until completion or failure."""
         for _ in range(max_retries):

@@ -183,7 +183,7 @@ def hypothetical_questions_for_chunk(chunk_text: str, n: int | None = None) -> l
 # Public entry point
 # ---------------------------------------------------------------------------
 
-def enhance_query(query: str) -> list[str]:
+def enhance_query(query: str, enhancements: str | list[str] | None = None) -> list[str]:
     """Apply all enabled query enhancements from ``cfg.query_enhancements``.
 
     ``cfg.query_enhancements`` is a comma-separated string of strategy names.
@@ -207,7 +207,11 @@ def enhance_query(query: str) -> list[str]:
     Returns:
         A deduplicated list of query strings to use for retrieval.
     """
-    enabled = {s.strip() for s in cfg.query_enhancements.split(",") if s.strip()}
+    configured = cfg.query_enhancements if enhancements is None else enhancements
+    if isinstance(configured, str):
+        enabled = {s.strip() for s in configured.split(",") if s.strip()}
+    else:
+        enabled = {s.strip() for s in configured if s.strip()}
 
     collected: list[str] = []
 

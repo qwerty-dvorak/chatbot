@@ -41,16 +41,16 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import tempfile
 import uuid
-from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from tqdm import tqdm
 
 from .config import cfg
 from .models import IngestionTier, Chunk, ChunkType, EmbeddedChunk, RawDocument
-from .extract import extract, extract_fast, _extract_pdf_at_dpi
+from .extract import extract, extract_fast
 from .ocr import ocr_pages
 from .chunk import chunk as chunk_doc
 from .embed import embed_text, embed_multimodal
@@ -58,7 +58,6 @@ from .index import (
     connect_milvus,
     index_chunks,
     build_bm25_index,
-    save_bm25_index,
     load_bm25_index,
     delete_chunks_by_source,
 )
@@ -97,8 +96,6 @@ class IngestOptions:
     # List of enhancement names: "hyde", "sub_queries", "stepback".
     query_enhancements: tuple[str, ...]
     use_reranker: bool
-    # Use cfg.chatbot_llm_* for HyDE/sub-queries (global tier only).
-    use_chatbot_llm: bool
 
 
 # ---------------------------------------------------------------------------
@@ -116,7 +113,6 @@ INSTANT_OPTIONS = IngestOptions(
     hypothetical_questions_per_chunk=0,
     query_enhancements=(),            # no enhancements — raw query only
     use_reranker=False,               # skip reranker for speed
-    use_chatbot_llm=False,
 )
 
 SLOW_OPTIONS = IngestOptions(
@@ -129,7 +125,6 @@ SLOW_OPTIONS = IngestOptions(
     hypothetical_questions_per_chunk=2,
     query_enhancements=("hyde",),
     use_reranker=True,
-    use_chatbot_llm=False,
 )
 
 GLOBAL_OPTIONS = IngestOptions(
@@ -142,7 +137,6 @@ GLOBAL_OPTIONS = IngestOptions(
     hypothetical_questions_per_chunk=3,
     query_enhancements=("hyde", "sub_queries", "stepback"),
     use_reranker=True,
-    use_chatbot_llm=True,             # use chatbot-service LLM for richer enhancements
 )
 
 _TIER_MAP: dict[IngestionTier, IngestOptions] = {
@@ -204,9 +198,21 @@ def _load_registry() -> dict:
 
 def _save_registry(registry: dict) -> None:
     path = _registry_path()
-    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-    with open(path, "w") as f:
-        json.dump(registry, f, indent=2)
+    directory = os.path.dirname(os.path.abspath(path))
+    os.makedirs(directory, exist_ok=True)
+    fd, temporary_path = tempfile.mkstemp(prefix=".registry-", dir=directory)
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(registry, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temporary_path, path)
+    except Exception:
+        try:
+            os.unlink(temporary_path)
+        except FileNotFoundError:
+            pass
+        raise
 
 
 def _registry_key(file_path: Path) -> str:
@@ -225,22 +231,20 @@ def _ingest_file(file_path: Path, opts: IngestOptions) -> tuple[int, int, list[C
     bm25_text_chunks are the text-only chunks to append to the BM25 index.
     """
     # --- Extract ---
-    if opts.extract_pdf_text_directly and file_path.suffix.lower() == ".pdf":
-        doc: RawDocument = extract_fast(str(file_path))
-    elif not opts.extract_pdf_text_directly and opts.ocr_dpi != cfg.ocr_pdf_dpi and file_path.suffix.lower() == ".pdf":
-        doc = _extract_pdf_at_dpi(file_path, opts.ocr_dpi)
-    else:
-        doc = extract(str(file_path))
+    doc: RawDocument = (
+        extract_fast(str(file_path))
+        if opts.extract_pdf_text_directly
+        else extract(str(file_path))
+    )
 
-    page_images = [img for img, _ in doc.images] if doc.images else []
+    page_images = doc.images
     image_chunks_for_mm: list[Chunk] = []
 
     if page_images and not opts.extract_pdf_text_directly:
-        # OCR all pages concurrently
         ocr_texts = ocr_pages(page_images)
 
-        # Backfill OCR text into doc
-        doc_text = "\n\n".join(t for t in ocr_texts if t)
+        ocr_text = "\n\n".join(t for t in ocr_texts if t)
+        doc_text = ocr_text or doc.text
         doc = RawDocument(
             path=doc.path,
             content_type=doc.content_type,
@@ -250,7 +254,7 @@ def _ingest_file(file_path: Path, opts: IngestOptions) -> tuple[int, int, list[C
         )
 
         if opts.use_multimodal_embedding:
-            for i, (img_bytes, _) in enumerate(page_images):
+            for i, img_bytes in enumerate(page_images):
                 if not img_bytes:
                     continue
                 image_chunks_for_mm.append(Chunk(
@@ -321,6 +325,8 @@ def ingest_tier(
     path: str,
     tier: IngestionTier = IngestionTier.SLOW,
     skip_duplicates: bool = True,
+    strategy: str | None = None,
+    hypothetical_questions: bool | None = None,
 ) -> dict:
     """Ingest one file or directory at a given tier.
 
@@ -341,6 +347,21 @@ def ingest_tier(
     """
     connect_milvus()
     opts = options_for_tier(tier)
+    if strategy is not None:
+        valid_strategies = {"recursive", "sentence_window", "hierarchical"}
+        if strategy not in valid_strategies:
+            raise ValueError(
+                f"Unknown chunk strategy {strategy!r}. "
+                f"Valid values: {', '.join(sorted(valid_strategies))}"
+            )
+        opts = replace(opts, chunk_strategy=strategy)
+    if hypothetical_questions is not None:
+        question_count = (
+            max(opts.hypothetical_questions_per_chunk, cfg.hypothetical_questions_per_chunk)
+            if hypothetical_questions
+            else 0
+        )
+        opts = replace(opts, hypothetical_questions_per_chunk=question_count)
 
     root = Path(path)
     if root.is_dir():
@@ -357,6 +378,7 @@ def ingest_tier(
     total_chunks = 0
     total_embeddings = 0
     all_text_chunks_for_bm25: list[Chunk] = []
+    errors: list[dict[str, str]] = []
 
     for file_path in tqdm(file_paths, desc=f"Ingesting [{tier.value}]", unit="file"):
         try:
@@ -388,6 +410,7 @@ def ingest_tier(
 
         except Exception as exc:  # noqa: BLE001
             print(f"[ingest_tier] ERROR processing {file_path}: {exc}")
+            errors.append({"file": str(file_path), "error": str(exc)})
             continue
 
     # --- BM25 rebuild ---
@@ -402,9 +425,11 @@ def ingest_tier(
     return {
         "tier": tier.value,
         "files_processed": files_processed,
+        "files_failed": len(errors),
         "files_skipped_duplicate": files_skipped,
         "chunks_created": total_chunks,
         "embeddings_indexed": total_embeddings,
+        "errors": errors,
     }
 
 
@@ -449,6 +474,18 @@ def promote_document(
     if delete_old_chunks:
         deleted_text  = delete_chunks_by_source(source_path, cfg.text_collection)
         deleted_image = delete_chunks_by_source(source_path, cfg.image_collection)
+        try:
+            _, chunks = load_bm25_index()
+        except FileNotFoundError:
+            chunks = []
+        retained_chunks = [chunk for chunk in chunks if chunk.source_path != source_path]
+        if retained_chunks:
+            build_bm25_index(retained_chunks)
+        else:
+            try:
+                os.unlink(cfg.bm25_index_path)
+            except FileNotFoundError:
+                pass
 
     # Remove registry entry so ingest_tier does not skip as duplicate
     registry = _load_registry()

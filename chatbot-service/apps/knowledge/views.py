@@ -75,6 +75,15 @@ class DocumentDetailView(LoginRequiredMixin, DetailView):
             .order_by("-created_at")
             .first()
         )
+        rag_job_id = self.object.metadata.get("rag_job_id")
+        if rag_job_id and rag_client.is_enabled():
+            rag_result = rag_client.get_job(rag_job_id)
+            if rag_result:
+                rag_status = rag_result.get("status", "")
+                context["rag_job"] = rag_result
+                if rag_status == "succeeded" and self.object.status == "pending":
+                    self.object.status = "ready"
+                    self.object.save(update_fields=["status"])
         return context
 
 
@@ -133,7 +142,8 @@ class DocumentUploadView(LoginRequiredMixin, View):
         )
 
         if rag_client.is_enabled():
-            full_path = os.path.join(settings.MEDIA_ROOT, "docs", rel_path)
+            docs_root = getattr(settings, "DOCS_ROOT", os.path.join(settings.MEDIA_ROOT, "docs"))
+            full_path = os.path.join(docs_root, rel_path)
             job = rag_client.ingest(full_path, tier=rag_tier)
             if job:
                 doc.metadata["rag_job_id"] = job.get("id")

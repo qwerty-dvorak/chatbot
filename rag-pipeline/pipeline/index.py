@@ -1,6 +1,7 @@
 import json
 import os
 import pickle
+import tempfile
 
 from pymilvus import MilvusClient, DataType
 from rank_bm25 import BM25Okapi
@@ -39,7 +40,17 @@ def _ensure_collection(name: str, dim: int) -> None:
       embedding      FLOAT_VECTOR(dim)
     """
     client = get_client()
+    index_params = client.prepare_index_params()
+    index_params.add_index(
+        field_name="embedding",
+        index_type="IVF_FLAT",
+        metric_type="IP",
+        params={"nlist": 128},
+    )
+
     if client.has_collection(name):
+        if "embedding" not in client.list_indexes(name):
+            client.create_index(collection_name=name, index_params=index_params)
         client.load_collection(name)
         return
 
@@ -53,15 +64,8 @@ def _ensure_collection(name: str, dim: int) -> None:
     schema.add_field("metadata_json", DataType.VARCHAR,      max_length=4096)
     schema.add_field("embedding",     DataType.FLOAT_VECTOR, dim=dim)
 
-    index_params = client.prepare_index_params()
-    index_params.add_index(
-        field_name="embedding",
-        index_type="IVF_FLAT",
-        metric_type="IP",
-        params={"nlist": 128},
-    )
-
-    client.create_collection(collection_name=name, schema=schema, index_params=index_params)
+    client.create_collection(collection_name=name, schema=schema)
+    client.create_index(collection_name=name, index_params=index_params)
     client.load_collection(name)
 
 
@@ -104,6 +108,21 @@ def index_chunks(embedded: list[EmbeddedChunk]) -> None:
     if image_chunks:
         _ensure_collection(cfg.image_collection, cfg.multimodal_embedding_dim)
         _insert_batch(image_chunks, cfg.image_collection)
+
+
+def delete_chunks_by_source(source_path: str, collection_name: str) -> int:
+    """Delete all chunks for a source path and return Milvus' delete count."""
+    client = get_client()
+    if not client.has_collection(collection_name):
+        return 0
+    escaped = source_path.replace("\\", "\\\\").replace('"', '\\"')
+    result = client.delete(
+        collection_name=collection_name,
+        filter=f'source_path == "{escaped}"',
+    )
+    if isinstance(result, dict):
+        return int(result.get("delete_count", 0))
+    return 0
 
 
 def _chunk_from_hit(hit: dict) -> Chunk:
@@ -152,8 +171,20 @@ def load_bm25_index() -> tuple[BM25Okapi, list[Chunk]]:
 
 
 def save_bm25_index(bm25: BM25Okapi, chunks: list[Chunk]) -> None:
-    """Persist BM25 index + chunks to cfg.bm25_index_path."""
+    """Persist BM25 index atomically so concurrent readers never see a partial file."""
     path = cfg.bm25_index_path
-    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-    with open(path, "wb") as f:
-        pickle.dump({"bm25": bm25, "chunks": chunks}, f)
+    directory = os.path.dirname(os.path.abspath(path))
+    os.makedirs(directory, exist_ok=True)
+    fd, temporary_path = tempfile.mkstemp(prefix=".bm25-", dir=directory)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            pickle.dump({"bm25": bm25, "chunks": chunks}, f)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temporary_path, path)
+    except Exception:
+        try:
+            os.unlink(temporary_path)
+        except FileNotFoundError:
+            pass
+        raise

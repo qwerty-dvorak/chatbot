@@ -42,7 +42,11 @@ class Config:
     image_collection: str = field(default_factory=lambda: os.getenv("IMAGE_COLLECTION", "rag_image_chunks"))
 
     # BM25
-    bm25_index_path: str = field(default_factory=lambda: os.getenv("BM25_INDEX_PATH", "./bm25_index.pkl"))
+    bm25_index_path: str = field(default_factory=lambda: os.getenv("BM25_INDEX_PATH", "./data/bm25_index.pkl"))
+
+    # Durable ingestion queue
+    ingestion_data_dir: str = field(default_factory=lambda: os.getenv("INGESTION_DATA_DIR", "./data/ingestion"))
+    ingestion_poll_interval: float = field(default_factory=lambda: float(os.getenv("INGESTION_POLL_INTERVAL", "0.5")))
 
     # Chunking
     chunk_strategy: str = field(default_factory=lambda: os.getenv("CHUNK_STRATEGY", "recursive"))
@@ -68,6 +72,10 @@ class Config:
             raise ValueError(f"MULTIMODAL_EMBEDDING_DIM must be positive, got {self.multimodal_embedding_dim}")
         if self.ocr_pdf_dpi <= 0:
             raise ValueError(f"OCR_PDF_DPI must be positive, got {self.ocr_pdf_dpi}")
+        if self.ingestion_poll_interval <= 0:
+            raise ValueError(
+                f"INGESTION_POLL_INTERVAL must be positive, got {self.ingestion_poll_interval}"
+            )
         if self.chunk_size <= 0:
             raise ValueError(f"CHUNK_SIZE must be positive, got {self.chunk_size}")
         if self.chunk_overlap < 0:

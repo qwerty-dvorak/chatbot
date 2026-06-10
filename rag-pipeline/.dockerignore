@@ -1,0 +1,9 @@
+*
+!Dockerfile
+!pyproject.toml
+!uv.lock
+!api.py
+!ingest.py
+!search.py
+!pipeline/
+!pipeline/**

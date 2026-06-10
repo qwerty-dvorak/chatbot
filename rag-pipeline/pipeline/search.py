@@ -26,6 +26,7 @@ def search(
     top_k: int | None = None,
     use_reranker: bool = True,
     retrieval_mode: str = "hybrid",
+    enhancements: str | list[str] | None = None,
 ) -> list[SearchResult]:
     """Full search pipeline.
 
@@ -66,7 +67,11 @@ def search(
     effective_top_k = top_k if top_k is not None else cfg.rerank_top_k
     retrieval_k = cfg.retrieval_top_k
 
-    enhanced_queries = enhance_query(query)
+    mode = retrieval_mode.lower()
+    if mode not in {"vector", "bm25", "hybrid"}:
+        raise ValueError("retrieval_mode must be one of: vector, bm25, hybrid")
+
+    enhanced_queries = enhance_query(query, enhancements=enhancements)
 
     # ------------------------------------------------------------------
     # Per-query retrieval
@@ -86,7 +91,6 @@ def search(
             continue
         embedding = embedded[0].embedding
 
-        mode = retrieval_mode.lower()
         if mode == "vector":
             results = vector_search(embedding, retrieval_k)
         elif mode == "bm25":
@@ -117,7 +121,7 @@ def search(
 
     # Re-assign ranks after deduplication.
     for i, sr in enumerate(deduped):
-        sr.rank = i + 1
+        sr.rank = i
 
     # ------------------------------------------------------------------
     # Optional reranking (uses original query, not enhanced variants)
@@ -183,7 +187,7 @@ def format_results(results: list[SearchResult]) -> str:
 
         lines.append(separator)
         lines.append(
-            f"[{sr.rank}] score={sr.score:.4f}  method={sr.retrieval_method}"
+            f"[{sr.rank + 1}] score={sr.score:.4f}  method={sr.retrieval_method}"
         )
         lines.append(f"    source: {chunk.source_path}")
         lines.append(f"    type:   {chunk.chunk_type.value}")

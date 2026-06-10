@@ -12,11 +12,12 @@ bash clone_models.sh
 bash start-services.sh
 bash start-services.sh --clean   # tear down and restart
 
-# 3. Ingest documents via API
+# 3. Queue documents for ingestion and poll the returned job URL
 curl -X POST http://localhost:8093/v1/ingest -F "files=@document.pdf"
 curl -X POST http://localhost:8093/v1/ingest \
   -F "files=@report.pdf" -F "files=@notes.md" \
-  -F "strategy=sentence_window"
+  -F "tier=slow" -F "strategy=sentence_window"
+curl http://localhost:8093/v1/ingestions/<job-id>
 
 # 4. Search via API
 curl -X POST http://localhost:8093/v1/search \
@@ -45,7 +46,7 @@ See `TESTING.md` for full details, manual curl examples, and troubleshooting.
 | rag-text-embed | 8090 | vllm/vllm-openai:latest | nvidia/llama-embed-nemotron-8b text embeddings |
 | rag-multimodal-embed | 8091 | vllm/vllm-openai:latest | nvidia/nemotron-colembed-vl-8b-v2 multimodal embeddings |
 | rag-reranker | 8092 | vllm/vllm-openai:latest | Qwen3-VL-Reranker-2B scoring via /score endpoint |
-| rag-api | 8093 | rag-api (ubuntu:24.04) | FastAPI ingestion + search service |
+| rag-api | 8093 | rag-api (ubuntu:24.04) | FastAPI, durable SQLite queue, ingestion worker, search |
 | milvus-standalone | 19530 | milvusdb/milvus:latest | Vector store |
 
 ## Architecture
@@ -62,6 +63,8 @@ pipeline/
   retrieve.py              <- Vector search, BM25 search, RRF hybrid fusion, reranker
   query.py                 <- Query enhancement (HyDE, sub-queries, stepback, hypothetical Qs)
   ingest.py                <- Ingestion orchestrator
+  jobs.py                  <- SQLite job store + single background worker
+  tiers.py                 <- Tier policies and promotion
   search.py                <- Search orchestrator
 mock_server/
   server.py                <- 5-port stdlib-only mock server
@@ -73,7 +76,11 @@ mock_server/
 
 ## Local mock endpoints
 
-The mock routes match `docs/runpod_api.md`:
+Two mock servers provide a complete offline test environment:
+
+### Mock AI Model Server (`mock_server/`)
+
+Matches `docs/runpod_api.md` API shapes:
 
 | Port | Endpoint | Purpose |
 |------|----------|---------|
@@ -83,16 +90,41 @@ The mock routes match `docs/runpod_api.md`:
 | 9003 | `POST /score` | Reranking |
 | 9004 | `POST /v1/chat/completions` | PaddleOCR-VL |
 
+### Mock RAG API Server (`mock_rag/`)
+
+Matches `docs/api.md` — all RAG pipeline endpoints on port 8093:
+
+| Endpoint | Description |
+|----------|-------------|
+| `POST /v1/ingest` | File upload with async ingestion |
+| `GET /v1/ingestions` | List jobs |
+| `GET /v1/ingestions/{id}` | Poll job |
+| `POST /v1/search` | Search |
+| `POST /v1/promote` | Tier promotion |
+| `GET /health` | Health checks |
+| `GET /v1/collections` | List collections |
+
 ```bash
-bash mock_server/start.sh --build
+# Start all mock services (no GPUs, no downloads)
+bash start_mock_all.sh
+
+# Run integration tests
 bash mock_server/test_integration.sh
+bash mock_rag/test.sh
+
+# Tear down
+bash start_mock_all.sh --clean
 ```
 
 ## API endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/v1/ingest` | Ingest one or more files (multipart form) |
+| `POST` | `/v1/ingest` | Persist uploads and queue ingestion (`202`) |
+| `GET` | `/v1/ingestions` | List ingestion and promotion jobs |
+| `GET` | `/v1/ingestions/{id}` | Read job status/result |
+| `DELETE` | `/v1/ingestions/{id}` | Cancel a queued job |
+| `POST` | `/v1/promote` | Queue re-ingestion at a higher tier |
 | `POST` | `/v1/search` | Search with optional mode and enhancements |
 | `GET` | `/docs` | Interactive API documentation (Swagger UI) |
 

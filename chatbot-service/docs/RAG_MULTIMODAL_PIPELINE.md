@@ -185,13 +185,29 @@ If vector retrieval returns poor results:
 
 Each LLM call should receive context in this order:
 
-1. System prompt.
+1. System prompt (with auto-injected RAG evidence).
 2. User profile and memory summary.
 3. Latest chat compaction summary.
 4. Recent chat turns.
-5. RAG evidence with citations.
+5. RAG evidence with citations (auto-injected via `ContextBuilder._search_rag()`).
 6. Available tool schemas.
 7. Current user message.
+
+The context builder `apps/chat/context.py` now **auto-injects RAG context** for every chat message:
+
+```python
+def _search_rag(self, query: str) -> str | None:
+    if rag_client.is_enabled():
+        results = rag_client.search(query, top_k=5)
+    else:
+        results = self._local_search(query)
+    # Formats as: [filename] (relevance: 0.95) content snippet...
+```
+
+When `RAG_API_ENABLED=true`, search calls the standalone RAG Pipeline API (`/v1/search`),
+which returns actual uploaded document content with filenames. This enables the LLM to
+reference and cite specific documents in its answers. Fallback uses text-level `icontains`
+search on local `DocumentChunk` records.
 
 The context builder should enforce a token budget:
 

@@ -1,58 +1,95 @@
-import os
-import io
-import uuid
-import tempfile
 import shutil
-from pathlib import Path
+import uuid
 from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import Literal
 
-from fastapi import FastAPI, File, UploadFile, HTTPException, Query as QueryParam
-from fastapi.responses import JSONResponse, RedirectResponse
-from pydantic import BaseModel
 import aiofiles
+from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile, status
+from fastapi.responses import RedirectResponse
+from pydantic import BaseModel, Field
 
 from pipeline.config import cfg
-from pipeline.ingest import ingest_path
-from pipeline.search import search, format_results
 from pipeline.index import connect_milvus, get_client
+from pipeline.jobs import IngestionWorker, JobStore, TERMINAL_STATUSES
+from pipeline.models import IngestionTier
+from pipeline.search import search
+from pipeline.tiers import (
+    ingest_tier,
+    options_for_tier,
+    promote_document,
+    tier_from_str,
+)
 
 
-# ---------------------------------------------------------------------------
-# Lifespan
-# ---------------------------------------------------------------------------
+job_store = JobStore(cfg.ingestion_data_dir)
+
+
+def _execute_job(job: dict) -> dict:
+    payload = job["payload"]
+    if job["kind"] == "ingest":
+        result = ingest_tier(
+            payload["path"],
+            tier=tier_from_str(payload["tier"]),
+            strategy=payload.get("strategy"),
+            hypothetical_questions=payload.get("hypothetical_questions"),
+        )
+        result["source_paths"] = [
+            str(path.resolve())
+            for path in sorted(Path(payload["path"]).iterdir())
+            if path.is_file()
+        ]
+        if result["files_failed"] and result["files_processed"] == 0:
+            messages = "; ".join(item["error"] for item in result["errors"])
+            raise RuntimeError(f"All uploaded files failed ingestion: {messages}")
+        return result
+    if job["kind"] == "promote":
+        return promote_document(
+            payload["source_path"],
+            to_tier=tier_from_str(payload["to_tier"]),
+            delete_old_chunks=payload["delete_old_chunks"],
+        )
+    raise ValueError(f"Unsupported job kind: {job['kind']}")
+
+
+ingestion_worker = IngestionWorker(
+    job_store,
+    handler=_execute_job,
+    poll_interval=cfg.ingestion_poll_interval,
+)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    job_store.initialize()
+    ingestion_worker.start()
     try:
         connect_milvus()
     except Exception as exc:
         print(f"[api] WARNING: Could not connect to Milvus on startup: {exc}")
-        print("[api] Service will start anyway; each pipeline call also connects.")
+        print("[api] Service will start; readiness reports the connection failure.")
     yield
+    ingestion_worker.stop()
 
-
-# ---------------------------------------------------------------------------
-# App
-# ---------------------------------------------------------------------------
 
 app = FastAPI(
     title="RAG Pipeline API",
-    description="Document ingestion and retrieval service",
-    version="1.0.0",
+    description=(
+        "Local document ingestion and retrieval service. Ingestion is durable, "
+        "queued, and processed by a single background worker."
+    ),
+    version="2.0.0",
     lifespan=lifespan,
 )
 
 
-# ---------------------------------------------------------------------------
-# Pydantic models
-# ---------------------------------------------------------------------------
-
 class SearchRequest(BaseModel):
-    query: str
-    top_k: int = 5
-    mode: str = "hybrid"          # hybrid | vector | bm25
-    use_reranker: bool = True
-    enhancements: str | None = None  # comma-sep overrides QUERY_ENHANCEMENTS
+    query: str = Field(min_length=1)
+    top_k: int = Field(default=5, ge=1, le=100)
+    mode: Literal["hybrid", "vector", "bm25"] = "hybrid"
+    use_reranker: bool | None = None
+    tier: IngestionTier | None = None
+    enhancements: str | None = None
 
 
 class SearchResponse(BaseModel):
@@ -61,76 +98,211 @@ class SearchResponse(BaseModel):
     total: int
 
 
-# ---------------------------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------------------------
+class PromotionRequest(BaseModel):
+    source_path: str = Field(min_length=1)
+    to_tier: IngestionTier
+    delete_old_chunks: bool = True
+
+
+def _public_job(job: dict) -> dict:
+    payload = job["payload"]
+    request = {key: value for key, value in payload.items() if key != "path"}
+    response = {
+        "id": job["id"],
+        "kind": job["kind"],
+        "status": job["status"],
+        "files": job["filenames"],
+        "request": request,
+        "result": job["result"],
+        "error": job["error"],
+        "created_at": job["created_at"],
+        "started_at": job["started_at"],
+        "completed_at": job["completed_at"],
+        "links": {
+            "self": f"/v1/ingestions/{job['id']}",
+            "collection": "/v1/ingestions",
+        },
+    }
+    return response
+
+
+def _get_job_or_404(job_id: str) -> dict:
+    job = job_store.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"Ingestion job {job_id!r} not found")
+    return job
+
+
+def _safe_upload_name(filename: str | None, used: set[str]) -> str:
+    candidate = Path(filename or "upload").name
+    if candidate in {"", ".", ".."}:
+        candidate = "upload"
+    original = candidate
+    counter = 2
+    while candidate in used:
+        path = Path(original)
+        candidate = f"{path.stem}-{counter}{path.suffix}"
+        counter += 1
+    used.add(candidate)
+    return candidate
+
+
+@app.get("/health/live")
+async def liveness():
+    return {"status": "ok"}
+
+
+@app.get("/health/ready")
+async def readiness():
+    try:
+        collections = get_client().list_collections()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Milvus unavailable: {exc}")
+    return {
+        "status": "ready",
+        "worker_running": ingestion_worker.running,
+        "queue": job_store.counts(),
+        "collections": len(collections),
+    }
+
 
 @app.get("/health")
 async def health():
-    """Return service health and Milvus connection info."""
-    return {"status": "ok", "milvus_host": cfg.milvus_host, "milvus_port": cfg.milvus_port}
+    return {
+        "status": "ok",
+        "milvus_host": cfg.milvus_host,
+        "milvus_port": cfg.milvus_port,
+        "worker_running": ingestion_worker.running,
+        "queue": job_store.counts(),
+    }
 
 
 @app.get("/")
 async def root():
-    """Redirect to interactive API docs."""
     return RedirectResponse(url="/docs")
 
 
-@app.post("/v1/ingest")
-async def ingest(
+@app.post("/v1/ingest", status_code=status.HTTP_202_ACCEPTED)
+async def enqueue_ingestion(
     files: list[UploadFile] = File(...),
-    strategy: str = QueryParam("recursive"),
-    hypothetical_questions: bool = QueryParam(False),
+    tier: IngestionTier = Form(IngestionTier.SLOW),
+    strategy: Literal["recursive", "sentence_window", "hierarchical"] | None = Form(None),
+    hypothetical_questions: bool | None = Form(None),
 ):
-    """Upload and ingest one or more files into the RAG index."""
-    tmpdir = tempfile.mkdtemp()
+    """Persist uploaded files and enqueue a long-running ingestion job."""
+    if not files:
+        raise HTTPException(status_code=422, detail="At least one file is required")
+
+    job_id = uuid.uuid4().hex
+    upload_dir = job_store.upload_dir / job_id
+    upload_dir.mkdir(parents=True, exist_ok=False)
+    filenames: list[str] = []
+    used_names: set[str] = set()
+
     try:
-        filenames = []
         for upload in files:
-            filename = upload.filename or f"upload_{uuid.uuid4().hex}"
-            dest = Path(tmpdir) / filename
-            # Use aiofiles for async write
-            content = await upload.read()
-            async with aiofiles.open(dest, "wb") as f:
-                await f.write(content)
+            filename = _safe_upload_name(upload.filename, used_names)
+            destination = upload_dir / filename
+            async with aiofiles.open(destination, "wb") as output:
+                while chunk := await upload.read(1024 * 1024):
+                    await output.write(chunk)
+            await upload.close()
             filenames.append(filename)
 
-        stats = ingest_path(
-            tmpdir,
-            strategy=strategy,
-            add_hypothetical_questions=hypothetical_questions,
+        job = job_store.create(
+            kind="ingest",
+            payload={
+                "path": str(upload_dir),
+                "tier": tier.value,
+                "strategy": strategy,
+                "hypothetical_questions": hypothetical_questions,
+            },
+            filenames=filenames,
+            job_id=job_id,
         )
-        return {"status": "ok", "files": filenames, "stats": stats}
+        ingestion_worker.notify()
+        return _public_job(job)
+    except Exception:
+        shutil.rmtree(upload_dir, ignore_errors=True)
+        raise
 
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
 
-    finally:
-        shutil.rmtree(tmpdir, ignore_errors=True)
+@app.post("/v1/promote", status_code=status.HTTP_202_ACCEPTED)
+async def enqueue_promotion(body: PromotionRequest):
+    source = Path(body.source_path)
+    if not source.is_file():
+        raise HTTPException(
+            status_code=404,
+            detail=f"Source file not found: {body.source_path!r}",
+        )
+    job = job_store.create(
+        kind="promote",
+        payload={
+            "source_path": str(source.resolve()),
+            "to_tier": body.to_tier.value,
+            "delete_old_chunks": body.delete_old_chunks,
+        },
+        filenames=[source.name],
+    )
+    ingestion_worker.notify()
+    return _public_job(job)
+
+
+@app.get("/v1/ingestions")
+async def list_ingestions(
+    job_status: Literal["queued", "running", "succeeded", "failed", "cancelled"] | None = Query(
+        default=None,
+        alias="status",
+    ),
+    limit: int = Query(default=50, ge=1, le=200),
+):
+    jobs = job_store.list(status=job_status, limit=limit)
+    return {"jobs": [_public_job(job) for job in jobs], "total": len(jobs)}
+
+
+@app.get("/v1/ingestions/{job_id}")
+async def get_ingestion(job_id: str):
+    return _public_job(_get_job_or_404(job_id))
+
+
+@app.delete("/v1/ingestions/{job_id}")
+async def cancel_ingestion(job_id: str):
+    job = _get_job_or_404(job_id)
+    if job["status"] in TERMINAL_STATUSES:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Job is already {job['status']} and cannot be cancelled",
+        )
+    if job["status"] == "running":
+        raise HTTPException(
+            status_code=409,
+            detail="Running ingestion cannot be interrupted safely",
+        )
+    job_store.cancel(job_id)
+    return _public_job(_get_job_or_404(job_id))
 
 
 @app.post("/v1/search", response_model=SearchResponse)
 async def search_endpoint(body: SearchRequest):
-    """Search the RAG index with optional query enhancements."""
     try:
-        # Temporarily override query enhancements if the caller specified them.
-        original_enhancements = cfg.query_enhancements
-        if body.enhancements is not None:
-            cfg.query_enhancements = body.enhancements
+        enhancements = body.enhancements
+        use_reranker = body.use_reranker
+        if body.tier is not None:
+            options = options_for_tier(body.tier)
+            if enhancements is None:
+                enhancements = ",".join(options.query_enhancements)
+            if use_reranker is None:
+                use_reranker = options.use_reranker
+        if use_reranker is None:
+            use_reranker = True
 
-        try:
-            results = search(
-                body.query,
-                top_k=body.top_k,
-                use_reranker=body.use_reranker,
-                retrieval_mode=body.mode,
-            )
-        finally:
-            # Always restore, even if search() raises.
-            if body.enhancements is not None:
-                cfg.query_enhancements = original_enhancements
-
+        results = search(
+            body.query,
+            top_k=body.top_k,
+            use_reranker=use_reranker,
+            retrieval_mode=body.mode,
+            enhancements=enhancements,
+        )
         formatted = [
             {
                 "rank": result.rank + 1,
@@ -144,29 +316,25 @@ async def search_endpoint(body: SearchRequest):
             }
             for result in results
         ]
-
         return SearchResponse(query=body.query, results=formatted, total=len(formatted))
-
-    except HTTPException:
-        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.get("/v1/collections")
 async def list_collections():
-    """List all Milvus collections."""
     try:
         return get_client().list_collections()
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.delete("/v1/collections/{name}")
 async def drop_collection(name: str):
-    """Drop a Milvus collection by name."""
     try:
         get_client().drop_collection(name)
         return {"dropped": name}
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc)) from exc

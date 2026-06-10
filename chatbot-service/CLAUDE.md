@@ -96,3 +96,26 @@ RAG_API_BASE_URL=http://localhost:8093
 
 When enabled, `apps/knowledge/rag_client.py` handles ingest and search via the RAG API.
 Visibility maps to tier: `private` → instant, `shared` → slow, `global` → global tier.
+
+**Auto RAG context injection** (`apps/chat/context.py`): every chat message triggers a RAG search.
+Results are injected into the system prompt so the LLM always has relevant knowledge context.
+When `RAG_API_ENABLED=true`, search goes to the RAG Pipeline API (`/v1/search`) which returns
+actual document content with filenames. Fallback is a local `icontains` search on `DocumentChunk`.
+
+### Mock Stack (no GPU required)
+
+```bash
+# 1. Start all RAG pipeline mock services
+cd ../rag-pipeline && bash start_mock_all.sh
+
+# 2. Start chatbot service (builds image, starts mock server + postgres + web + worker)
+cd ../chatbot-service && bash start-services-no-gemma.sh
+
+# Creates:
+#   chatbot-mock-server  — chat (9000), embed (9001), reranker (9003) on chatbot_net
+#   postgres             — port 5433
+#   file-server          — port 8888
+#   web                  — port 8080
+#   worker               — ingestion worker
+# Uses real Milvus (test containers) + mock model servers for full end-to-end testing.
+```

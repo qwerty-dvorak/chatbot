@@ -68,7 +68,10 @@ def bm25_search(query: str, top_k: int | None = None) -> list[SearchResult]:
     if top_k is None:
         top_k = cfg.retrieval_top_k
 
-    bm25, chunks = load_bm25_index()
+    try:
+        bm25, chunks = load_bm25_index()
+    except FileNotFoundError:
+        return []
     tokenized_query = query.lower().split()
     scores = bm25.get_scores(tokenized_query)
 
@@ -91,7 +94,9 @@ def bm25_search(query: str, top_k: int | None = None) -> list[SearchResult]:
 
 
 def _rrf_fusion(
-    results_lists: list[list[SearchResult]], k: int = 60
+    results_lists: list[list[SearchResult]],
+    weights: list[float] | None = None,
+    k: int = 60,
 ) -> list[SearchResult]:
     """Reciprocal Rank Fusion across multiple ranked result lists.
 
@@ -102,11 +107,16 @@ def _rrf_fusion(
     rrf_scores: dict[str, float] = defaultdict(float)
     chunks_by_id: dict[str, Chunk] = {}
 
-    for result_list in results_lists:
+    if weights is None:
+        weights = [1.0] * len(results_lists)
+    if len(weights) != len(results_lists):
+        raise ValueError("weights must have the same length as results_lists")
+
+    for result_list, weight in zip(results_lists, weights):
         for result in result_list:
             chunk_id = result.chunk.id
             # rank is 0-based; RRF formula uses 1-based rank.
-            rrf_scores[chunk_id] += 1.0 / (k + result.rank + 1)
+            rrf_scores[chunk_id] += weight / (k + result.rank + 1)
             if chunk_id not in chunks_by_id:
                 chunks_by_id[chunk_id] = result.chunk
 
@@ -143,7 +153,10 @@ def hybrid_search(
     vector_results = vector_search(query_embedding, top_k=top_k)
     bm25_results = bm25_search(query, top_k=top_k)
 
-    fused = _rrf_fusion([vector_results, bm25_results])
+    fused = _rrf_fusion(
+        [vector_results, bm25_results],
+        weights=[cfg.hybrid_alpha, 1.0 - cfg.hybrid_alpha],
+    )
 
     # Trim to requested top_k.
     return fused[:top_k]

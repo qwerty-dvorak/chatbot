@@ -74,7 +74,8 @@ def _public_job(job: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 def _parse_multipart(content_type: str, body: bytes) -> dict[str, list]:
-    """Parse multipart/form-data body. Returns {field_name: [values]}."""
+    """Parse multipart/form-data body. Returns {field_name: [values]}.
+    For file fields, each value is a dict {"data": bytes, "filename": str | None}."""
     boundary = None
     for part in content_type.split(";"):
         part = part.strip()
@@ -106,13 +107,21 @@ def _parse_multipart(content_type: str, body: bytes) -> dict[str, list]:
             if hline_str.lower().startswith("content-disposition"):
                 content_disposition = hline_str
 
-        m = re.search(r'name="([^"]*)"', content_disposition)
-        if m:
-            name = m.group(1)
+        fm = re.search(r'name="([^"]*)"', content_disposition)
+        if fm:
+            name = fm.group(1)
+        ff = re.search(r'filename="([^"]*)"', content_disposition)
+        if ff:
+            filename = ff.group(1)
+
         if name:
             if name not in result:
                 result[name] = []
-            result[name].append(data)
+            # If there's a filename, store as dict to preserve the name
+            if filename is not None:
+                result[name].append({"data": data, "filename": filename})
+            else:
+                result[name].append(data)
 
     return result
 
@@ -150,29 +159,42 @@ class MockRagHandler(BaseHTTPRequestHandler):
             return
 
         form = _parse_multipart(ctype, body)
-        raw_files = form.get("file", [])
+        raw_files = form.get("files", form.get("file", []))
         if not raw_files:
             self._send_json({"error": "At least one file is required"}, 422)
             return
 
-        tier_bytes = form.get("tier", [b"slow"])[0]
-        strategy_bytes = form.get("strategy", [None])[0]
-        hypothetical_bytes = form.get("hypothetical_questions", [None])[0]
+        def _first_val(key: str, default: str = "slow") -> str:
+            vals = form.get(key, [])
+            if not vals:
+                return default
+            v = vals[0]
+            if isinstance(v, dict):
+                return (v.get("data") or b"").decode() if isinstance(v.get("data"), bytes) else default
+            if isinstance(v, bytes):
+                return v.decode()
+            return str(v)
 
-        tier = tier_bytes.decode() if isinstance(tier_bytes, bytes) else "slow"
-        strategy = strategy_bytes.decode() if isinstance(strategy_bytes, bytes) else None
-        hypothetical = hypothetical_bytes.decode() if isinstance(hypothetical_bytes, bytes) else None
+        tier = _first_val("tier", "slow")
+        strategy = _first_val("strategy", "")
+        hypothetical = _first_val("hypothetical_questions", "")
 
         job_id = _make_job_id()
         job_dir = UPLOAD_DIR / job_id
         job_dir.mkdir(parents=True, exist_ok=True)
         filenames = []
 
-        for i, data in enumerate(raw_files):
-            if isinstance(data, bytes):
+        for i, entry in enumerate(raw_files):
+            if isinstance(entry, dict):
+                file_data = entry.get("data", b"")
+                filename = entry.get("filename") or f"upload_{i}"
+            elif isinstance(entry, bytes):
+                file_data = entry
                 filename = f"upload_{i}"
-                (job_dir / filename).write_bytes(data)
-                filenames.append(filename)
+            else:
+                continue
+            (job_dir / filename).write_bytes(file_data if isinstance(file_data, bytes) else str(file_data).encode())
+            filenames.append(filename)
 
         payload = {"path": str(job_dir), "tier": tier}
         if strategy:
@@ -190,11 +212,11 @@ class MockRagHandler(BaseHTTPRequestHandler):
             JOBS[job_id] = job
 
         def _complete():
-            time.sleep(0.5)
+            time.sleep(5.0)
             with JOBS_LOCK:
                 JOBS[job_id]["status"] = "running"
                 JOBS[job_id]["started_at"] = _now()
-            time.sleep(0.5)
+            time.sleep(5.0)
             with JOBS_LOCK:
                 JOBS[job_id]["status"] = "succeeded"
                 JOBS[job_id]["completed_at"] = _now()
@@ -270,11 +292,11 @@ class MockRagHandler(BaseHTTPRequestHandler):
                 JOBS[job_id] = job
 
             def _complete():
-                time.sleep(0.3)
+                time.sleep(5.0)
                 with JOBS_LOCK:
                     JOBS[job_id]["status"] = "running"
                     JOBS[job_id]["started_at"] = _now()
-                time.sleep(0.3)
+                time.sleep(5.0)
                 with JOBS_LOCK:
                     JOBS[job_id]["status"] = "succeeded"
                     JOBS[job_id]["completed_at"] = _now()
@@ -292,21 +314,53 @@ class MockRagHandler(BaseHTTPRequestHandler):
 
         elif path == "/v1/search":
             body = self._read_body()
-            query = body.get("query", "")
+            query = body.get("query", "").lower()
             top_k = body.get("top_k", 5)
             mode = body.get("mode", "hybrid")
+
             results = []
-            for i in range(min(top_k, 3)):
+            uploaded_files = sorted(UPLOAD_DIR.glob("**/*"))
+            for fpath in uploaded_files:
+                if not fpath.is_file():
+                    continue
+                try:
+                    text = fpath.read_text(encoding="utf-8", errors="replace")
+                except Exception:
+                    continue
+                if query and query not in text.lower():
+                    continue
                 results.append({
-                    "rank": i + 1,
-                    "score": round(0.95 - i * 0.1, 2),
+                    "rank": len(results) + 1,
+                    "score": round(0.95 - len(results) * 0.05, 2),
                     "method": "reranked" if mode == "hybrid" else mode,
-                    "source": "/app/data/ingestion/uploads/mock-job/sample.txt",
+                    "source": str(fpath),
                     "chunk_type": "child",
-                    "text": f"Mock result {i+1} for: {query[:50]}...",
+                    "text": text[:500],
                     "has_image": False,
-                    "metadata": {"filename": "sample.txt", "ingestion_tier": "slow"},
+                    "metadata": {"filename": fpath.name, "ingestion_tier": "instant"},
                 })
+                if len(results) >= top_k:
+                    break
+
+            if not results:
+                for fpath in uploaded_files[:3]:
+                    if not fpath.is_file():
+                        continue
+                    try:
+                        text = fpath.read_text(encoding="utf-8", errors="replace")
+                    except Exception:
+                        continue
+                    results.append({
+                        "rank": len(results) + 1,
+                        "score": 0.5,
+                        "method": mode,
+                        "source": str(fpath),
+                        "chunk_type": "child",
+                        "text": text[:500],
+                        "has_image": False,
+                        "metadata": {"filename": fpath.name, "ingestion_tier": "instant"},
+                    })
+
             self._send_json({"query": query, "results": results, "total": len(results)})
         else:
             self._send_json({"error": "not found"}, 404)

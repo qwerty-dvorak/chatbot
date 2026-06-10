@@ -5,11 +5,7 @@ FROM ubuntu:24.04
 ARG DEBIAN_FRONTEND=noninteractive
 
 # BEGIN BARC APT SOURCES
-# RUN rm -f /etc/apt/sources.list.d/*.sources /etc/apt/sources.list
-#
-# RUN echo "deb http://osrepo.barc.gov.in/ubuntu/ noble main restricted universe multiverse\n\
-# deb http://osrepo.barc.gov.in/ubuntu/ noble-updates main restricted universe multiverse\n\
-# deb http://osrepo.barc.gov.in/ubuntu/ noble-security main restricted universe multiverse" > /etc/apt/sources.list
+# Public Ubuntu sources from the base image remain enabled.
 # END BARC APT SOURCES
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -27,7 +23,7 @@ ENV POSTGRES_DB=chatbot \
     UV_LINK_MODE=copy
 
 # BEGIN BARC UV ENV
-# BARC uv mirror variables are disabled in public mode.
+# Public PyPI is used.
 # END BARC UV ENV
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -56,7 +52,7 @@ WORKDIR /app
 
 COPY pyproject.toml uv.lock README.md ./
 # BEGIN BARC UV SYNC
-RUN uv sync --upgrade --no-dev
+RUN uv sync --frozen --no-dev
 # END BARC UV SYNC
 
 COPY . /app/

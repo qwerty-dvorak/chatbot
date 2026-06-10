@@ -131,9 +131,28 @@ Initial built-in tools:
 4. Chunker creates normalized text chunks.
 5. Embedding generator creates vectors (text: llama-embed-nemotron-8b, multimodal: nemotron-colembed-vl-8b-v2).
 6. Chunks are stored in Milvus with their vectors and metadata.
-7. Queries embed the user question and rank chunks by vector similarity in Milvus.
-8. Reranker (Qwen3-VL-Reranker-2B) optionally re-ranks top results.
-9. Full text search is used as fallback or hybrid boost.
+7. **Every chat message triggers automatic RAG search.** The `ContextBuilder` calls `rag_client.search()` (RAG Pipeline API) or falls back to local `DocumentChunk` text search, then injects results into the system prompt via `RAG_CONTEXT_PROMPT`.
+8. Queries embed the user question and rank chunks by vector similarity in Milvus.
+9. Reranker (Qwen3-VL-Reranker-2B) optionally re-ranks top results.
+10. Full text search is used as fallback or hybrid boost.
+
+#### RAG Context Injection
+
+```python
+# apps/chat/context.py — auto-injected for every user message
+def _search_rag(self, query: str) -> str | None:
+    if rag_client.is_enabled():
+        results = rag_client.search(query, top_k=5)
+    else:
+        results = self._local_search(query)
+    # Results are formatted as:
+    # [filename] (relevance: 0.95) Actual document content...
+    # and appended to the system prompt
+```
+
+When the RAG Pipeline API is enabled (`RAG_API_ENABLED=true`), search goes to the external RAG API (`/v1/search`). Otherwise it falls back to a text-level `icontains` search on `DocumentChunk.content`.
+
+Results include the source filename, relevance score, and a snippet of document content — enabling the LLM to cite actual documents in its responses.
 
 ### Chat Compaction
 

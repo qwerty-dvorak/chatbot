@@ -1,0 +1,10 @@
+Local RAG Pipeline Integration Fixture
+
+The ingestion service stores uploaded documents in a durable queue. A background
+worker extracts text, creates chunks, requests local embeddings, and writes both
+Milvus and BM25 indexes.
+
+Hybrid retrieval combines semantic vector search with lexical BM25 search using
+reciprocal rank fusion. An optional local reranker can reorder the final results.
+
+This fixture contains key updates and announcements for deterministic mock tests.

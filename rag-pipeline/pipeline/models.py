@@ -5,10 +5,17 @@ from typing import Optional
 
 class ChunkType(str, Enum):
     TEXT = "text"
+    IMAGE = "image"
     PARENT = "parent"
     CHILD = "child"
     SENTENCE_WINDOW = "sentence_window"
     SUMMARY = "summary"
+
+
+class IngestionTier(str, Enum):
+    INSTANT = "instant"
+    SLOW = "slow"
+    GLOBAL = "global"
 
 
 class ContentType(str, Enum):
