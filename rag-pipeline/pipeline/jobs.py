@@ -40,6 +40,7 @@ class JobStore:
                     filenames_json TEXT NOT NULL,
                     result_json TEXT,
                     error TEXT,
+                    steps_json TEXT,
                     created_at TEXT NOT NULL,
                     started_at TEXT,
                     completed_at TEXT
@@ -158,6 +159,13 @@ class JobStore:
             counts[row["status"]] = row["count"]
         return counts
 
+    def update_steps(self, job_id: str, steps: list[dict]) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                "UPDATE ingestion_jobs SET steps_json = ? WHERE id = ?",
+                (json.dumps(steps), job_id),
+            )
+
     def _finish(
         self,
         job_id: str,
@@ -195,6 +203,8 @@ class JobStore:
         job["filenames"] = json.loads(job.pop("filenames_json"))
         result_json = job.pop("result_json")
         job["result"] = json.loads(result_json) if result_json else None
+        steps_json = job.pop("steps_json")
+        job["steps"] = json.loads(steps_json) if steps_json else None
         return job
 
 
