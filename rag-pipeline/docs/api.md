@@ -234,16 +234,56 @@ indexing the new representation.
 
 ### `POST /v1/search`
 
-Search remains synchronous because it is expected to be short-lived.
+Search remains synchronous because it is expected to be short-lived. All
+features (HyDE, sub-queries, stepback, hierarchical index, reranker) are
+**on by default** — send the simplest possible request for maximum quality.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `query` | string | required | Non-empty search query |
 | `top_k` | int | `5` | Result count, from 1 to 100 |
 | `mode` | enum | `hybrid` | `hybrid`, `vector`, or `bm25` |
-| `tier` | enum/null | null | Applies tier search defaults |
-| `use_reranker` | bool/null | null | Explicit override; otherwise tier/default behavior |
-| `enhancements` | string/null | null | Comma-separated `hyde`, `sub_queries`, `stepback`; overrides tier |
+| `use_reranker` | bool | `true` | Cross-encoder reranker on merged results |
+| `hierarchical` | bool | `true` | Two-stage coarse-to-fine search |
+| `hyde` | bool | `true` | Generate hypothetical answer documents |
+| `sub_queries` | bool | `true` | Decompose complex queries into sub-questions |
+| `stepback` | bool | `true` | Abstract query to broader foundational question |
+| `tier` | enum | `null` | Apply tier defaults (overrides individual flags) |
+| `enhancements` | string | `null` | Comma-separated override: `hyde,sub_queries,stepback` |
+
+**Flag resolution order** (later wins):
+1. Individual flags (`hyde`, `sub_queries`, `stepback`) — all `true` by default
+2. `tier` — if set, replaces individual flags with tier's predefined set
+3. `enhancements` string — if set, replaces everything above
+
+Disable specific features by passing `false`:
+
+```bash
+# Everything on (default — just omit flags)
+curl -X POST http://localhost:8093/v1/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "self-attention complexity"}'
+
+# Only hyde, no sub-queries or stepback
+curl -X POST http://localhost:8093/v1/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "...", "sub_queries": false, "stepback": false}'
+
+# Only vector search, no enhancements, no reranker, no hierarchical
+curl -X POST http://localhost:8093/v1/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "...", "mode": "vector", "hyde": false}'
+
+# Use tier defaults
+curl -X POST http://localhost:8093/v1/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "...", "tier": "global"}'
+
+# explicit enhancements string overrides everything
+curl -X POST http://localhost:8093/v1/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "...", "enhancements": "hyde,stepback"}'
+```
 
 Tier search defaults:
 
@@ -267,14 +307,22 @@ curl -X POST http://localhost:8093/v1/search \
   -d '{
     "query": "How does self-attention scale?",
     "top_k": 5,
-    "mode": "hybrid",
-    "tier": "global"
+    "mode": "hybrid"
   }'
 ```
 
 ```json
 {
   "query": "How does self-attention scale?",
+  "enhanced_queries": [
+    "The self-attention mechanism has a computational complexity that scales quadratically with the input sequence length...",
+    "How does the computational cost of self-attention grow with sequence length?",
+    "What are the fundamental complexity classes and scaling rules for attention mechanisms in transformer architectures?",
+    "How does self-attention scale?"
+  ],
+  "retrieval_mode": "hybrid",
+  "use_reranker": true,
+  "hierarchical": true,
   "results": [
     {
       "rank": 1,
@@ -293,6 +341,18 @@ curl -X POST http://localhost:8093/v1/search \
   "total": 1
 }
 ```
+
+**Response fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `query` | string | Original query |
+| `enhanced_queries` | list[string] | All query strings searched (HyDE docs, sub-queries, stepback, original) |
+| `retrieval_mode` | string | Mode used: `hybrid`, `vector`, or `bm25` |
+| `use_reranker` | bool | Whether reranker was applied |
+| `hierarchical` | bool | Whether two-stage summary-based search was used |
+| `results` | list[object] | Ranked result chunks |
+| `total` | int | Number of results returned |
 
 Possible `method` values in search results:
 

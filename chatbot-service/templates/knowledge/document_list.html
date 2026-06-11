@@ -22,6 +22,13 @@
           <div class="doc-body">
             <div class="doc-title" style="color:var(--text)">{{ doc.title }}</div>
             <div class="doc-meta">{{ doc.original_filename }} · {{ doc.created_at|timesince }} ago</div>
+            {% with ei=doc.metadata.embedding_info %}
+              {% if ei %}
+                <div class="doc-meta" style="font-size:.7rem;color:var(--text3)">
+                  <code>{{ ei.model }} · {{ ei.dimension }}d</code>
+                </div>
+              {% endif %}
+            {% endwith %}
           </div>
         </a>
         <div class="doc-actions">

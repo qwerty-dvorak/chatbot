@@ -44,7 +44,7 @@ RERANKER_URL="${RERANKER_BASE_URL}/pooling"
 echo ""
 echo "  Text Embed      ${EMBEDDING_BASE_URL}"
 echo "  MM Embed        ${MULTIMODAL_EMBEDDING_BASE_URL}"
-echo "  Reranker        ${RERANKER_BASE_URL}/pooling"
+echo "  Reranker        ${RERANKER_BASE_URL}  (/score, /v1/rerank)"
 
 # ═══════════════════════════════════════════════════════
 # 1. Text Embedding — POST /v1/embeddings
@@ -144,38 +144,60 @@ done
 # ═══════════════════════════════════════════════════════
 echo ""
 echo "───────────────────────────────────────────────────"
-echo " §3  Reranker — POST /pooling"
-echo "     Qwen/Qwen3-VL-Reranker-8B"
+echo " §3  Reranker — POST /score, POST /v1/rerank"
+echo "     Qwen/Qwen3-VL-Reranker-2B"
 echo "───────────────────────────────────────────────────"
 
-echo -n "  reranker single input"
-resp=$(curl -sf -X POST "$RERANKER_URL" \
+echo -n "  /score ScoreTextRequest (single pair)"
+resp=$(curl -sf -X POST "${RERANKER_BASE_URL}/score" \
   -H "Content-Type: application/json" \
-  -d '{"model":"Qwen/Qwen3-VL-Reranker-8B","input":"What is the capital of France? Paris is the capital of France."}' 2>&1) && {
+  -d '{"model":"Qwen/Qwen3-VL-Reranker-2B","text_1":"What is the capital of France?","text_2":"Paris is the capital of France."}' 2>&1) && {
   info=$(echo "$resp" | python3 -c "
 import sys,json
 d=json.load(sys.stdin)
-e=d['data'][0]['data']
-print(f'{len(e)} vecs x {len(e[0])} dim')" 2>/dev/null || echo "")
-  [[ -n "$info" ]] && result PASS "single input → $info" \
-    || result FAIL "single input → unexpected: $(echo $resp | head -c200)"
-} || result FAIL "single input → HTTP error: $(echo $resp | head -c200)"
+score=d['data'][0]['score']
+assert isinstance(score, (int,float)), f'score not float: {type(score)}'
+assert 0 <= score <= 1, f'score out of range: {score}'
+assert d['object'] == 'list', f'object={d[\"object\"]}'
+assert d['data'][0]['object'] == 'score', f'object={d[\"data\"][0][\"object\"]}'
+print(f'score={score:.4f}')" 2>/dev/null || echo "")
+  [[ -n "$info" ]] && result PASS "/score single pair → $info" \
+    || result FAIL "/score single pair → unexpected: $(echo $resp | head -c200)"
+} || result FAIL "/score single pair → HTTP error: $(echo $resp | head -c200)"
 
-echo -n "  reranker response shape"
-echo "$resp" | python3 -c "
+echo -n "  /score ScoreQueriesDocumentsRequest (1:N)"
+resp=$(curl -sf -X POST "${RERANKER_BASE_URL}/score" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"Qwen/Qwen3-VL-Reranker-2B","queries":"What is the capital of France?","documents":["Paris is the capital.","London is the capital.","Berlin is the capital."]}' 2>&1) && {
+  info=$(echo "$resp" | python3 -c "
 import sys,json
 d=json.load(sys.stdin)
-obj = d.get('object')
-model = d.get('model')
-usage = d.get('usage',{})
-assert obj == 'list', f'object={obj}'
-assert model == 'Qwen/Qwen3-VL-Reranker-8B', f'model={model}'
-assert 'prompt_tokens' in usage, f'usage={usage}'
-print('OK')
-" 2>&1 | head -1 | while read line; do
-  [[ "$line" == "OK" ]] && result PASS "response shape matches runpod_api.md" \
-    || result FAIL "response shape mismatch: $line"
-done
+n=len(d['data'])
+scores=[item['score'] for item in d['data']]
+assert n == 3, f'expected 3 results, got {n}'
+assert all(0 <= s <= 1 for s in scores), f'scores out of range: {scores}'
+print(f'{n} results, top={max(scores):.4f}')" 2>/dev/null || echo "")
+  [[ -n "$info" ]] && result PASS "/score 1:N batch → $info" \
+    || result FAIL "/score 1:N batch → unexpected: $(echo $resp | head -c200)"
+} || result FAIL "/score 1:N batch → HTTP error: $(echo $resp | head -c200)"
+
+echo -n "  /v1/rerank (Cohere format)"
+resp=$(curl -sf -X POST "${RERANKER_BASE_URL}/v1/rerank" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"Qwen/Qwen3-VL-Reranker-2B","query":"What is the capital of France?","documents":["Paris is the capital.","London is the capital.","Berlin is the capital."],"top_n":2}' 2>&1) && {
+  info=$(echo "$resp" | python3 -c "
+import sys,json
+d=json.load(sys.stdin)
+results=d['results']
+assert len(results) == 2, f'expected 2 (top_n), got {len(results)}'
+for r in results:
+    assert 'relevance_score' in r, f'missing relevance_score: {r}'
+    assert 'document' in r and 'text' in r['document'], f'missing document.text: {r}'
+    assert 0 <= r['relevance_score'] <= 1, f'score out of range: {r[\"relevance_score\"]}'
+print(f'{len(results)} results, top={results[0][\"relevance_score\"]:.4f}')" 2>/dev/null || echo "")
+  [[ -n "$info" ]] && result PASS "/v1/rerank → $info" \
+    || result FAIL "/v1/rerank → unexpected: $(echo $resp | head -c200)"
+} || result FAIL "/v1/rerank → HTTP error: $(echo $resp | head -c200)"
 
 # ═══════════════════════════════════════════════════════
 # Summary

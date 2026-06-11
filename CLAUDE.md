@@ -35,21 +35,77 @@ To clone models locally:
 bash rag-pipeline/clone_models.sh
 ```
 
+## Architecture Overview
+
+### RAG Pipeline (`rag-pipeline/`)
+
+The RAG pipeline handles document ingestion and search as a standalone FastAPI
+service (port 8093).  See `rag-pipeline/AGENTS.md` and `rag-pipeline/docs/architecture.md`
+for full detail.
+
+**Key design decisions:**
+
+- **Hypothetical Questions are embedded as separate vectors** in Milvus at
+  index time. Each chunk's generated questions become HYPOTHETICAL_QUESTION
+  chunk objects, embedded into the same collection with `parent_id` → source
+  chunk.  At search time, query-to-query resolution replaces question hits
+  with their parent document chunks.  This is distinct from **HyDE** (query-time
+  document generation).
+- **Single PostgreSQL** is shared between rag-pipeline (writes) and
+  chatbot-service (reads). For two-server deployment, PostgreSQL listens on
+  `*` with `pg_hba.conf` allowing remote connections.
+- **Single Milvus** can be shared: rag-pipeline uses `rag_text_chunks` and
+  `rag_image_chunks` collections; chatbot-service uses `user_memories`.
+
+### Chatbot Service (`chatbot-service/`)
+
+Django web app that provides the chat interface, user memory, and tool calling.
+When `RAG_API_ENABLED=true`, it delegates all document ingest and search to the
+RAG pipeline via HTTP (`RAG_API_BASE_URL`).
+
+## Two-server deployment
+
+```
+┌── Server A: RAG Pipeline ──────────────────────────┐
+│  rag-api (port 8093)    Milvus (:19530)              │
+│  PostgreSQL (:5432)     RunPod / vLLM endpoints       │
+└──────────────────────────────────────────────────────┘
+                │ HTTP :8093 │ TCP :5432 │ TCP :19530
+┌──────────────────────────────────────────────────────┐
+│  Server B: Chatbot Service                             │
+│  chatbot-service (port 8080)  Chat LLM endpoint        │
+│  RAG_API_BASE_URL=http://<server-a>:8093               │
+│  POSTGRES_HOST=<server-a>                              │
+└──────────────────────────────────────────────────────┘
+```
+
+PostgreSQL remote access:
+```ini
+postgresql.conf  →  listen_addresses = '*'
+pg_hba.conf      →  host chatbot chatbot <client-ip>/32 md5
+```
+
 ## Requirements
 
-- Docker 24+ with NVIDIA Container Toolkit
+- Docker 24+ with NVIDIA Container Toolkit (for local GPU)
 - 3x NVIDIA GPUs with 16GB+ VRAM each (one per model: text embed, multimodal embed, reranker)
+  OR RunPod cloud GPUs (preferred for development)
 - Python 3.12 (only needed for developing inside containers)
 
 ## Key principles
 
-- **Models outside repo** — all model files live in a sibling `../models/` git repo; cloned once via `rag-pipeline/clone_models.sh`. Docker volumes mount them at runtime.
-- **No Docker Compose** — services are started with plain `docker run` commands or native processes.
+- **Models outside repo** — all model files live in a sibling `../models/` git repo;
+  cloned once via `rag-pipeline/clone_models.sh`. Docker volumes mount them at runtime.
+- **No Docker Compose** — services are started with plain `docker run` commands or
+  native processes.
 - **Python images** always use `FROM ubuntu:24.04` as base; dependencies managed with `uv`.
-- **Reproducible uv resolution** — every `pyproject.toml` contains `[tool.uv]` with `exclude-newer = "2025-10-23T12:36:00Z"`.
+- **Reproducible uv resolution** — every `pyproject.toml` contains `[tool.uv]` with
+  `exclude-newer = "2025-10-23T12:36:00Z"`.
 - **Milvus** is the vector store, started via `rag-pipeline/start-services.sh`.
-- **PostgreSQL 16** runs embedded inside the chatbot-service Docker image.
-- **Adding Python dependencies** — always use `uv add <package>` inside the relevant subdirectory (`chatbot-service/` or `rag-pipeline/`). Never edit `pyproject.toml` or `uv.lock` manually.
+- **PostgreSQL 16** runs as a standalone container shared between services.
+- **Adding Python dependencies** — always use `uv add <package>` inside the relevant
+  subdirectory (`chatbot-service/` or `rag-pipeline/`). Never edit `pyproject.toml`
+  or `uv.lock` manually.
 
 ## Docker source configuration
 

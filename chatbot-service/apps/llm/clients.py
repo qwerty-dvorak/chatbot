@@ -1,3 +1,4 @@
+import json
 import logging
 import time
 from typing import Any
@@ -8,6 +9,39 @@ from .errors import LLMConnectionError, LLMProviderError, LLMRateLimitError, LLM
 from .token_usage import record_token_usage
 
 logger = logging.getLogger(__name__)
+
+
+def _truncate_payload(messages: list, max_chars: int = 2000) -> str:
+    dump = json.dumps(messages, default=str)
+    if len(dump) <= max_chars:
+        return dump
+    return dump[:max_chars] + f"... (truncated, {len(dump)} total)"
+
+
+def _debug_log(messages: list, model: str, kwargs: dict):
+    if not getattr(settings, "CHAT_DEBUG", False):
+        return
+    n_images = sum(
+        1 for m in messages
+        if isinstance(m.get("content"), list)
+        for part in m["content"]
+        if isinstance(part, dict) and part.get("type") == "image_url"
+    )
+    n_files = sum(
+        1 for m in messages
+        if isinstance(m.get("content"), list)
+        for part in m["content"]
+        if isinstance(part, dict) and part.get("type") == "text" and part["text"].startswith("--- ")
+    )
+    logger.info(
+        "[CHAT_DEBUG] model=%s messages=%d images=%d files=%d tools=%s payload=%s",
+        model,
+        len(messages),
+        n_images,
+        n_files,
+        bool(kwargs.get("tools")),
+        _truncate_payload(messages),
+    )
 
 
 class LiteLLMClient:
@@ -24,12 +58,34 @@ class LiteLLMClient:
         except ImportError:
             raise LLMProviderError("litellm is not installed")
 
+    def _has_multimodal(self, messages: list) -> bool:
+        for m in messages:
+            content = m.get("content")
+            if isinstance(content, list):
+                for part in content:
+                    if isinstance(part, dict) and part.get("type") == "image_url":
+                        return True
+        return False
+
+    def _select_model(self, messages: list) -> str:
+        if self._has_multimodal(messages):
+            logger.debug("Detected multimodal content, using vision_model=%s", self.vision_model)
+            return self.vision_model
+        return self.chat_model
+
+    def _extra_body(self) -> dict | None:
+        if getattr(settings, "CHAT_REASONING_ENABLED", False):
+            return {"chat_template_kwargs": {"enable_thinking": True}}
+        return None
+
     def chat_completion(self, messages: list[dict[str, str]], **kwargs) -> dict[str, Any]:
+        model = self._select_model(messages)
+        _debug_log(messages, model, kwargs)
         start = time.time()
         try:
             completion = self._get_client()
-            response = completion(
-                model=self.chat_model,
+            call_kwargs = dict(
+                model=model,
                 messages=messages,
                 max_tokens=kwargs.get("max_tokens", settings.CHAT_RESPONSE_MAX_TOKENS),
                 temperature=kwargs.get("temperature", 0.7),
@@ -37,21 +93,32 @@ class LiteLLMClient:
                 api_base=self.base_url,
                 api_key=self.api_key,
             )
+            extra_body = self._extra_body()
+            if extra_body:
+                call_kwargs["extra_body"] = extra_body
+            response = completion(**call_kwargs)
             duration = time.time() - start
             self._log_usage(response, "chat", duration)
-            return {
-                "content": response.choices[0].message.content or "",
+            msg = response.choices[0].message
+            result = {
+                "content": msg.content or "",
                 "finish_reason": response.choices[0].finish_reason,
                 "usage": dict(response.usage) if response.usage else {},
             }
+            reasoning = getattr(msg, "reasoning", None)
+            if reasoning:
+                result["reasoning"] = reasoning
+            return result
         except Exception as e:
             raise self._normalize_error(e)
 
     def chat_completion_stream(self, messages: list[dict[str, str]], **kwargs):
+        model = self._select_model(messages)
+        _debug_log(messages, model, kwargs)
         try:
             completion = self._get_client()
             call_kwargs = dict(
-                model=self.chat_model,
+                model=model,
                 messages=messages,
                 max_tokens=kwargs.get("max_tokens", settings.CHAT_RESPONSE_MAX_TOKENS),
                 temperature=kwargs.get("temperature", 0.7),
@@ -60,7 +127,9 @@ class LiteLLMClient:
                 api_base=self.base_url,
                 api_key=self.api_key,
             )
-            # Pass tools/tool_choice through so the model can call them
+            extra_body = self._extra_body()
+            if extra_body:
+                call_kwargs["extra_body"] = extra_body
             if "tools" in kwargs:
                 call_kwargs["tools"] = kwargs["tools"]
             if "tool_choice" in kwargs:
@@ -100,35 +169,3 @@ class LiteLLMClient:
             logger.warning(f"Failed to log token usage: {e}")
 
 
-class FakeChunk:
-    def __init__(self, content=None, finish_reason=None, tool_calls=None):
-        self.choices = [FakeChoice(content=content, finish_reason=finish_reason, tool_calls=tool_calls)]
-
-
-class FakeChoice:
-    def __init__(self, content=None, finish_reason=None, tool_calls=None):
-        self.delta = FakeDelta(content=content, tool_calls=tool_calls)
-        self.finish_reason = finish_reason
-        self.index = 0
-
-
-class FakeDelta:
-    def __init__(self, content=None, tool_calls=None):
-        self.content = content
-        self.tool_calls = tool_calls
-
-
-class FakeLLMClient:
-    def chat_completion(self, messages, **kwargs):
-        return {
-            "content": "This is a fake response for testing.",
-            "finish_reason": "stop",
-            "usage": {"prompt_tokens": 10, "completion_tokens": 10, "total_tokens": 20},
-        }
-
-    def chat_completion_stream(self, messages, **kwargs):
-        words = ["This ", "is ", "a ", "fake ", "stream."]
-        for word in words:
-            yield FakeChunk(content=word)
-
-        yield FakeChunk(finish_reason="stop")

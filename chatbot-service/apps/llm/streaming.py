@@ -11,25 +11,23 @@ class StreamHandler:
     """
     Processes LiteLLM streaming chunks and converts them to SSE events.
 
-    Tool call deltas arrive in pieces across multiple chunks (OpenAI format):
-      chunk 1: tool_calls[0].id = "call_xxx", .function.name = "memory.search", .function.arguments = ""
-      chunk 2: tool_calls[0].function.arguments = '{"query":'
-      chunk 3: tool_calls[0].function.arguments = ' "Python"}'
-      finish_reason = "tool_calls"
+    Supports:
+      - Text deltas (choices[0].delta.content)
+      - Reasoning / thinking deltas (choices[0].delta.reasoning_content)
+      - Tool call deltas (choices[0].delta.tool_calls)
+      - Finish reasons: "stop", "tool_calls"
 
-    This handler accumulates those pieces in self._tc_acc, then exposes
-    self.completed_tool_calls when finish_reason="tool_calls" is received.
-    The chat streaming layer reads completed_tool_calls to execute the tools
-    and continue the conversation.
+    Reasoning content is accumulated separately and stored in message metadata
+    under the "reasoning" key when streaming completes.
     """
 
     def __init__(self, message: Message):
         self.message   = message
         self.accumulated_content = ""
+        self.accumulated_reasoning = ""
         self._tc_acc: dict[int, dict] = {}
         self.completed_tool_calls: list[dict] = []
 
-        # Start sequence after any existing deltas so retries don't conflict
         from django.db.models import Max
         existing = MessageDelta.objects.filter(message=message).aggregate(
             mx=Max("sequence")
@@ -47,8 +45,12 @@ class StreamHandler:
         finish       = getattr(choice, "finish_reason", None)
 
         if delta:
-            content    = getattr(delta, "content", None)
-            tool_calls = getattr(delta, "tool_calls", None)
+            content           = getattr(delta, "content", None)
+            reasoning_content = getattr(delta, "reasoning_content", None)
+            tool_calls        = getattr(delta, "tool_calls", None)
+
+            if reasoning_content:
+                yield from self._handle_reasoning(reasoning_content)
 
             if content:
                 yield from self._handle_text(content)
@@ -76,9 +78,19 @@ class StreamHandler:
         if fn:
             fn_name = getattr(fn, "name", None) or ""
             fn_args = getattr(fn, "arguments", None) or ""
-            # name only appears on first delta; use 'or' to keep first value
             self._tc_acc[idx]["name"] = self._tc_acc[idx]["name"] or fn_name
             self._tc_acc[idx]["args"] += fn_args
+
+    def _handle_reasoning(self, content: str) -> Generator[dict, None, None]:
+        self.accumulated_reasoning += content
+        MessageDelta.objects.create(
+            message=self.message,
+            sequence=self.sequence,
+            delta_type=MessageDelta.DeltaType.TEXT,
+            content=content,
+        )
+        self.sequence += 1
+        yield {"type": "reasoning", "content": content}
 
     def _handle_text(self, content: str) -> Generator[dict, None, None]:
         self.accumulated_content += content
@@ -99,13 +111,19 @@ class StreamHandler:
             content="",
         )
         self.sequence += 1
+
         self.message.content = self.accumulated_content
         self.message.status  = Message.Status.COMPLETED
-        self.message.save(update_fields=["content", "status"])
+        if self.accumulated_reasoning:
+            metadata = dict(self.message.metadata or {})
+            metadata["reasoning"] = self.accumulated_reasoning
+            self.message.metadata = metadata
+            self.message.save(update_fields=["content", "status", "metadata"])
+        else:
+            self.message.save(update_fields=["content", "status"])
         yield {"type": "done"}
 
     def _handle_tool_calls_finish(self) -> Generator[dict, None, None]:
-        """Convert accumulated deltas to complete tool calls and yield each."""
         self.completed_tool_calls = []
 
         for idx in sorted(self._tc_acc):
@@ -118,11 +136,10 @@ class StreamHandler:
             self.completed_tool_calls.append({
                 "id":   tc["id"] or f"call_{idx}",
                 "name": tc["name"],
-                "args": tc["args"],       # raw string for OpenAI messages
-                "args_dict": args_dict,   # parsed for executor
+                "args": tc["args"],
+                "args_dict": args_dict,
             })
 
-            # Save delta record
             MessageDelta.objects.create(
                 message=self.message,
                 sequence=self.sequence,
@@ -140,5 +157,3 @@ class StreamHandler:
                     "arguments": args_dict,
                 },
             }
-        # NOTE: no "done" event here — the caller continues with tool results
-        # and a second LLM round before emitting done.

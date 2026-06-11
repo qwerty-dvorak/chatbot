@@ -6,7 +6,7 @@ from django.urls import reverse
 
 from apps.accounts.models import User
 from apps.chat.models import Chat, Message, MessageDelta
-from apps.llm.clients import FakeLLMClient
+
 
 
 class StreamingTest(TestCase):
@@ -94,7 +94,7 @@ class StreamHandlerTest(TestCase):
 
     def test_handle_done_finalizes_message(self):
         list(self.handler._handle_text("Final "))
-        list(self.handler._handle_done())
+        list(self.handler._handle_stop())
         self.msg.refresh_from_db()
         self.assertEqual(self.msg.content, "Final ")
         self.assertEqual(self.msg.status, Message.Status.COMPLETED)
@@ -106,6 +106,38 @@ class StreamHandlerTest(TestCase):
         deltas = MessageDelta.objects.filter(message=self.msg).order_by("sequence")
         self.assertEqual([d.content for d in deltas], ["A", "B", "C"])
         self.assertEqual([d.sequence for d in deltas], [0, 1, 2])
+
+    def test_handle_reasoning_creates_reasoning_event(self):
+        events = list(self.handler._handle_reasoning("I need to think about this"))
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["type"], "reasoning")
+        self.assertEqual(events[0]["content"], "I need to think about this")
+        self.assertEqual(self.handler.accumulated_reasoning, "I need to think about this")
+
+    def test_handle_reasoning_accumulates(self):
+        list(self.handler._handle_reasoning("Step 1: "))
+        list(self.handler._handle_reasoning("Step 2: "))
+        self.assertEqual(self.handler.accumulated_reasoning, "Step 1: Step 2: ")
+
+    def test_handle_reasoning_then_text(self):
+        list(self.handler._handle_reasoning("Thinking... "))
+        list(self.handler._handle_text("Final answer"))
+        self.assertEqual(self.handler.accumulated_reasoning, "Thinking... ")
+        self.assertEqual(self.handler.accumulated_content, "Final answer")
+
+    def test_reasoning_stored_in_metadata_on_done(self):
+        list(self.handler._handle_reasoning("Reasoning trace"))
+        list(self.handler._handle_stop())
+        self.msg.refresh_from_db()
+        self.assertIn("reasoning", self.msg.metadata)
+        self.assertEqual(self.msg.metadata["reasoning"], "Reasoning trace")
+
+    def test_no_reasoning_does_not_set_metadata(self):
+        list(self.handler._handle_text("No reasoning"))
+        list(self.handler._handle_stop())
+        self.msg.refresh_from_db()
+        reasoning = self.msg.metadata.get("reasoning")
+        self.assertIsNone(reasoning)
 
 
 class MessageDeltaModelTest(TestCase):

@@ -246,7 +246,8 @@ Minimum tests:
 - tool calls are validated, permission checked, executed, and recorded.
 - public share links do not expose private knowledge sources.
 
-Use fake LLM, fake embedding, and fake reranker clients in tests so tests do not require the local model runtime.
+Tests hit the real LLM endpoint — no mocks or fakes. The test orchestrator (`test-all.sh`)
+starts the required stack (RunPod or local GPU) and runs tests against the live endpoint.
 
 ## Security Notes
 

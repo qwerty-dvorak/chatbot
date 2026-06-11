@@ -117,17 +117,47 @@ Open `http://localhost:8080` — you'll be redirected to the login page.
 
 ## Running Tests
 
-Tests require a live PostgreSQL instance. Set `POSTGRES_TEST_DB` to use a separate test database (default: `chatbot_test`).
+Tests hit the **real LLM endpoint** — no mocks or fakes. Use the unified test
+orchestrator to start services and run everything in one command.
 
 ```bash
-# All tests
-uv run python manage.py test --settings=config.settings.test
+# Auto-detect mode (RunPod or local GPU)
+bash test-all.sh
+
+# Use RunPod cloud GPU
+bash test-all.sh --runpod
+
+# Use local GPU (requires 2x NVIDIA GPUs)
+bash test-all.sh --local
+
+# Test then tear down
+bash test-all.sh --runpod --clean
+
+# Keep test database for faster repeats
+bash test-all.sh --runpod --keepdb
 
 # Single app
-uv run python manage.py test apps.chat --settings=config.settings.test
+bash test-all.sh --runpod apps.chat.tests
 
-# Single test class
-uv run python manage.py test apps.chat.tests.test_chat_flow.ChatFlowTest --settings=config.settings.test
+# Against an already-running stack
+bash test-all.sh --runpod --no-start
+```
+
+### Prerequisites
+
+**RunPod mode** — deploy the LLM once, then start + test:
+
+```bash
+export HF_TOKEN=hf_...
+bash runpod_deploy_chat.sh              # ~15-30 min first time
+bash test-all.sh --runpod
+```
+
+**Local mode** — requires 2x NVIDIA GPUs, 16GB+ VRAM each:
+
+```bash
+bash ../rag-pipeline/clone_models.sh     # clone model files
+bash test-all.sh --local
 ```
 
 ---

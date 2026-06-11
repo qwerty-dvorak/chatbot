@@ -29,6 +29,22 @@
     <span class="badge badge-{{ job.status }}">{{ job.status }}{% if job.error %} — {{ job.error|truncatechars:60 }}{% endif %}</span>
   </div>
   {% endif %}
+  {% if rag_job %}
+  <div class="settings-row">
+    <div><div class="settings-row-label">RAG API job</div></div>
+    <span class="badge badge-{{ rag_job.status }}">{{ rag_job.status }}</span>
+  </div>
+  {% if rag_job.status == "succeeded" and rag_job.result %}
+    {% with info=rag_job.result.embedding_info %}
+      {% if info %}
+      <div class="settings-row">
+        <div><div class="settings-row-label">Embedding</div></div>
+        <span class="settings-val mono">{{ info.model }} · {{ info.dimension }}d · {{ info.collection }}</span>
+      </div>
+      {% endif %}
+    {% endwith %}
+  {% endif %}
+  {% endif %}
 </div>
 
 {% if chunks %}

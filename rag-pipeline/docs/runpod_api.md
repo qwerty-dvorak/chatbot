@@ -142,62 +142,163 @@ bash rag-pipeline/test_runpod_endpoints.sh
 
 ## 3. Reranker
 
-**Model:** `Qwen/Qwen3-VL-Reranker-8B`
-**Endpoint:** `POST /pooling`
+**Model:** `Qwen/Qwen3-VL-Reranker-2B`
+**Endpoints:** `POST /score`, `POST /v1/score`, `POST /v1/rerank`, `POST /pooling`
+**URL:** `https://lwq7azeh2cl1xf-8000.proxy.runpod.net`
 
-> With `--runner pooling`, the reranker exposes the **/pooling** endpoint (same as
-> the multimodal embed). Both pods share the same API shape. The `--hf-overrides`
-> flag configures the model architecture to properly load the classification head.
+> With `--runner pooling`, the reranker exposes multiple scoring endpoints.
+> The **preferred** endpoints are `/score` (structured pairwise) and `/v1/rerank`
+> (Cohere-compatible). `/pooling` also works but returns a less structured response.
+> The `--hf-overrides` flag configures the model architecture to load the
+> classification head.
 
-### Request
+---
+
+### 3a. POST /score — structured pairwise scoring
+
+**Request formats:**
+
+| Format | Fields | Use case |
+|--------|--------|----------|
+| ScoreTextRequest | `text_1`, `text_2` | Single query–document pair |
+| ScoreQueriesDocumentsRequest | `queries`, `documents` | 1:N or N:N batch |
+| ScoreQueriesItemsRequest | `queries`, `items` | Query–short-item batch |
+| ScoreDataRequest | `data_1`, `data_2` | Multimodal pairs |
+
+**Single pair (ScoreTextRequest):**
 
 ```json
 {
-  "model": "Qwen/Qwen3-VL-Reranker-8B",
-  "input": "What is the capital of France? Paris is the capital of France."
+  "model": "Qwen/Qwen3-VL-Reranker-2B",
+  "text_1": "What is the capital of France?",
+  "text_2": "Paris is the capital of France."
 }
 ```
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `model` | string | yes | Model ID |
-| `input` | string or string[] | yes | Text to embed (pair for cross-encoding) |
+| `model` | string | no | Model ID |
+| `text_1` | string | **yes** | Query text |
+| `text_2` | string | **yes** | Document text |
 
-### Response
+**Batch 1:N (ScoreQueriesDocumentsRequest):**
 
 ```json
 {
-  "id": "pool-...",
+  "model": "Qwen/Qwen3-VL-Reranker-2B",
+  "queries": "What is the capital of France?",
+  "documents": [
+    "Paris is the capital of France.",
+    "London is the capital of UK.",
+    "Berlin is the capital of Germany."
+  ]
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `model` | string | no | Model ID |
+| `queries` | string or string[] | **yes** | Query(s) — 1:N or N:N |
+| `documents` | string[] | **yes** | Candidate documents |
+
+**Response:**
+
+```json
+{
+  "id": "score-91ac2141fb94426d",
   "object": "list",
+  "created": 1781155093,
+  "model": "Qwen/Qwen3-VL-Reranker-2B",
   "data": [
     {
       "index": 0,
-      "object": "pooling",
-      "data": [
-        [0.0012, -0.0034, ...],
-        [0.0056, 0.0012, ...]
-      ]
+      "object": "score",
+      "score": 0.998
     }
   ],
-  "model": "Qwen/Qwen3-VL-Reranker-8B",
   "usage": {
-    "prompt_tokens": 12,
-    "total_tokens": 12
+    "prompt_tokens": 14,
+    "total_tokens": 14,
+    "completion_tokens": 0
   }
 }
 ```
 
 | Field | Value |
 |-------|-------|
-| Output type | ColBERT-style multi-vector pooling |
-| Each vector dim | **4096** |
-| Data type | `float32` |
+| Score type | **Scalar relevance score** (0–1, higher = more relevant) |
 | Max tokens | 4096 |
+
+---
+
+### 3b. POST /v1/rerank — Cohere-compatible
+
+**Request:**
+
+```json
+{
+  "model": "Qwen/Qwen3-VL-Reranker-2B",
+  "query": "What is the capital of France?",
+  "documents": [
+    "Paris is the capital of France.",
+    "London is the capital of UK.",
+    "Berlin is the capital of Germany."
+  ],
+  "top_n": 3
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `model` | string | no | Model ID |
+| `query` | string | **yes** | Search query |
+| `documents` | string[] | **yes** | Documents to rerank |
+| `top_n` | int | no | Number of top results (default: all) |
+
+**Response:**
+
+```json
+{
+  "id": "score-bbcb46f54f5d2476",
+  "model": "Qwen/Qwen3-VL-Reranker-2B",
+  "results": [
+    {
+      "index": 0,
+      "document": {
+        "text": "Paris is the capital of France."
+      },
+      "relevance_score": 0.998
+    },
+    {
+      "index": 2,
+      "document": {
+        "text": "Berlin is the capital of Germany."
+      },
+      "relevance_score": 0.961
+    },
+    {
+      "index": 1,
+      "document": {
+        "text": "London is the capital of UK."
+      },
+      "relevance_score": 0.957
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 42,
+    "total_tokens": 42
+  }
+}
+```
+
+> Results are sorted by `relevance_score` descending (most relevant first).
+
+---
 
 ### vLLM Config
 
 ```
---model Qwen/Qwen3-VL-Reranker-8B
+--model Qwen/Qwen3-VL-Reranker-2B
 --runner pooling
 --trust-remote-code
 --gpu-memory-utilization 0.90

@@ -45,6 +45,7 @@ class ChatDetailView(LoginRequiredMixin, DetailView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         from apps.tools.models import ToolCall
+        from apps.knowledge.models import RagSearchLog
 
         # Named chat_messages (not messages) to avoid shadowing Django's flash messages framework
         chat_messages = list(Message.objects.filter(chat=self.object).order_by("created_at"))
@@ -60,8 +61,15 @@ class ChatDetailView(LoginRequiredMixin, DetailView):
         for tc in tc_qs:
             tc_by_msg.setdefault(tc.message_id, []).append(tc)
 
+        # Attach RAG search logs to user messages
+        log_qs = RagSearchLog.objects.filter(chat=self.object).order_by("created_at")
+        log_by_msg: dict = {}
+        for log in log_qs:
+            log_by_msg[log.message_id] = log
+
         for msg in chat_messages:
             msg.tool_calls_data = tc_by_msg.get(msg.id, [])
+            msg.rag_search_log = log_by_msg.get(msg.id)
 
         context["chat_messages"] = chat_messages
         context["form"] = MessageForm()

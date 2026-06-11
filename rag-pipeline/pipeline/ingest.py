@@ -220,4 +220,9 @@ def ingest_path(
         "files_skipped_duplicate": files_skipped,
         "chunks_created": total_chunks,
         "embeddings_indexed": total_embeddings,
+        "embedding_info": {
+            "model": cfg.text_embedding_model,
+            "dimension": cfg.text_embedding_dim,
+            "collection": cfg.text_collection,
+        },
     }

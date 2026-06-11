@@ -316,6 +316,12 @@ def process_document(
         "question_chunks_indexed": len(question_chunks),
         "summary_indexed": summary_indexed,
         "summary_text": summary_text,
+        "embedding_info": {
+            "model": p.embedding_model,
+            "dimension": p.embedding_dim,
+            "collection": cfg.text_collection,
+            "chunk_strategy": p.chunk_strategy,
+        },
     }
     log("[text_pipeline] done doc_id=%s chunks=%d embeddings=%d hyde=%d questions=%d summary=%s",
         doc_id, len(text_chunks), len(text_embedded), hyde_count, len(question_chunks),

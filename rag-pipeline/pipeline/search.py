@@ -9,6 +9,7 @@ The :func:`search` function is the main entry point.
 :func:`format_results` formats results for CLI display.
 """
 
+import time
 import uuid
 
 import openai
@@ -28,7 +29,7 @@ def search(
     retrieval_mode: str = "hybrid",
     enhancements: str | list[str] | None = None,
     hierarchical: bool | None = None,
-) -> list[SearchResult]:
+) -> tuple[list[SearchResult], dict[str, float]]:
     """Full search pipeline.
 
     Steps
@@ -72,9 +73,28 @@ def search(
                         ``cfg.hierarchical_mode``.
 
     Returns:
-        Ordered list of :class:`~pipeline.models.SearchResult` objects.
+        Tuple of ``(list[SearchResult], timing_dict)`` where *timing_dict*
+        maps step names to seconds.
     """
+    timing: dict[str, float] = {}
+    _t = time.time
+
     connect_milvus()
+
+    # Fast return if vector store is empty
+    t0 = _t()
+    try:
+        _ensure_collection(cfg.text_collection, cfg.text_embedding_dim)
+        count_hits = list(get_client().query(
+            collection_name=cfg.text_collection,
+            output_fields=["count(*)"],
+            limit=1,
+        ))
+        total_vectors = count_hits[0].get("count(*)", 0) if count_hits else 0
+    except Exception:
+        total_vectors = 0
+    if total_vectors == 0:
+        return [], {"empty_store": 0.001, "total": 0.001, "message": "Vector store is empty — ingest documents first"}
 
     effective_top_k = top_k if top_k is not None else cfg.rerank_top_k
     retrieval_k = cfg.retrieval_top_k
@@ -86,12 +106,17 @@ def search(
     if mode not in {"vector", "bm25", "hybrid"}:
         raise ValueError("retrieval_mode must be one of: vector, bm25, hybrid")
 
+    t0 = _t()
     enhanced_queries = enhance_query(query, enhancements=enhancements)
+    timing["enhance_query"] = round(_t() - t0, 4)
 
     # ------------------------------------------------------------------
     # Per-query retrieval
     # ------------------------------------------------------------------
+    t_embed_total = 0.0
+    t_search_total = 0.0
     all_result_lists: list[list[SearchResult]] = []
+    n_queries = len(enhanced_queries)
 
     for q_text in enhanced_queries:
         tmp_chunk = Chunk(
@@ -100,14 +125,16 @@ def search(
             text=q_text,
             chunk_type=ChunkType.TEXT,
         )
+        t0 = _t()
         embedded = embed_text([tmp_chunk])
+        t_embed_total += _t() - t0
         if not embedded:
             continue
         embedding = embedded[0].embedding
 
         # ── Two-stage hierarchical search ──────────────────────────
+        t0 = _t()
         if hierarchical:
-            # Stage 1: search against summary vectors
             summary_hits = vector_search(
                 embedding, top_k=cfg.summary_top_k,
                 extra_filter='chunk_type == "summary"',
@@ -135,22 +162,29 @@ def search(
                 results = bm25_search(q_text, retrieval_k)
             else:
                 results = hybrid_search(q_text, embedding, retrieval_k)
+        t_search_total += _t() - t0
 
         if results:
             all_result_lists.append(results)
 
+    timing["embed"] = round(t_embed_total, 4)
+    timing["search"] = round(t_search_total, 4)
+
     if not all_result_lists:
-        return []
+        return [], timing
 
     # ------------------------------------------------------------------
     # Merge with RRF fusion
     # ------------------------------------------------------------------
+    t0 = _t()
     merged = _rrf_fusion(all_result_lists)
+    timing["fusion"] = round(_t() - t0, 4)
 
     # ------------------------------------------------------------------
     # Resolve hypothetical-question hits to parent chunks, then
     # deduplicate by chunk.id (keep entry with highest score).
     # ------------------------------------------------------------------
+    t0 = _t()
     seen: dict[str, SearchResult] = {}
     for sr in merged:
         chunk = sr.chunk
@@ -175,20 +209,22 @@ def search(
         if cid not in seen or sr.score > seen[cid].score:
             seen[cid] = sr
     deduped = sorted(seen.values(), key=lambda r: r.score, reverse=True)
-
-    # Re-assign ranks after deduplication.
     for i, sr in enumerate(deduped):
         sr.rank = i
+    timing["dedup"] = round(_t() - t0, 4)
 
     # ------------------------------------------------------------------
     # Optional reranking (uses original query, not enhanced variants)
     # ------------------------------------------------------------------
     if use_reranker and deduped:
+        t0 = _t()
         deduped = rerank(query, deduped, top_k=effective_top_k)
+        timing["rerank"] = round(_t() - t0, 4)
 
     # ------------------------------------------------------------------
     # Parent context fetch for CHILD chunks
     # ------------------------------------------------------------------
+    t0 = _t()
     for sr in deduped:
         chunk = sr.chunk
         if (
@@ -210,9 +246,11 @@ def search(
                     if parent_text:
                         chunk.window_text = parent_text
             except Exception:  # noqa: BLE001
-                pass  # Parent fetch is best-effort; never fail the search.
+                pass
+    timing["parent_fetch"] = round(_t() - t0, 4)
 
-    return deduped[:effective_top_k]
+    timing["total"] = round(sum(timing.values()), 4)
+    return deduped[:effective_top_k], timing
 
 
 def format_results(results: list[SearchResult]) -> str:

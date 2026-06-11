@@ -24,9 +24,8 @@ the real documents.
 5. Retrieval finds chunks whose vectors are near any of the hypothetical
    passages or the original query.
 
-**When to use:** Almost always. HyDE is the default enhancement for slow and
-global tiers. It consistently improves recall for factual and descriptive
-queries.
+**When to use:** Almost always. HyDE is enabled by default for all searches.
+It consistently improves recall for factual and descriptive queries.
 
 **Trade-off:** One extra LLM call per search (returns N documents). O(N + 1)
 embedding + retrieval operations. Configure N via `HYDE_N_DOCUMENTS` (default 2).
@@ -116,8 +115,8 @@ User query: "What are the differences in features between Milvus and Zilliz Clou
   Milvus?"               Zilliz Cloud?"
 ```
 
-**When to use:** Multi-aspect, comparative, or open-ended questions. Global tier
-only by default.
+**When to use:** Multi-aspect, comparative, or open-ended questions. Enabled
+by default for all searches.
 
 **Trade-off:** O(N + 1) embedding + retrieval calls (N sub-queries + original
 query). Configurable via `SUB_QUERIES_COUNT`.
@@ -211,7 +210,7 @@ abstracted question and then combines both sources for a grounded answer.
    the reranker using the original query.
 
 **When to use:** Narrow, specific queries where background context or
-foundational knowledge is needed. Global tier only by default.
+foundational knowledge is needed. Enabled by default for all searches.
 
 **Trade-off:** One extra LLM call per search. Less useful for already-broad
 queries.
@@ -298,8 +297,20 @@ GLOBAL_OPTIONS = IngestOptions(
 
 ### Per request (API)
 
+All features are on by default. Control them per-request with individual flags:
+
 ```bash
-# Override with explicit enhancement list
+# Everything on (default)
+curl -X POST http://localhost:8093/v1/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "..."}'
+
+# Disable sub-queries and stepback
+curl -X POST http://localhost:8093/v1/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "...", "sub_queries": false, "stepback": false}'
+
+# Override with explicit enhancement list string
 curl -X POST http://localhost:8093/v1/search \
   -H "Content-Type: application/json" \
   -d '{"query": "...", "enhancements": "hyde,sub_queries"}'
@@ -308,11 +319,11 @@ curl -X POST http://localhost:8093/v1/search \
 ### Per env (default for legacy `QUERY_ENHANCEMENTS`)
 
 ```
-QUERY_ENHANCEMENTS=hyde
+QUERY_ENHANCEMENTS=hyde,sub_queries,stepback
 ```
 
-This env var is used when no tier is specified and no explicit enhancements are
-passed.
+This env var is used when no tier, no explicit enhancements string, and no
+individual flags are provided.
 
 ## Enhancement Interaction
 

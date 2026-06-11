@@ -61,7 +61,7 @@ class Config:
     hybrid_alpha: float = field(default_factory=lambda: float(os.getenv("HYBRID_ALPHA", "0.5")))
 
     # Query enhancements
-    query_enhancements: str = field(default_factory=lambda: os.getenv("QUERY_ENHANCEMENTS", "hyde"))
+    query_enhancements: str = field(default_factory=lambda: os.getenv("QUERY_ENHANCEMENTS", "hyde,sub_queries,stepback"))
     hyde_n_documents: int = field(default_factory=lambda: int(os.getenv("HYDE_N_DOCUMENTS", "2")))
     sub_queries_count: int = field(default_factory=lambda: int(os.getenv("SUB_QUERIES_COUNT", "2")))
     hypothetical_questions_per_chunk: int = field(default_factory=lambda: int(os.getenv("HYPOTHETICAL_QUESTIONS_PER_CHUNK", "3")))

@@ -33,6 +33,7 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "config.middleware.RequestLoggingMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -87,6 +88,14 @@ AUTH_USER_MODEL = "accounts.User"
 LOGIN_URL = "/accounts/login/"
 LOGIN_REDIRECT_URL = "/"
 LOGOUT_REDIRECT_URL = "/"
+
+# Debug: log all LLM API calls with truncated payloads
+CHAT_DEBUG = os.environ.get("CHAT_DEBUG", "false").lower() in ("true", "1", "yes")
+
+# Reasoning / thinking mode: enables structured step-by-step reasoning
+# Passes chat_template_kwargs with enable_thinking=True to the LLM.
+# The reasoning content is stored in message metadata under the "reasoning" key.
+CHAT_REASONING_ENABLED = os.environ.get("CHAT_REASONING_ENABLED", "false").lower() in ("true", "1", "yes")
 
 # Chat model endpoint (vLLM or any OpenAI-compatible server)
 CHAT_BASE_URL = os.environ.get("CHAT_BASE_URL", "http://localhost:9000/v1")
@@ -158,3 +167,61 @@ MEMORY_AUTO_SAVE_DEFAULT = os.environ.get("MEMORY_AUTO_SAVE_DEFAULT", "true").lo
 TOOL_CALLS_ENABLED = os.environ.get("TOOL_CALLS_ENABLED", "true").lower() in ("true", "1", "yes")
 TOOL_CALL_TIMEOUT_SECONDS = int(os.environ.get("TOOL_CALL_TIMEOUT_SECONDS", "60"))
 TOOL_RESULT_MAX_TOKENS = int(os.environ.get("TOOL_RESULT_MAX_TOKENS", "4000"))
+
+# ── Logging ──────────────────────────────────────────────────────────────────
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {
+            "format": "{levelname} {asctime} {name} {message}",
+            "style": "{",
+        },
+        "simple": {
+            "format": "{levelname} {message}",
+            "style": "{",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "verbose",
+        },
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": os.environ.get("LOG_LEVEL", "WARNING"),
+    },
+    "loggers": {
+        "django": {
+            "handlers": ["console"],
+            "level": os.environ.get("DJANGO_LOG_LEVEL", "INFO"),
+            "propagate": False,
+        },
+        "django.request": {
+            "handlers": ["console"],
+            "level": os.environ.get("DJANGO_REQUEST_LOG_LEVEL", "INFO"),
+            "propagate": False,
+        },
+        "django.server": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "apps": {
+            "handlers": ["console"],
+            "level": os.environ.get("APPS_LOG_LEVEL", "DEBUG" if DEBUG else "INFO"),
+            "propagate": False,
+        },
+        "apps.llm.clients": {
+            "handlers": ["console"],
+            "level": "DEBUG",
+            "propagate": False,
+        },
+        "apps.chat.streaming": {
+            "handlers": ["console"],
+            "level": "DEBUG",
+            "propagate": False,
+        },
+    },
+}

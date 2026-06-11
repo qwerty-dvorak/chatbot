@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 logger = logging.getLogger(__name__)
 
 from pipeline.config import cfg
-from pipeline.index import connect_milvus, get_client
+from pipeline.index import connect_milvus, get_client, _ensure_collection
 from pipeline.jobs import IngestionWorker, JobStore, TERMINAL_STATUSES
 from pipeline.models import IngestionTier
 from pipeline.progress import ProgressTracker
@@ -135,16 +135,24 @@ class SearchRequest(BaseModel):
     query: str = Field(min_length=1)
     top_k: int = Field(default=5, ge=1, le=100)
     mode: Literal["hybrid", "vector", "bm25"] = "hybrid"
-    use_reranker: bool | None = None
+    use_reranker: bool = True
+    hierarchical: bool = True
+    hyde: bool = True
+    sub_queries: bool = True
+    stepback: bool = True
     tier: IngestionTier | None = None
     enhancements: str | None = None
-    hierarchical: bool | None = None
 
 
 class SearchResponse(BaseModel):
     query: str
+    enhanced_queries: list[str]
+    retrieval_mode: str
+    use_reranker: bool
+    hierarchical: bool
     results: list[dict]
     total: int
+    timing: dict[str, float]
 
 
 class PromotionRequest(BaseModel):
@@ -349,18 +357,33 @@ async def cancel_ingestion(job_id: str):
 @app.post("/v1/search", response_model=SearchResponse)
 async def search_endpoint(body: SearchRequest):
     try:
-        enhancements = body.enhancements
+        # Resolve enhancements — precedence: explicit string > tier > individual flags
+        if body.enhancements is not None:
+            enhancements = body.enhancements
+        elif body.tier is not None:
+            options = options_for_tier(body.tier)
+            enhancements = ",".join(options.query_enhancements)
+        else:
+            enabled = []
+            if body.hyde:
+                enabled.append("hyde")
+            if body.sub_queries:
+                enabled.append("sub_queries")
+            if body.stepback:
+                enabled.append("stepback")
+            enhancements = ",".join(enabled)
+
+        # Pre-resolve enhanced queries for logging
+        from pipeline.query import enhance_query as _enhance
+        enhanced_queries = _enhance(body.query, enhancements=enhancements)
+
+        # Resolve reranker — tier overrides, individual flag is default
         use_reranker = body.use_reranker
         if body.tier is not None:
             options = options_for_tier(body.tier)
-            if enhancements is None:
-                enhancements = ",".join(options.query_enhancements)
-            if use_reranker is None:
-                use_reranker = options.use_reranker
-        if use_reranker is None:
-            use_reranker = True
+            use_reranker = options.use_reranker
 
-        results = search(
+        results, timing = search(
             body.query,
             top_k=body.top_k,
             use_reranker=use_reranker,
@@ -381,7 +404,16 @@ async def search_endpoint(body: SearchRequest):
             }
             for result in results
         ]
-        return SearchResponse(query=body.query, results=formatted, total=len(formatted))
+        return SearchResponse(
+            query=body.query,
+            enhanced_queries=enhanced_queries,
+            retrieval_mode=body.mode,
+            use_reranker=use_reranker,
+            hierarchical=body.hierarchical,
+            results=formatted,
+            total=len(formatted),
+            timing=timing,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
@@ -391,7 +423,44 @@ async def search_endpoint(body: SearchRequest):
 @app.get("/v1/collections")
 async def list_collections():
     try:
-        return get_client().list_collections()
+        collections = get_client().list_collections()
+        # Enhance with embedding config info
+        result = []
+        for c in collections:
+            name = c.get("name", "") if isinstance(c, dict) else str(c)
+            info = {
+                "name": name,
+                "embedding_model": cfg.text_embedding_model,
+                "embedding_dim": cfg.text_embedding_dim,
+                "collection_name": cfg.text_collection if name == cfg.text_collection else name,
+            }
+            result.append(info)
+        return {"collections": result}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/v1/collections/{name}/stats")
+async def collection_stats(name: str):
+    try:
+        _ensure_collection(name, cfg.text_embedding_dim)
+        client = get_client()
+        if hasattr(client, "count"):
+            count = client.count(collection_name=name)
+        else:
+            count = len(list(client.query(
+                collection_name=name,
+                output_fields=["id"],
+                limit=10000,
+            )))
+        return {
+            "name": name,
+            "embedding_model": cfg.text_embedding_model,
+            "embedding_dim": cfg.text_embedding_dim,
+            "milvus_host": cfg.milvus_host,
+            "milvus_port": cfg.milvus_port,
+            "count": count,
+        }
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 

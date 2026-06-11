@@ -121,7 +121,7 @@ Key fields and their env vars:
 | `retrieval_top_k` | `RETRIEVAL_TOP_K` | `20` |
 | `rerank_top_k` | `RERANK_TOP_K` | `5` |
 | `hybrid_alpha` | `HYBRID_ALPHA` | `0.5` |
-| `query_enhancements` | `QUERY_ENHANCEMENTS` | `"hyde"` |
+| `query_enhancements` | `QUERY_ENHANCEMENTS` | `"hyde,sub_queries,stepback"` |
 | `hypothetical_questions_per_chunk` | `HYPOTHETICAL_QUESTIONS_PER_CHUNK` | `3` |
 
 ---

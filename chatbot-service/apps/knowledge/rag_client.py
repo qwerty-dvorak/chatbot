@@ -31,6 +31,20 @@ class RagApiClient:
     def is_enabled(self) -> bool:
         return self.enabled
 
+    def collection_stats(self, name: str | None = None) -> dict | None:
+        """Get embedding metadata (model, dimension, count) for a Milvus collection."""
+        try:
+            if name:
+                url = f"{self.base_url}/v1/collections/{name}/stats"
+            else:
+                url = f"{self.base_url}/v1/collections"
+            resp = requests.get(url, timeout=10)
+            resp.raise_for_status()
+            return resp.json()
+        except requests.RequestException as exc:
+            logger.warning("RAG API collection stats failed: %s", exc)
+            return None
+
     def health(self) -> dict | None:
         try:
             resp = requests.get(f"{self.base_url}/health", timeout=5)
@@ -100,15 +114,30 @@ class RagApiClient:
         return None
 
     def search(self, query: str, top_k: int = 5, mode: str = "hybrid",
-               use_reranker: bool | None = None, tier: str | None = None) -> list[dict]:
-        """Search the RAG index."""
+               use_reranker: bool | None = None, tier: str | None = None,
+               hierarchical: bool | None = None,
+               hyde: bool | None = None, sub_queries: bool | None = None,
+               stepback: bool | None = None) -> dict:
+        """Search the RAG index and return the full response dict.
+
+        Returns ``{"results": [...], "enhanced_queries": [...], ...}``
+        or ``{"results": []}`` on error / when disabled.
+        """
         if not self.enabled:
-            return []
+            return {"results": [], "enhanced_queries": []}
         body = {"query": query, "top_k": top_k, "mode": mode}
         if use_reranker is not None:
             body["use_reranker"] = use_reranker
         if tier is not None:
             body["tier"] = tier
+        if hierarchical is not None:
+            body["hierarchical"] = hierarchical
+        if hyde is not None:
+            body["hyde"] = hyde
+        if sub_queries is not None:
+            body["sub_queries"] = sub_queries
+        if stepback is not None:
+            body["stepback"] = stepback
         try:
             resp = requests.post(
                 f"{self.base_url}/v1/search",
@@ -116,11 +145,10 @@ class RagApiClient:
                 timeout=30,
             )
             resp.raise_for_status()
-            data = resp.json()
-            return data.get("results", [])
+            return resp.json()
         except requests.RequestException as exc:
             logger.error("RAG API search failed: %s", exc)
-            return []
+            return {"results": [], "enhanced_queries": []}
 
 
 rag_client = RagApiClient()

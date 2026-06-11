@@ -18,17 +18,14 @@ def stream_chat_response(message: Message, user) -> StreamingHttpResponse:
 
     from .context import ContextBuilder
     builder = ContextBuilder(chat, user)
-    context_messages = builder.build("")
 
-    # Replace the placeholder user message with the actual last user message
     parent_msg = (
         Message.objects
         .filter(chat=chat, role=Message.Role.USER, status=Message.Status.COMPLETED)
         .order_by("-created_at")
         .first()
     )
-    if parent_msg:
-        context_messages[-1]["content"] = parent_msg.content
+    context_messages = builder.build(parent_msg.content if parent_msg else "", parent_msg)
 
     client      = LiteLLMClient()
     tool_schemas = registry.get_schemas(user)
@@ -50,7 +47,6 @@ def _event_stream(message, user, client, context_messages, tool_schemas):
       Round 2 — LLM continuation with tool results → final text → done.
     """
     try:
-        # ── Round 1 ────────────────────────────────────────────────────────────
         handler1 = StreamHandler(message)
         kwargs   = {"tools": tool_schemas} if tool_schemas else {}
 
@@ -58,11 +54,9 @@ def _event_stream(message, user, client, context_messages, tool_schemas):
             for event in handler1.handle_chunk(chunk):
                 yield f"data: {json.dumps(event)}\n\n"
 
-        # Plain text response — we're done
         if not handler1.completed_tool_calls:
             return
 
-        # ── Execute tools ───────────────────────────────────────────────────────
         tool_result_messages: list[dict] = []
 
         for tc in handler1.completed_tool_calls:
@@ -76,8 +70,6 @@ def _event_stream(message, user, client, context_messages, tool_schemas):
                 "content":      result_content,
             })
 
-        # ── Round 2 ────────────────────────────────────────────────────────────
-        # Build continuation: original context + assistant tool-call msg + results
         assistant_tc_msg = {
             "role":    "assistant",
             "content": None,
@@ -92,15 +84,13 @@ def _event_stream(message, user, client, context_messages, tool_schemas):
         }
         continuation = context_messages + [assistant_tc_msg] + tool_result_messages
 
-        # Reset message for round 2 text accumulation
         message.content = ""
         message.status  = Message.Status.STREAMING
         message.save(update_fields=["content", "status"])
 
         handler2 = StreamHandler(message)
-        handler2.sequence = handler1.sequence  # keep delta sequence monotonic
+        handler2.sequence = handler1.sequence
 
-        # No tools in round 2 — prevents infinite tool-call loops
         for chunk in client.chat_completion_stream(continuation):
             for event in handler2.handle_chunk(chunk):
                 yield f"data: {json.dumps(event)}\n\n"
@@ -113,7 +103,6 @@ def _event_stream(message, user, client, context_messages, tool_schemas):
 
 
 def _execute_tool(tc: dict, message: Message, user) -> str:
-    """Look up and run the tool handler; return its result as a string."""
     from apps.tools.models import ToolCall as ToolCallModel, ToolDefinition
     from apps.tools.executor import ToolExecutor
 
@@ -125,7 +114,6 @@ def _execute_tool(tc: dict, message: Message, user) -> str:
     if not tool_def:
         return f"Error: tool '{name}' not found or disabled."
 
-    # Determine next sequence for this message
     seq = ToolCallModel.objects.filter(message=message).count()
 
     tc_record = ToolCallModel.objects.create(

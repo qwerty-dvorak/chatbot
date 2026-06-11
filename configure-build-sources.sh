@@ -55,7 +55,7 @@ barc_blocks = {
     --index-url http://osrepo.barc.gov.in/python-pypi/simple \\
     --trusted-host osrepo.barc.gov.in \\
     uv""",
-    "BARC UV SYNC": """RUN uv sync --frozen --no-dev \\
+    "BARC UV SYNC": """RUN uv sync --upgrade \\
     --default-index http://osrepo.barc.gov.in/python-pypi/simple \\
     --allow-insecure-host osrepo.barc.gov.in""",
     "BARC PYMILVUS INSTALL": """RUN pip install --no-cache-dir --break-system-packages \\

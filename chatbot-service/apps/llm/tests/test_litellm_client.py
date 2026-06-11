@@ -1,34 +1,39 @@
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
-from apps.llm.clients import FakeLLMClient, LiteLLMClient
+from apps.llm.clients import LiteLLMClient
 from apps.llm.embeddings import FakeEmbeddingClient
-from apps.llm.errors import LLMError, LLMProviderError, LLMTimeoutError
+from apps.llm.errors import LLMConnectionError, LLMError, LLMProviderError, LLMTimeoutError
 from apps.llm.token_usage import record_token_usage
 
 
-class FakeLLMClientTest(TestCase):
+class LiteLLMClientChatCompletionTest(TestCase):
     def setUp(self):
-        self.client = FakeLLMClient()
+        self.client = LiteLLMClient()
 
     def test_chat_completion_returns_content(self):
-        result = self.client.chat_completion([{"role": "user", "content": "hi"}])
+        result = self.client.chat_completion([{"role": "user", "content": "Say exactly: hello world"}])
         self.assertIn("content", result)
-        self.assertEqual(result["content"], "This is a fake response for testing.")
-        self.assertEqual(result["finish_reason"], "stop")
+        self.assertIn("hello world", result["content"].lower())
+        self.assertIn("finish_reason", result)
 
     def test_chat_completion_returns_usage(self):
-        result = self.client.chat_completion([{"role": "user", "content": "hi"}])
+        result = self.client.chat_completion([{"role": "user", "content": "Say exactly: hello world"}])
         self.assertIn("usage", result)
         self.assertGreater(result["usage"]["total_tokens"], 0)
 
     def test_chat_completion_stream_yields_chunks(self):
-        chunks = list(self.client.chat_completion_stream([{"role": "user", "content": "hi"}]))
+        chunks = list(self.client.chat_completion_stream([{"role": "user", "content": "Say exactly: hello stream"}]))
         self.assertGreater(len(chunks), 1)
-        contents = []
-        for chunk in chunks:
-            if chunk.choices and chunk.choices[0].delta.content:
-                contents.append(chunk.choices[0].delta.content)
-        self.assertEqual("".join(contents), "This is a fake stream.")
+
+    def test_extra_body_reasoning_enabled(self):
+        with override_settings(CHAT_REASONING_ENABLED=True):
+            extra = self.client._extra_body()
+            self.assertEqual(extra, {"chat_template_kwargs": {"enable_thinking": True}})
+
+    def test_extra_body_reasoning_disabled(self):
+        with override_settings(CHAT_REASONING_ENABLED=False):
+            extra = self.client._extra_body()
+            self.assertIsNone(extra)
 
 
 class FakeEmbeddingClientTest(TestCase):
@@ -46,12 +51,11 @@ class FakeEmbeddingClientTest(TestCase):
 
 
 class LiteLLMClientErrorTest(TestCase):
-    def test_client_requires_litellm_installed(self):
+    def test_client_raises_connection_error(self):
         client = LiteLLMClient()
-        with self.assertRaises(Exception):
-            client.chat_completion([{"role": "user", "content": "hi"}],
-                                    api_base="http://nonexistent:9999",
-                                    api_key="invalid")
+        client.base_url = "http://localhost:1"
+        with self.assertRaises((LLMConnectionError, LLMTimeoutError)):
+            client.chat_completion([{"role": "user", "content": "hi"}])
 
 
 class TokenUsageTest(TestCase):

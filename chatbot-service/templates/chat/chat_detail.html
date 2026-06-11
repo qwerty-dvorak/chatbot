@@ -47,6 +47,48 @@
                 {% for a in msg.attachments %}<span class="attach-chip">📎 {{ a.original_filename }}</span>{% endfor %}
               </div>
             {% endif %}
+            {% with rag_log=msg.rag_search_log %}
+              {% if rag_log %}
+                <button class="rag-details-toggle" onclick="toggleRagDetails(this)" type="button">
+                  <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor"><path d="M8 4a.5.5 0 01.5.5v3h3a.5.5 0 010 1h-3v3a.5.5 0 01-1 0v-3h-3a.5.5 0 010-1h3v-3A.5.5 0 018 4z"/></svg>
+                  RAG details
+                </button>
+                <div class="rag-details-panel">
+                  <div class="rag-detail-row">
+                    <span class="rag-detail-label">Mode</span>
+                    <span class="rag-detail-value">{{ rag_log.retrieval_mode }} · reranker:{{ rag_log.use_reranker|yesno:"on,off" }} · hierarchical:{{ rag_log.hierarchical|yesno:"on,off" }}</span>
+                  </div>
+                  <div class="rag-detail-row">
+                    <span class="rag-detail-label">Results</span>
+                    <span class="rag-detail-value">{{ rag_log.total_results }} sources: {% for s in rag_log.result_sources %}<code>{{ s }}</code> {% endfor %}</span>
+                  </div>
+                  {% if rag_log.enhanced_queries %}
+                  <div class="rag-detail-row">
+                    <span class="rag-detail-label">Enhanced</span>
+                    <span class="rag-detail-value">
+                      <ul class="rag-detail-list">
+                        {% for eq in rag_log.enhanced_queries %}<li><code>{{ eq|truncatechars:100 }}</code></li>{% endfor %}
+                      </ul>
+                    </span>
+                  </div>
+                  {% endif %}
+                  {% with timing=rag_log.metadata.timing %}
+                    {% if timing %}
+                    <div class="rag-detail-row">
+                      <span class="rag-detail-label">Timing</span>
+                      <span class="rag-detail-value">
+                        {% if timing.enhance_query %}<code>enhance {{ timing.enhance_query }}s</code> · {% endif %}
+                        {% if timing.embed %}<code>embed {{ timing.embed }}s</code> · {% endif %}
+                        {% if timing.search %}<code>search {{ timing.search }}s</code> · {% endif %}
+                        {% if timing.rerank %}<code>rerank {{ timing.rerank }}s</code> · {% endif %}
+                        {% if timing.total %}<strong>{{ timing.total }}s total</strong>{% endif %}
+                      </span>
+                    </div>
+                    {% endif %}
+                  {% endwith %}
+                </div>
+              {% endif %}
+            {% endwith %}
             <div class="msg-time">{{ msg.created_at|time:"H:i" }}</div>
           </div>
 
@@ -128,6 +170,15 @@
 </div>
 
 <script>
+function toggleRagDetails(btn) {
+  var panel = btn.nextElementSibling;
+  if (panel && panel.classList.contains('rag-details-panel')) {
+    panel.classList.toggle('open');
+    btn.innerHTML = panel.classList.contains('open')
+      ? '<svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor"><path d="M4 8a.5.5 0 01.5-.5h7a.5.5 0 010 1h-7A.5.5 0 014 8z"/></svg> RAG details'
+      : '<svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor"><path d="M8 4a.5.5 0 01.5.5v3h3a.5.5 0 010 1h-3v3a.5.5 0 01-1 0v-3h-3a.5.5 0 010-1h3v-3A.5.5 0 018 4z"/></svg> RAG details';
+  }
+}
 (function () {
   /* ── auto-resize textarea ── */
   const ta = document.getElementById('msg-input');

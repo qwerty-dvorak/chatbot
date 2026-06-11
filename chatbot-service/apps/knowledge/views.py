@@ -84,6 +84,17 @@ class DocumentDetailView(LoginRequiredMixin, DetailView):
                 if rag_status == "succeeded" and self.object.status == "pending":
                     self.object.status = "ready"
                     self.object.save(update_fields=["status"])
+                # Capture embedding info from job result
+                if rag_status == "succeeded" and rag_result.get("result"):
+                    meta = self.object.metadata
+                    if "embedding_info" not in meta:
+                        results_list = rag_result.get("result", {}).get("results", [])
+                        if results_list:
+                            meta["embedding_info"] = results_list[0].get("embedding_info", {})
+                        elif isinstance(rag_result.get("result"), dict):
+                            meta["embedding_info"] = rag_result["result"].get("embedding_info", {})
+                        self.object.metadata = meta
+                        self.object.save(update_fields=["metadata"])
         return context
 
 

@@ -126,3 +126,35 @@ class DocumentChunk(models.Model):
 
     def get_milvus_id(self):
         return str(self.id)
+
+
+class RagSearchLog(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True, blank=True, related_name="rag_search_logs")
+    chat = models.ForeignKey("chat.Chat", on_delete=models.CASCADE, null=True, blank=True, related_name="rag_search_logs")
+    message = models.ForeignKey("chat.Message", on_delete=models.CASCADE, null=True, blank=True, related_name="rag_search_logs")
+    original_query = models.TextField()
+    enhanced_queries = models.JSONField(default=list, blank=True)
+    hyde_docs = models.JSONField(default=list, blank=True)
+    sub_queries = models.JSONField(default=list, blank=True)
+    stepback_question = models.TextField(default="", blank=True)
+    retrieval_mode = models.CharField(max_length=30, default="hybrid")
+    use_reranker = models.BooleanField(default=True)
+    hierarchical = models.BooleanField(default=True)
+    total_results = models.IntegerField(default=0)
+    result_sources = models.JSONField(default=list, blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "rag_search_logs"
+        indexes = [
+            models.Index(fields=["user", "-created_at"]),
+            models.Index(fields=["chat", "-created_at"]),
+            models.Index(fields=["message"]),
+        ]
+        verbose_name = "RAG Search Log"
+        verbose_name_plural = "RAG Search Logs"
+
+    def __str__(self):
+        return f"RAG search [{self.original_query[:50]}] at {self.created_at}"
