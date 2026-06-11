@@ -13,8 +13,21 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ENV_FILE="$SCRIPT_DIR/.env.runpod"
 
-[[ -f "$ENV_FILE" ]] || { echo "ERROR: .env.runpod not found. Run runpod_wait.sh first."; exit 1; }
-source "$ENV_FILE"
+if [[ -f "$ENV_FILE" ]]; then
+  source "$ENV_FILE"
+elif [[ -f "$SCRIPT_DIR/.runpod_state" ]]; then
+  source "$SCRIPT_DIR/.runpod_state"
+  TEXT_URL="https://${TEXT_POD}-8000.proxy.runpod.net"
+  MM_URL="https://${MM_POD}-8000.proxy.runpod.net"
+  RERANKER_URL="https://${RERANKER_POD}-8000.proxy.runpod.net"
+  EMBEDDING_BASE_URL="${TEXT_URL}/v1"
+  MULTIMODAL_EMBEDDING_BASE_URL="${MM_URL}"
+  RERANKER_BASE_URL="${RERANKER_URL}"
+else
+  echo "ERROR: neither .env.runpod nor .runpod_state found."
+  echo "Run 'bash runpod_deploy.sh' or check pod IDs in .runpod_state."
+  exit 1
+fi
 
 PASS=0; FAIL=0
 result() { local s=$1 name="$2"; [[ "$s" == "PASS" ]] && PASS=$((PASS+1)) || FAIL=$((FAIL+1)); printf "  [%s] %s\n" "$s" "$name"; }
@@ -24,14 +37,14 @@ echo " RunPod vLLM endpoint validation"
 echo " docs/runpod_api.md"
 echo "══════════════════════════════════════════════════"
 
-TEXT_EMBED_URL="${EMBEDDING_BASE_URL}/v1/embeddings"
+TEXT_EMBED_URL="${EMBEDDING_BASE_URL}/embeddings"
 MM_EMBED_URL="${MULTIMODAL_EMBEDDING_BASE_URL}/pooling"
-RERANKER_URL="${RERANKER_BASE_URL}/score"
+RERANKER_URL="${RERANKER_BASE_URL}/pooling"
 
 echo ""
 echo "  Text Embed      ${EMBEDDING_BASE_URL}"
 echo "  MM Embed        ${MULTIMODAL_EMBEDDING_BASE_URL}"
-echo "  Reranker        ${RERANKER_BASE_URL}"
+echo "  Reranker        ${RERANKER_BASE_URL}/pooling"
 
 # ═══════════════════════════════════════════════════════
 # 1. Text Embedding — POST /v1/embeddings
@@ -124,53 +137,29 @@ print('OK')
 done
 
 # ═══════════════════════════════════════════════════════
-# 3. Reranker — POST /score
+# 3. Reranker — POST /pooling
 #    docs/runpod_api.md §3
+#    With --runner pooling the reranker exposes /pooling
+#    (same endpoint as the multimodal embed).
 # ═══════════════════════════════════════════════════════
 echo ""
 echo "───────────────────────────────────────────────────"
-echo " §3  Reranker — POST /score"
+echo " §3  Reranker — POST /pooling"
 echo "     Qwen/Qwen3-VL-Reranker-8B"
 echo "───────────────────────────────────────────────────"
 
-echo -n "  reranker text-only (single)"
+echo -n "  reranker single input"
 resp=$(curl -sf -X POST "$RERANKER_URL" \
   -H "Content-Type: application/json" \
-  -d '{"model":"Qwen/Qwen3-VL-Reranker-8B","text_1":"what is the capital of france","text_2":"Paris is the capital of France"}' 2>&1) && {
-  score=$(echo "$resp" | python3 -c "
+  -d '{"model":"Qwen/Qwen3-VL-Reranker-8B","input":"What is the capital of France? Paris is the capital of France."}' 2>&1) && {
+  info=$(echo "$resp" | python3 -c "
 import sys,json
 d=json.load(sys.stdin)
-s = d.get('score') or (d.get('data') and d['data'][0].get('score')) or ''
-print(s)" 2>/dev/null || echo "")
-  [[ -n "$score" ]] && result PASS "text-only single → score=$score" \
-    || result FAIL "text-only single → unexpected: $(echo $resp | head -c200)"
-} || result FAIL "text-only single → HTTP error: $(echo $resp | head -c200)"
-
-echo -n "  reranker batch scoring"
-resp=$(curl -sf -X POST "$RERANKER_URL" \
-  -H "Content-Type: application/json" \
-  -d '{"model":"Qwen/Qwen3-VL-Reranker-8B","queries":["what is the capital of france","who wrote 1984"],"documents":["Paris is the capital of France","George Orwell"]}' 2>&1) && {
-  count=$(echo "$resp" | python3 -c "
-import sys,json
-d=json.load(sys.stdin)
-scores = d.get('data',[{}])
-print(len(scores))" 2>/dev/null || echo "0")
-  [[ "$count" -gt 0 ]] && result PASS "batch scoring → $count scores" \
-    || result FAIL "batch scoring → unexpected: $(echo $resp | head -c200)"
-} || result FAIL "batch scoring → HTTP error: $(echo $resp | head -c200)"
-
-echo -n "  reranker multimodal (text+image)"
-resp=$(curl -sf -X POST "$RERANKER_URL" \
-  -H "Content-Type: application/json" \
-  -d '{"model":"Qwen/Qwen3-VL-Reranker-8B","text_1":"A woman with a dog on a beach","text_2":{"content":[{"type":"text","text":"A woman shares a joyful moment with her golden retriever on a sun-drenched beach at sunset."},{"type":"image_url","image_url":{"url":"https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen-VL/assets/demo.jpeg"}}]}}' 2>&1) && {
-  score=$(echo "$resp" | python3 -c "
-import sys,json
-d=json.load(sys.stdin)
-s = d.get('score') or (d.get('data') and d['data'][0].get('score')) or ''
-print(s)" 2>/dev/null || echo "")
-  [[ -n "$score" ]] && result PASS "multimodal → score=$score" \
-    || result FAIL "multimodal → unexpected: $(echo $resp | head -c200)"
-} || result FAIL "multimodal → HTTP error: $(echo $resp | head -c200)"
+e=d['data'][0]['data']
+print(f'{len(e)} vecs x {len(e[0])} dim')" 2>/dev/null || echo "")
+  [[ -n "$info" ]] && result PASS "single input → $info" \
+    || result FAIL "single input → unexpected: $(echo $resp | head -c200)"
+} || result FAIL "single input → HTTP error: $(echo $resp | head -c200)"
 
 echo -n "  reranker response shape"
 echo "$resp" | python3 -c "

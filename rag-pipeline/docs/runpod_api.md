@@ -143,54 +143,40 @@ bash rag-pipeline/test_runpod_endpoints.sh
 ## 3. Reranker
 
 **Model:** `Qwen/Qwen3-VL-Reranker-8B`
-**Endpoint:** `POST /score`
+**Endpoint:** `POST /pooling`
 
-#### Text-only (single score)
+> With `--runner pooling`, the reranker exposes the **/pooling** endpoint (same as
+> the multimodal embed). Both pods share the same API shape. The `--hf-overrides`
+> flag configures the model architecture to properly load the classification head.
 
-```json
-{
-  "model": "Qwen/Qwen3-VL-Reranker-8B",
-  "text_1": "what is the capital of france",
-  "text_2": "Paris is the capital of France"
-}
-```
-
-#### Batch scoring
+### Request
 
 ```json
 {
   "model": "Qwen/Qwen3-VL-Reranker-8B",
-  "queries": ["what is the capital of france", "who wrote 1984"],
-  "documents": ["Paris is the capital of France", "George Orwell"]
+  "input": "What is the capital of France? Paris is the capital of France."
 }
 ```
 
-#### Multimodal (text + image)
-
-```json
-{
-  "model": "Qwen/Qwen3-VL-Reranker-8B",
-  "text_1": "A woman with a dog on a beach",
-  "text_2": {
-    "content": [
-      {"type": "text", "text": "A woman shares a joyful moment with her golden retriever on a sun-drenched beach at sunset."},
-      {"type": "image_url", "image_url": {"url": "https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen-VL/assets/demo.jpeg"}}
-    ]
-  }
-}
-```
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `model` | string | yes | Model ID |
+| `input` | string or string[] | yes | Text to embed (pair for cross-encoding) |
 
 ### Response
 
 ```json
 {
-  "id": "score-...",
+  "id": "pool-...",
   "object": "list",
   "data": [
     {
       "index": 0,
-      "object": "score",
-      "score": 0.979
+      "object": "pooling",
+      "data": [
+        [0.0012, -0.0034, ...],
+        [0.0056, 0.0012, ...]
+      ]
     }
   ],
   "model": "Qwen/Qwen3-VL-Reranker-8B",
@@ -203,10 +189,10 @@ bash rag-pipeline/test_runpod_endpoints.sh
 
 | Field | Value |
 |-------|-------|
-| Score range | 0.0 – 1.0 (higher = more relevant) |
-| Input modes | text-only, text+image, text only doc, image only doc |
-| Max tokens | depends on model config |
-| Task | `score` (via `--runner pooling` + `--hf-overrides`) |
+| Output type | ColBERT-style multi-vector pooling |
+| Each vector dim | **4096** |
+| Data type | `float32` |
+| Max tokens | 4096 |
 
 ### vLLM Config
 

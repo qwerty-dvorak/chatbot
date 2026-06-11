@@ -160,7 +160,7 @@ MULTIMODAL_EMBEDDING_API_KEY=dummy
 MULTIMODAL_EMBEDDING_MODEL=nvidia/nemotron-colembed-vl-8b-v2
 MULTIMODAL_EMBEDDING_DIM=${MM_DIM}
 
-# Reranker — Qwen/Qwen3-VL-Reranker-8B (vLLM /score endpoint)
+# Reranker — Qwen/Qwen3-VL-Reranker-8B (vLLM /pooling endpoint)
 RERANKER_BASE_URL=${RERANKER_URL}
 RERANKER_API_KEY=dummy
 RERANKER_MODEL=Qwen/Qwen3-VL-Reranker-8B
