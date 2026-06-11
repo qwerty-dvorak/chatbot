@@ -18,3 +18,5 @@ rag-pipeline/bm25_index_mock.pkl
 # RunPod testing
 rag-pipeline/.runpod_state
 rag-pipeline/.env.runpod
+
+data/object_store/
