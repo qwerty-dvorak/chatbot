@@ -125,13 +125,24 @@ echo "  pod: $TEXT_POD"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 3. MULTIMODAL EMBEDDING — nvidia/nemotron-colembed-vl-8b-v2
+#    limit-mm-per-prompt JSON goes in env var MM_LIMIT to avoid RunPod's
+#    comma-splitting of the docker-start-cmd string.
 # ─────────────────────────────────────────────────────────────────────────────
+MM_ENV_JSON=$(python3 -c "
+import json
+d = {
+    'HF_TOKEN': '${HF_TOKEN}',
+    'HUGGING_FACE_HUB_TOKEN': '${HF_TOKEN}',
+    'MM_LIMIT': json.dumps({'image': 1, 'video': 0})
+}
+print(json.dumps(d))")
+
 echo "Creating multimodal-embed template..."
 MM_TPL=$(create_template "rag-mm-embed-$TS" \
   --image "vllm/vllm-openai:latest" \
   --docker-entrypoint "/bin/bash" \
-  --docker-start-cmd '-c,exec python3 -m vllm.entrypoints.openai.api_server --model nvidia/nemotron-colembed-vl-8b-v2 --trust-remote-code --runner pooling --port 8000 --gpu-memory-utilization 0.90 --max-model-len 8192 --limit-mm-per-prompt '"'"'{"image":1,"video":0}'"'"' --skip-mm-profiling' \
-  --env "$HF_ENV_JSON" \
+  --docker-start-cmd '-c,exec python3 -m vllm.entrypoints.openai.api_server --model nvidia/nemotron-colembed-vl-8b-v2 --trust-remote-code --runner pooling --port 8000 --gpu-memory-utilization 0.90 --max-model-len 8192 --limit-mm-per-prompt "$MM_LIMIT" --skip-mm-profiling' \
+  --env "$MM_ENV_JSON" \
   --ports "8000/http" \
   --container-disk-in-gb 50)
 echo "  template: $MM_TPL"
