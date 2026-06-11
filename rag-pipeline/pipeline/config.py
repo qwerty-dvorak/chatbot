@@ -64,6 +64,18 @@ class Config:
     query_enhancements: str = field(default_factory=lambda: os.getenv("QUERY_ENHANCEMENTS", "hyde"))
     hypothetical_questions_per_chunk: int = field(default_factory=lambda: int(os.getenv("HYPOTHETICAL_QUESTIONS_PER_CHUNK", "3")))
 
+    # PostgreSQL knowledge store — connects to the *chatbot-service* database.
+    # Uses the same env var names and defaults as chatbot-service.
+    postgres_db: str = field(default_factory=lambda: os.getenv("POSTGRES_DB", "chatbot"))
+    postgres_user: str = field(default_factory=lambda: os.getenv("POSTGRES_USER", "chatbot"))
+    postgres_password: str = field(default_factory=lambda: os.getenv("POSTGRES_PASSWORD", "chatbot"))
+    postgres_host: str = field(default_factory=lambda: os.getenv("POSTGRES_HOST", "localhost"))
+    postgres_port: int = field(default_factory=lambda: int(os.getenv("POSTGRES_PORT", "5432")))
+    postgres_pool_size: int = field(default_factory=lambda: int(os.getenv("POSTGRES_POOL_SIZE", "5")))
+
+    # Object store (local file-system, content-addressed)
+    object_store_path: str = field(default_factory=lambda: os.getenv("OBJECT_STORE_PATH", "./data/object_store"))
+
     def __post_init__(self) -> None:
         # Validate numeric bounds that would cause confusing downstream errors
         if self.text_embedding_dim <= 0:
