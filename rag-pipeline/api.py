@@ -1,3 +1,4 @@
+import logging
 import shutil
 import uuid
 from contextlib import asynccontextmanager
@@ -9,13 +10,15 @@ from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile, statu
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
+logger = logging.getLogger(__name__)
+
 from pipeline.config import cfg
 from pipeline.index import connect_milvus, get_client
 from pipeline.jobs import IngestionWorker, JobStore, TERMINAL_STATUSES
 from pipeline.models import IngestionTier
+from pipeline.progress import ProgressTracker
 from pipeline.search import search
 from pipeline.tiers import (
-    ingest_tier,
     options_for_tier,
     promote_document,
     tier_from_str,
@@ -27,22 +30,67 @@ job_store = JobStore(cfg.ingestion_data_dir)
 
 def _execute_job(job: dict) -> dict:
     payload = job["payload"]
+    job_id = job["id"]
+
     if job["kind"] == "ingest":
-        result = ingest_tier(
-            payload["path"],
-            tier=tier_from_str(payload["tier"]),
-            strategy=payload.get("strategy"),
-            hypothetical_questions=payload.get("hypothetical_questions"),
-        )
-        result["source_paths"] = [
-            str(path.resolve())
-            for path in sorted(Path(payload["path"]).iterdir())
-            if path.is_file()
+        step_names = [
+            "extract", "store_raw", "db_insert", "chunk",
+            "hyde", "persist", "embed", "index",
         ]
-        if result["files_failed"] and result["files_processed"] == 0:
-            messages = "; ".join(item["error"] for item in result["errors"])
+        tracker = ProgressTracker(
+            job_id, step_names,
+            persist_fn=lambda jid, steps: job_store.update_steps(jid, steps),
+        )
+        tracker.start("extract", "reading files from disk")
+
+        # Use the new text/image pipelines with progress tracking
+        from pipeline.text_pipeline import process_document as text_process
+        from pipeline.image_pipeline import process_document as image_process
+        from pipeline.extract import extract as do_extract
+
+        upload_dir = Path(payload["path"])
+        file_paths = sorted(
+            p for p in upload_dir.iterdir() if p.is_file()
+        )
+        results = []
+        errors = []
+
+        for file_path in file_paths:
+            source_name = file_path.name
+            try:
+                tracker.start("extract", f"extracting {source_name}")
+                doc = do_extract(str(file_path))
+                tracker.complete("extract", f"{source_name} ({doc.content_type.value})")
+
+                if doc.images and not doc.text:
+                    # Image document -> use image pipeline
+                    result = image_process(doc, params={
+                        "embedding_model": cfg.multimodal_embedding_model,
+                        "embedding_dim": cfg.multimodal_embedding_dim,
+                    }, progress=tracker)
+                else:
+                    # Text document -> use text pipeline
+                    result = text_process(doc, params={
+                        "chunk_strategy": payload.get("strategy", cfg.chunk_strategy),
+                        "generate_hyde": payload.get("hypothetical_questions", True),
+                    }, progress=tracker)
+                results.append(result)
+            except Exception as exc:
+                logger.error("Failed to process %s: %s", source_name, exc)
+                errors.append({"file": source_name, "error": str(exc)})
+
+        combined = {
+            "files_processed": len(results),
+            "files_failed": len(errors),
+            "results": results,
+            "errors": errors,
+        }
+
+        if errors and not results:
+            messages = "; ".join(item["error"] for item in errors)
             raise RuntimeError(f"All uploaded files failed ingestion: {messages}")
-        return result
+        return combined
+
     if job["kind"] == "promote":
         return promote_document(
             payload["source_path"],
@@ -107,6 +155,19 @@ class PromotionRequest(BaseModel):
 def _public_job(job: dict) -> dict:
     payload = job["payload"]
     request = {key: value for key, value in payload.items() if key != "path"}
+    steps = job.get("steps") or []
+    step_summary = {}
+    if steps:
+        total = len(steps)
+        completed = sum(1 for s in steps if s["status"] == "completed")
+        failed = sum(1 for s in steps if s["status"] == "failed")
+        running = next((s for s in steps if s["status"] == "running"), None)
+        step_summary = {
+            "total": total,
+            "completed": completed,
+            "failed": failed,
+            "current_step": running["name"] if running else None,
+        }
     response = {
         "id": job["id"],
         "kind": job["kind"],
@@ -115,6 +176,8 @@ def _public_job(job: dict) -> dict:
         "request": request,
         "result": job["result"],
         "error": job["error"],
+        "steps": steps,
+        "step_summary": step_summary,
         "created_at": job["created_at"],
         "started_at": job["started_at"],
         "completed_at": job["completed_at"],
