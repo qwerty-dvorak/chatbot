@@ -2,13 +2,13 @@
 
 Three vLLM servers deployed on RunPod for RAG pipeline:
 
-| Service | Pod ID | GPU | Cost/hr |
-|---------|--------|-----|---------|
-| Text Embedding | `jio9vdwk5an2ot` | NVIDIA L4 (24GB) | $0.39 |
-| Multimodal Embedding | `n90g9jigviyth3` | NVIDIA H100 (80GB) | $3.29 |
-| Reranker | `nqg53nubtze0xh` | NVIDIA H100 (80GB) | $3.29 |
+| Service | GPU | Cost/hr |
+|---------|-----|---------|
+| Text Embedding | NVIDIA GeForce RTX 3090 | $0.22 |
+| Multimodal Embedding | NVIDIA GeForce RTX 3090 | $0.22 |
+| Reranker | NVIDIA GeForce RTX 3090 | $0.22 |
 
-Total: **$6.97/hr**
+Total: **$0.66/hr**
 
 ---
 
@@ -58,10 +58,10 @@ Total: **$6.97/hr**
 | Data type | `float32` |
 | Max tokens | 8192 |
 
-### Script
+### Test
 
 ```bash
-bash rag-pipeline/scripts/test_text_embed.sh
+bash rag-pipeline/test_runpod_endpoints.sh
 ```
 
 ---
@@ -125,33 +125,31 @@ bash rag-pipeline/scripts/test_text_embed.sh
 ```
 --model nvidia/nemotron-colembed-vl-8b-v2
 --trust-remote-code
---tensor-parallel-size 1
+--runner pooling
 --gpu-memory-utilization 0.90
 --max-model-len 8192
---limit-mm-per-prompt {"image": 1, "video": 0}
+--limit-mm-per-prompt <MM_LIMIT env var>
 --skip-mm-profiling
---runner pooling
 ```
 
-### Script
+### Test
 
 ```bash
-bash rag-pipeline/scripts/test_mm_embed.sh
+bash rag-pipeline/test_runpod_endpoints.sh
 ```
 
 ---
 
 ## 3. Reranker
 
-**Model:** `Qwen/Qwen3-VL-Reranker-2B`
+**Model:** `Qwen/Qwen3-VL-Reranker-8B`
 **Endpoint:** `POST /score`
-**URL:** `https://nqg53nubtze0xh-8000.proxy.runpod.net`
 
 #### Text-only (single score)
 
 ```json
 {
-  "model": "Qwen/Qwen3-VL-Reranker-2B",
+  "model": "Qwen/Qwen3-VL-Reranker-8B",
   "text_1": "what is the capital of france",
   "text_2": "Paris is the capital of France"
 }
@@ -161,7 +159,7 @@ bash rag-pipeline/scripts/test_mm_embed.sh
 
 ```json
 {
-  "model": "Qwen/Qwen3-VL-Reranker-2B",
+  "model": "Qwen/Qwen3-VL-Reranker-8B",
   "queries": ["what is the capital of france", "who wrote 1984"],
   "documents": ["Paris is the capital of France", "George Orwell"]
 }
@@ -171,7 +169,7 @@ bash rag-pipeline/scripts/test_mm_embed.sh
 
 ```json
 {
-  "model": "Qwen/Qwen3-VL-Reranker-2B",
+  "model": "Qwen/Qwen3-VL-Reranker-8B",
   "text_1": "A woman with a dog on a beach",
   "text_2": {
     "content": [
@@ -195,7 +193,7 @@ bash rag-pipeline/scripts/test_mm_embed.sh
       "score": 0.979
     }
   ],
-  "model": "Qwen/Qwen3-VL-Reranker-2B",
+  "model": "Qwen/Qwen3-VL-Reranker-8B",
   "usage": {
     "prompt_tokens": 12,
     "total_tokens": 12
@@ -208,27 +206,30 @@ bash rag-pipeline/scripts/test_mm_embed.sh
 | Score range | 0.0 – 1.0 (higher = more relevant) |
 | Input modes | text-only, text+image, text only doc, image only doc |
 | Max tokens | depends on model config |
-| Task | `score` (via `--hf-overrides`) |
+| Task | `score` (via `--runner pooling` + `--hf-overrides`) |
 
 ### vLLM Config
 
 ```
---model Qwen/Qwen3-VL-Reranker-2B
+--model Qwen/Qwen3-VL-Reranker-8B
+--runner pooling
 --trust-remote-code
---tensor-parallel-size 1
 --gpu-memory-utilization 0.90
 --port 8000
---hf-overrides '{"architectures":["Qwen3VLForSequenceClassification"],"classifier_from_token":["no","yes"],"is_original_qwen3_reranker":true}'
+--max-model-len 4096
+--hf-overrides <HF_OVERRIDES env var>
 ```
 
-### Scripts
+`HF_OVERRIDES` env var:
+```json
+{"architectures":["Qwen3VLForSequenceClassification"],"classifier_from_token":["no","yes"],"is_original_qwen3_reranker":true}
+```
+
+### Tests
 
 ```bash
-# Text-only
-bash rag-pipeline/scripts/test_reranker.sh
-
-# Multimodal (text + image)
-bash rag-pipeline/scripts/test_reranker_image.sh
+# All endpoints (text embed, mm embed, reranker)
+bash rag-pipeline/test_runpod_endpoints.sh
 ```
 
 ---
