@@ -110,26 +110,44 @@ def sub_queries(query: str, n: int | None = None) -> list[str]:
 
 
 def stepback(query: str) -> str:
-    """Generate a broader 'stepback' question.
+    """Generate a stepback question that abstracts the specific query into
+    a broader question about fundamental concepts, principles, or rules.
 
-    Reformulates the query as a more general question that provides the
-    high-level background knowledge needed to answer the original query.
-    Retrieving documents for this broader question can surface context that
-    would otherwise be missed.
+    The architecture diagram describes a two-stage process:
+
+      ② Stepback abstraction
+         LLM rewrites the narrow query into a generalised stepback question
+         targeting core concepts or rules.
+
+      ③-④ Retrieval with stepback question
+         The stepback question is embedded and searched against the vector
+         store, surfacing chunks with foundational principles.
+
+      ⑤-⑥ Stepback answer generation
+         The retrieved chunks are fed to an LLM which generates a high-level
+         *stepback answer* detailing the rules, limitations, or context
+         requested by the abstract question.  (This happens in the search
+         pipeline or downstream chatbot-service.)
+
+      ⑦-⑧ Final synthesis
+         Both the original question (specific) and the stepback answer
+         (foundational) are routed to the final LLM for a grounded answer.
 
     Args:
         query: The user's original search query.
 
     Returns:
-        A single, more general reformulation of the query.
+        A single, more abstract stepback question focusing on the underlying
+        principles, rules, or domain knowledge needed to answer the query.
     """
     system = (
-        "You are an expert at reformulating questions. "
-        "Given a specific query, produce a broader, more general question "
-        "that captures the underlying concept or domain. "
-        "The broader question should help surface background knowledge "
-        "useful for answering the original query. "
-        "Return only the broader question, nothing else."
+        "You are an expert at the stepback prompting technique. "
+        "Given a highly specific question, abstract it into a broader, "
+        "high-level question about the fundamental concepts, principles, "
+        "rules, or constraints that govern the topic. "
+        "The stepback question should target the core knowledge needed "
+        "to understand and answer the original query. "
+        "Return only the stepback question, nothing else."
     )
     user = f"Query: {query}"
     return _chat(system, user).strip()

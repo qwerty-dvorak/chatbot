@@ -168,11 +168,66 @@ for i, q in enumerate(enhanced):
 print()
 
 # ═══════════════════════════════════════════════════
+# Stepback Tests
+# ═══════════════════════════════════════════════════
+print()
+print("══════════════════════════════════════════════════")
+print(" Stepback Test")
+print("══════════════════════════════════════════════════")
+print()
+
+# ── Test 13: stepback() returns a non-empty string ──────
+print("§13 stepback() returns a reformulated question...")
+sb = stepback(QUERY)
+check(len(sb) > 0, f"returned string of length {len(sb)}")
+check(sb != QUERY, "stepback question differs from original query")
+check("?" in sb, "stepback question is a question (contains '?')")
+print(f"    original: {QUERY}")
+print(f"    stepback: {sb}")
+print()
+
+# ── Test 14: stepback is broader / more abstract ────────
+print("§14 stepback question is broader in scope...")
+sb_words = set(sb.lower().split())
+q_words = set(QUERY.lower().split())
+is_longer = len(sb) >= len(QUERY) * 0.5  # rough: shouldn't be much shorter
+check(is_longer, f"stepback ({len(sb)} chars) not drastically shorter than "
+      f"original ({len(QUERY)} chars)")
+# Stepback should mention general concepts like "research", "expedition",
+# "exploration" rather than the specific "Acheron Trough"
+has_general_term = any(t in sb.lower() for t in
+                       ["research", "expedition", "exploration", "geological",
+                        "scientific", "study", "mission", "survey"])
+check(has_general_term, f"stepback contains a general-scope term")
+print()
+
+# ── Test 15: enhance_query with stepback includes both ──
+print("§15 enhance_query(query, enhancements='stepback')...")
+enhanced = enhance_query(QUERY, enhancements="stepback")
+check(len(enhanced) >= 2, f"returned {len(enhanced)} query strings (≥2)")
+check(QUERY in enhanced, "original query present")
+has_stepback = any(q != QUERY and "?" in q for q in enhanced)
+check(has_stepback, "stepback question present")
+for i, q in enumerate(enhanced):
+    print(f"    query[{i}]: {q[:100]}...")
+print()
+
+# ── Test 16: enhance_query with stepback+hyde+sub_queries ─
+print("§16 enhance_query with stepback+hyde+sub_queries combines all...")
+enhanced = enhance_query(QUERY, enhancements="stepback,hyde,sub_queries")
+check(len(enhanced) >= 3,
+      f"returned {len(enhanced)} query strings (≥3)")
+check(QUERY in enhanced, "original query present")
+for i, q in enumerate(enhanced):
+    print(f"    query[{i}]: {q[:100]}...")
+print()
+
+# ═══════════════════════════════════════════════════
 # Summary
 # ═══════════════════════════════════════════════════
 print("══════════════════════════════════════════════════")
 if _failures == 0:
-    print(f" All {12 - (_failures > 0)} checks passed! HyDE + sub-queries pipeline validated.")
+    print(f" All {16 - (_failures > 0)} checks passed! HyDE + sub-queries + stepback pipeline validated.")
 else:
     print(f" {_failures} check(s) failed.")
     sys.exit(1)

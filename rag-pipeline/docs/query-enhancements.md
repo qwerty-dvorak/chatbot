@@ -124,22 +124,97 @@ query). Configurable via `SUB_QUERIES_COUNT`.
 
 ---
 
-### Stepback — Query-time
+### Stepback (Take-a-Step-Back) — Query-time
 
-**Key insight:** Specific queries ("what is the learning rate in the paper on
-page 7?") may miss documents that contain the background knowledge needed to
-understand the answer. A broader query ("what optimisation techniques are used
-in transformer training?") surfaces that context.
+**Key insight:** When a user asks a highly specific, complex, or concrete
+question ("what is the learning rate in the paper on page 7?"), directly
+querying a vector database often surfaces shallow matches or misses the
+underlying principles needed to answer correctly. A broader, high-level
+question ("what optimisation techniques are used in transformer training?")
+surfaces the foundational knowledge. The system retrieves context with this
+abstracted question and then combines both sources for a grounded answer.
+
+**Architecture diagram (Stepback Prompting RAG Workflow):**
+```
+                    ┌───────────────────┐
+                    │  Original Query   │
+                    │  (very specific)  │
+                    └────────┬──────────┘
+                             │ ② LLM abstracts
+                             ▼
+                    ┌───────────────────┐
+                    │  Stepback Query   │
+                    │(fundamental       │
+                    │ concepts / rules) │
+                    └────────┬──────────┘
+                             │ ③ embed + search
+                             ▼
+                    ┌────────────────────┐
+                    │ Vector Store:      │
+                    │ ┌───────────────┐  │
+                    │ │ [hit]         │  │
+                    │ └───────────────┘  │
+                    │ ┌───────────────┐  │ ④ surface
+                    │ │[foundational] │  │    closest match
+                    │ └───────────────┘  │
+                    │ ┌───────────────┐  │
+                    │ └───────────────┘  │
+                    └────────┬───────────┘
+                             │ ⑤ top-k chunks
+                             ▼
+                    ┌───────────────────┐
+                    │  Top K Chunks     │
+                    │(broad /           │
+                    │ foundational)     │
+                    └────────┬──────────┘
+                             │ ⑥ LLM generates
+                             ▼
+                    ┌───────────────────┐
+                    │ Stepback Answer   │
+                    │(rules / context)  │
+                    └────────┬──────────┘
+                             │
+              ┌──────────────┼──────────────┐
+              │ ⑦ original   │              │
+              │    query      │ ⑦ stepback   │
+              │   (specific)  │    answer    │
+              │              │  (foundation) │
+              └──────┬───────┴──────┬───────┘
+                     │              │
+                     ▼              ▼
+                ┌────────────────────────┐
+                │     Final LLM          │
+                │   (synthesis stage)    │ ⑧
+                └───────────┬────────────┘
+                            ▼
+                   ┌────────────────┐
+                   │   Final Answer │
+                   │   (grounded)   │
+                   └────────────────┘
+```
 
 **How it works:**
-1. The LLM reformulates the query into a broader, more general question.
-2. The broader question is embedded and searched alongside the original.
-3. Results are fused via RRF.
+1. The LLM abstracts the highly specific query into a broader **stepback
+   question** targeting fundamental concepts, principles, rules, or constraints
+   (step ②).
+2. The stepback question is embedded and searched against the vector store,
+   surfacing chunks containing foundational knowledge (steps ③-④).
+3. Those chunks are gathered as the top-k relevant context (step ⑤).
+4. The retrieved chunks are fed to an LLM which generates a comprehensive,
+   high-level **stepback answer** detailing the rules, limitations, or
+   background context (step ⑥). This happens in the search pipeline or
+   downstream chatbot-service.
+5. Both the original query (specific details) and the stepback answer
+   (foundational rules) are routed to the final LLM for synthesis (steps ⑦-⑧).
+6. Inside the RAG pipeline, the stepback question is always searched alongside
+   the original query for recall; results are fused via RRF and re-scored by
+   the reranker using the original query.
 
-**When to use:** Narrow, specific queries where background context is needed.
-Global tier only by default.
+**When to use:** Narrow, specific queries where background context or
+foundational knowledge is needed. Global tier only by default.
 
-**Trade-off:** One extra LLM call. Less useful for already-broad queries.
+**Trade-off:** One extra LLM call per search. Less useful for already-broad
+queries.
 
 ---
 
