@@ -27,6 +27,7 @@ def search(
     use_reranker: bool = True,
     retrieval_mode: str = "hybrid",
     enhancements: str | list[str] | None = None,
+    hierarchical: bool | None = None,
 ) -> list[SearchResult]:
     """Full search pipeline.
 
@@ -37,7 +38,14 @@ def search(
     3. For each enhanced query string:
        a. Build a temporary :class:`~pipeline.models.Chunk` from the query text
           and call :func:`~pipeline.embed.embed_text` to obtain its embedding.
-       b. Run retrieval according to *retrieval_mode*:
+       b. If *hierarchical* is ``True`` (default from config):
+          i.   **Stage 1** — Search against ``chunk_type == "summary"`` vectors
+               to identify top-N relevant documents (N = ``summary_top_k``).
+          ii.  Extract the ``source_path`` values from matched summaries.
+          iii. **Stage 2** — Search only within those documents' chunks
+               (filter: ``source_path in [...] and chunk_type != "summary"``).
+       c. Otherwise (standard mode), run retrieval directly according to
+          *retrieval_mode*:
           - ``"vector"``  – :func:`~pipeline.retrieve.vector_search`
           - ``"bm25"``    – :func:`~pipeline.retrieve.bm25_search`
           - ``"hybrid"``  – :func:`~pipeline.retrieve.hybrid_search`
@@ -58,6 +66,10 @@ def search(
                         ``cfg.rerank_top_k`` when given.
         use_reranker:   Whether to run the reranker after fusion.
         retrieval_mode: One of ``"vector"``, ``"bm25"``, or ``"hybrid"``.
+        hierarchical:   Enable two-stage coarse-to-fine search (stage 1 =
+                        summary vectors; stage 2 = document chunks within
+                        matched documents).  ``None`` falls back to
+                        ``cfg.hierarchical_mode``.
 
     Returns:
         Ordered list of :class:`~pipeline.models.SearchResult` objects.
@@ -66,6 +78,9 @@ def search(
 
     effective_top_k = top_k if top_k is not None else cfg.rerank_top_k
     retrieval_k = cfg.retrieval_top_k
+
+    if hierarchical is None:
+        hierarchical = cfg.hierarchical_mode
 
     mode = retrieval_mode.lower()
     if mode not in {"vector", "bm25", "hybrid"}:
@@ -79,7 +94,6 @@ def search(
     all_result_lists: list[list[SearchResult]] = []
 
     for q_text in enhanced_queries:
-        # Build a temporary chunk so we can reuse embed_text's batch API.
         tmp_chunk = Chunk(
             id=uuid.uuid4().hex,
             source_path="__query__",
@@ -91,12 +105,36 @@ def search(
             continue
         embedding = embedded[0].embedding
 
-        if mode == "vector":
-            results = vector_search(embedding, retrieval_k)
-        elif mode == "bm25":
-            results = bm25_search(q_text, retrieval_k)
-        else:  # default: hybrid
-            results = hybrid_search(q_text, embedding, retrieval_k)
+        # ── Two-stage hierarchical search ──────────────────────────
+        if hierarchical:
+            # Stage 1: search against summary vectors
+            summary_hits = vector_search(
+                embedding, top_k=cfg.summary_top_k,
+                extra_filter='chunk_type == "summary"',
+            )
+            matched_paths = list({h.chunk.source_path for h in summary_hits})
+            if matched_paths:
+                escaped = [
+                    p.replace("\\", "\\\\").replace('"', '\\"')
+                    for p in matched_paths
+                ]
+                path_list = "[" + ", ".join(f'"{e}"' for e in escaped) + "]"
+                extra = f"source_path in {path_list} and chunk_type != \"summary\""
+                if mode == "vector":
+                    results = vector_search(embedding, retrieval_k, extra_filter=extra)
+                elif mode == "bm25":
+                    results = bm25_search(q_text, retrieval_k)
+                else:
+                    results = hybrid_search(q_text, embedding, retrieval_k, extra_filter=extra)
+            else:
+                results = []
+        else:
+            if mode == "vector":
+                results = vector_search(embedding, retrieval_k)
+            elif mode == "bm25":
+                results = bm25_search(q_text, retrieval_k)
+            else:
+                results = hybrid_search(q_text, embedding, retrieval_k)
 
         if results:
             all_result_lists.append(results)

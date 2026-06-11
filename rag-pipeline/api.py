@@ -35,7 +35,7 @@ def _execute_job(job: dict) -> dict:
     if job["kind"] == "ingest":
         step_names = [
             "extract", "store_raw", "db_insert", "chunk",
-            "hyde", "persist", "embed", "index",
+            "summary", "hyde", "persist", "embed", "index",
         ]
         tracker = ProgressTracker(
             job_id, step_names,
@@ -138,6 +138,7 @@ class SearchRequest(BaseModel):
     use_reranker: bool | None = None
     tier: IngestionTier | None = None
     enhancements: str | None = None
+    hierarchical: bool | None = None
 
 
 class SearchResponse(BaseModel):
@@ -365,6 +366,7 @@ async def search_endpoint(body: SearchRequest):
             use_reranker=use_reranker,
             retrieval_mode=body.mode,
             enhancements=enhancements,
+            hierarchical=body.hierarchical,
         )
         formatted = [
             {

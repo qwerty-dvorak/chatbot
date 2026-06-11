@@ -65,6 +65,9 @@ class Config:
     hyde_n_documents: int = field(default_factory=lambda: int(os.getenv("HYDE_N_DOCUMENTS", "2")))
     sub_queries_count: int = field(default_factory=lambda: int(os.getenv("SUB_QUERIES_COUNT", "2")))
     hypothetical_questions_per_chunk: int = field(default_factory=lambda: int(os.getenv("HYPOTHETICAL_QUESTIONS_PER_CHUNK", "3")))
+    hierarchical_mode: bool = field(default_factory=lambda: os.getenv("HIERARCHICAL_MODE", "true").lower() in ("1", "true", "yes"))
+    summary_top_k: int = field(default_factory=lambda: int(os.getenv("SUMMARY_TOP_K", "3")))
+    generate_summary: bool = field(default_factory=lambda: os.getenv("GENERATE_SUMMARY", "true").lower() in ("1", "true", "yes"))
 
     # PostgreSQL knowledge store — connects to the *chatbot-service* database.
     # Uses the same env var names and defaults as chatbot-service.

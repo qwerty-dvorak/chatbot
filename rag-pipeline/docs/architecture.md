@@ -504,3 +504,124 @@ collections, hybrid search, vector search, and BM25 search.
 
 `start_mock_all.sh` starts all three services with a single command.
 `start_mock_all.sh --clean` tears everything down.
+
+## Hierarchical Index (Coarse-to-Fine Retrieval)
+
+When processing vast document spaces, a flat vector search across millions of
+granular chunks can introduce noise and latency. The hierarchical index
+mitigates this with a two-stage coarse-to-fine retrieval strategy.
+
+### Architecture
+
+```text
+                    ┌──────────────┐
+                    │    Query     │
+                    └──────┬───────┘
+                           │ ② embed + search
+                           ▼
+              ┌────────────────────────┐
+              │ Index of Summary       │
+              │ Vectors (doc-level)    │
+              │ ┌──────────────────┐   │
+              │ │ [matched]        │   │  ③ isolate
+              │ └──────────────────┘   │     relevant
+              │ ┌──────────────────┐   │     doc
+              │ │                  │   │
+              │ └──────────────────┘   │
+              └─────────┬──────────────┘
+                        │ ④ narrow
+                        ▼
+              ┌────────────────────────┐
+              │ Vector Store: Chunks   │
+              │ (filtered by matched   │
+              │  doc source_path)      │
+              │ ┌─[hit1]───────────┐   │
+              │ └──────────────────┘   │
+              │ ┌─[hit2]───────────┐   │  ⑤ high-res
+              │ └──────────────────┘   │     lookup
+              └─────────┬──────────────┘
+                        │ ⑥ top-k
+                        ▼
+              ┌──────────────────┐
+              │ Top K Chunks     │
+              └────────┬─────────┘
+                       │ ⑦ context
+                       ▼
+              ┌──────────────────┐
+              │       LLM        │
+              └────────┬─────────┘
+                       │ ⑧ answer
+                       ▼
+              ┌──────────────────┐
+              │     Answer       │
+              └──────────────────┘
+```
+
+### Ingestion (offline)
+
+Each document is processed through two parallel pipelines at ingest time:
+
+1. **Summary generation** — An LLM call produces a concise 3-5 sentence summary
+   covering the document's key topics and findings.
+2. **Summary storage** — The summary text is stored in PostgreSQL
+   (`documents.analysis_summary`) and also embedded as a
+   `ChunkType.SUMMARY` vector in Milvus in the same collection (with
+   `chunk_type = "summary"`).
+3. **Full chunking** — The document is chunked, embedded, and indexed normally
+   (as before), with each chunk's `source_path` pointing to the original file.
+
+### Two-Stage Retrieval (online)
+
+When `hierarchical_mode = true` (default):
+
+| Step | Description |
+|------|-------------|
+| **①** | Query is embedded using the text embedding model. |
+| **②** | **Stage 1** — Search against `chunk_type == "summary"` vectors to identify the top-N most relevant documents (N = `SUMMARY_TOP_K`, default 3). |
+| **③** | Extract the `source_path` values from the matched summary vectors. |
+| **④** | **Stage 2** — Search against non-summary chunks filtered by `source_path in [matched docs] and chunk_type != "summary"`. |
+| **⑤** | Results are fused via RRF (if multiple enhanced queries) and reranked using the reranker. |
+| **⑥** | Return the top-K document chunks — no summary vectors leak into results. |
+
+### Interaction with Query Enhancements
+
+Hierarchical mode is independent of query enhancements (HyDE, sub-queries,
+stepback). Both can be active simultaneously. When multiple enhanced queries
+are generated, each one independently goes through the two-stage pipeline:
+
+```
+Enhanced queries:
+  ┌─ hyde_doc_1 ──→ stage1(summaries) → stage2(chunks) ─┐
+  ├─ hyde_doc_2 ──→ stage1(summaries) → stage2(chunks) ─┤  RRF
+  ├─ sub_query_1 ─→ stage1(summaries) → stage2(chunks) ─┤ fusion
+  ├─ sub_query_2 ─→ stage1(summaries) → stage2(chunks) ─┤
+  └─ original ────→ stage1(summaries) → stage2(chunks) ─┘
+```
+
+### Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `HIERARCHICAL_MODE` | `true` | Enable two-stage coarse-to-fine search |
+| `SUMMARY_TOP_K` | `3` | Number of summary matches in stage 1 |
+| `GENERATE_SUMMARY` | `true` | Generate document summary at ingest time |
+
+Override per request via the API:
+
+```bash
+# Enable hierarchical search
+curl -X POST http://localhost:8093/v1/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "...", "hierarchical": true}'
+
+# Disable hierarchical search (flat vector search)
+curl -X POST http://localhost:8093/v1/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "...", "hierarchical": false}'
+```
+
+### Test
+
+```bash
+POSTGRES_HOST=localhost MILVUS_HOST=localhost .venv/bin/python tests/test_hierarchical.py
+```

@@ -20,7 +20,7 @@ from .models import Chunk, ChunkType, EmbeddedChunk, RawDocument
 from .chunk import chunk as chunk_doc
 from .embed import embed_text
 from .index import connect_milvus, index_chunks
-from .query import hypothetical_questions_for_chunk
+from .query import hypothetical_questions_for_chunk, _chat
 from . import db as pgdb
 from . import object_store as store
 
@@ -38,6 +38,7 @@ class TextPipelineParams:
     embedding_dim: int = 0
     generate_hyde: bool = True
     hyde_per_chunk: int = 3
+    generate_summary: bool = True
     milvus_collection: str = ""
 
 
@@ -54,6 +55,7 @@ def _resolve(params: Optional[dict] = None) -> TextPipelineParams:
     p.embedding_dim = params.get("embedding_dim", cfg.text_embedding_dim)
     p.generate_hyde = params.get("generate_hyde", True)
     p.hyde_per_chunk = params.get("hyde_per_chunk", cfg.hypothetical_questions_per_chunk)
+    p.generate_summary = params.get("generate_summary", cfg.generate_summary)
     p.milvus_collection = params.get("milvus_collection", cfg.text_collection)
     return p
 
@@ -67,6 +69,7 @@ def _patch_config(p: TextPipelineParams) -> None:
     cfg.text_embedding_model = p.embedding_model
     cfg.text_embedding_dim = p.embedding_dim
     cfg.hypothetical_questions_per_chunk = p.hyde_per_chunk
+    cfg.generate_summary = p.generate_summary
     cfg.text_collection = p.milvus_collection
 
 
@@ -164,6 +167,42 @@ def process_document(
     if progress:
         progress.complete("chunk", f"{len(text_chunks)} text chunks")
 
+    # Step 3a — Document summary generation (hierarchical index)
+    summary_chunk: Chunk | None = None
+    summary_text = ""
+    if p.generate_summary and doc.text.strip():
+        if progress:
+            progress.start("summary", f"summarising {source_name}")
+        summary_text = _chat(
+            "You are an expert at summarising documents. "
+            "Given a document, produce a concise summary (3-5 sentences) "
+            "that captures the key topics, themes, and findings. "
+            "Output only the summary text, nothing else.",
+            f"Document:\n{doc.text[:8000]}",
+        ).strip()
+        if summary_text:
+            log("[text_pipeline] step=summary len=%d chars", len(summary_text))
+            print(f"[text_pipeline] step=summary {len(summary_text)} chars")
+            summary_meta = dict(doc.metadata)
+            summary_meta["chunk_type"] = ChunkType.SUMMARY.value
+            summary_chunk = Chunk(
+                id=uuid.uuid4().hex,
+                source_path=doc.path,
+                text=summary_text,
+                chunk_type=ChunkType.SUMMARY,
+                metadata=summary_meta,
+            )
+            pgdb.execute(
+                """UPDATE documents SET analysis_summary = %s, updated_at = NOW()
+                   WHERE id = %s""",
+                (summary_text, doc_id),
+            )
+        if progress:
+            progress.complete("summary", f"{len(summary_text)} chars")
+    elif progress:
+        progress.start("summary", "skipped")
+        progress.complete("summary", "summary generation disabled")
+
     # Step 4 — Hypothetical question generation
     hyde_count = 0
     question_chunks: list[Chunk] = []
@@ -234,8 +273,10 @@ def process_document(
     if progress:
         progress.complete("persist", f"{len(chunk_ids)} chunks")
 
-    # Step 6 — embed (text chunks + hypothetical question chunks)
+    # Step 6 — embed (text chunks + hypothetical question chunks + summary)
     all_to_embed = text_chunks + question_chunks
+    if summary_chunk is not None:
+        all_to_embed.append(summary_chunk)
     if progress:
         progress.start("embed", f"model={p.embedding_model}")
     log("[text_pipeline] step=embed model=%s dim=%d chunks=%d questions=%d",
@@ -265,6 +306,7 @@ def process_document(
     if progress:
         progress.complete("index", f"{len(text_embedded)} vectors indexed")
 
+    summary_indexed = 1 if summary_chunk is not None else 0
     result = {
         "document_id": doc_id,
         "object_key": object_key,
@@ -272,9 +314,13 @@ def process_document(
         "embeddings_indexed": len(text_embedded),
         "hyde_generated": hyde_count,
         "question_chunks_indexed": len(question_chunks),
+        "summary_indexed": summary_indexed,
+        "summary_text": summary_text,
     }
-    log("[text_pipeline] done doc_id=%s chunks=%d embeddings=%d hyde=%d questions=%d",
-        doc_id, len(text_chunks), len(text_embedded), hyde_count, len(question_chunks))
+    log("[text_pipeline] done doc_id=%s chunks=%d embeddings=%d hyde=%d questions=%d summary=%s",
+        doc_id, len(text_chunks), len(text_embedded), hyde_count, len(question_chunks),
+        f"{summary_indexed} chunk" if summary_chunk else "disabled")
     print(f"[text_pipeline] done doc_id={doc_id} chunks={len(text_chunks)} "
-          f"embeddings={len(text_embedded)} hyde={hyde_count} questions={len(question_chunks)}")
+          f"embeddings={len(text_embedded)} hyde={hyde_count} questions={len(question_chunks)} "
+          f"summary={summary_indexed}")
     return result

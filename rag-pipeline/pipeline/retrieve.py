@@ -12,12 +12,8 @@ def vector_search(
     query_embedding: list[float],
     top_k: int | None = None,
     collection_name: str | None = None,
+    extra_filter: str | None = None,
 ) -> list[SearchResult]:
-    """Search Milvus for nearest neighbors using inner product (cosine on normalized vectors).
-
-    collection_name defaults to cfg.text_collection.
-    Returns SearchResult list with retrieval_method="vector".
-    """
     if top_k is None:
         top_k = cfg.retrieval_top_k
     if collection_name is None:
@@ -34,7 +30,7 @@ def vector_search(
         "id", "source_path", "text", "chunk_type",
         "parent_id", "window_text", "metadata_json",
     ]
-    results = get_client().search(
+    search_kwargs = dict(
         collection_name=collection_name,
         data=[query_embedding],
         anns_field="embedding",
@@ -42,6 +38,9 @@ def vector_search(
         limit=top_k,
         output_fields=output_fields,
     )
+    if extra_filter:
+        search_kwargs["filter"] = extra_filter
+    results = get_client().search(**search_kwargs)
 
     search_results: list[SearchResult] = []
     if results:
@@ -140,17 +139,12 @@ def hybrid_search(
     query: str,
     query_embedding: list[float],
     top_k: int | None = None,
+    extra_filter: str | None = None,
 ) -> list[SearchResult]:
-    """Combine vector_search and bm25_search via RRF fusion.
-
-    cfg.hybrid_alpha weights the two lists (alpha=1 → pure vector, alpha=0 → pure BM25),
-    but both lists are always passed to _rrf_fusion; alpha is reflected by controlling
-    how many results each source contributes.
-    """
     if top_k is None:
         top_k = cfg.retrieval_top_k
 
-    vector_results = vector_search(query_embedding, top_k=top_k)
+    vector_results = vector_search(query_embedding, top_k=top_k, extra_filter=extra_filter)
     bm25_results = bm25_search(query, top_k=top_k)
 
     fused = _rrf_fusion(

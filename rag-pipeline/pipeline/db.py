@@ -130,6 +130,7 @@ def insert_document(
     original_filename: str = "",
     sha256: str = "",
     extracted_text: str = "",
+    analysis_summary: str = "",
     metadata: dict | None = None,
 ) -> str:
     """Insert a Document row linked to the pipeline source.
@@ -142,10 +143,10 @@ def insert_document(
         """INSERT INTO documents
            (id, source_id, title, original_filename, mime_type, sha256, status,
             extracted_text, analysis_summary, metadata, created_at, updated_at)
-           VALUES (%s, %s, %s, %s, %s, %s, 'ready', %s, '', %s, NOW(), NOW())""",
+           VALUES (%s, %s, %s, %s, %s, %s, 'ready', %s, %s, %s, NOW(), NOW())""",
         (
             doc_id, source_id, title, original_filename or title,
-            mime_type, sha256, extracted_text,
+            mime_type, sha256, extracted_text, analysis_summary,
             json.dumps(metadata or {}),
         ),
     )

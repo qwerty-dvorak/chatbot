@@ -1,0 +1,13 @@
+Astrophysics and Stellar Evolution
+
+Astrophysics is the branch of astronomy that applies the laws of physics to understand the universe. Stellar evolution describes the life cycle of stars, from their formation in molecular clouds to their ultimate fate as white dwarfs, neutron stars, or black holes.
+
+Star formation begins in giant molecular clouds, regions of cold gas and dust where gravity overcomes internal pressure. As a cloud collapses, it fragments into protostars that heat up through gravitational contraction. When core temperatures reach about 10 million Kelvin, hydrogen fusion ignites and a main sequence star is born.
+
+Main sequence stars, like our Sun, fuse hydrogen into helium in their cores through the proton-proton chain or the CNO cycle. The duration of this stable phase depends on stellar mass: low-mass stars can remain on the main sequence for billions of years, while high-mass stars burn through their fuel in just millions of years.
+
+When a star exhausts its core hydrogen, it expands into a red giant. Low-mass stars (up to about 8 solar masses) shed their outer layers to form planetary nebulae, leaving behind Earth-sized white dwarfs composed of carbon and oxygen. High-mass stars undergo more dramatic evolution, fusing heavier elements up to iron in onion-like shells.
+
+The final stage of massive stars is a core-collapse supernova, which outshines entire galaxies for weeks. The remnant becomes either a neutron star, with densities exceeding nuclear matter, or a stellar-mass black hole if the core mass exceeds about 3 solar masses. Neutron stars can manifest as pulsars, emitting regular beams of radiation.
+
+Gravitational waves, first directly detected by LIGO in 2015, have opened a new window into studying compact object mergers. The detection of GW170817, a neutron star merger observed in both gravitational waves and electromagnetic radiation, marked the beginning of multi-messenger astrophysics.

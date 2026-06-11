@@ -32,7 +32,8 @@ class ProgressTracker:
     Usage::
 
         tracker = ProgressTracker(job_id, step_names=[
-            "extract", "store_raw", "chunk", "hyde", "embed", "index",
+            "extract", "store_raw", "db_insert", "chunk",
+            "summary", "hyde", "embed", "index",
         ])
         tracker.start("extract")
         ...
