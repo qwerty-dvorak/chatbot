@@ -1,7 +1,11 @@
 # CLAUDE.md — Monorepo Root
 
-Everything in this repository runs **fully locally** with no external dependencies.
-No cloud APIs are called. No internet access is required at runtime.
+The RAG pipeline runs fully locally. The chatbot-service can use either a local GPU
+(in Docker via `start-services.sh`), a mock LLM (`start-services-no-gemma.sh`), or
+a RunPod cloud GPU (`start-services-with-runpod.sh` + `runpod_deploy_chat.sh`).
+
+Tests hit the **real LLM endpoint** — no mocks or fakes. See `chatbot-service/test-all.sh`
+for the unified test orchestrator (`--runpod` or `--local`).
 
 ## Structure
 
@@ -23,7 +27,7 @@ barc/
     ├── gemma-4-26B-A4B-it/
     ├── llama-embed-nemotron-8b/
     ├── nemotron-colembed-vl-8b-v2/
-    └── Qwen3-VL-Reranker-2B/
+    └── Qwen3-VL-Reranker-8B/
 ```
 
 To clone models locally:

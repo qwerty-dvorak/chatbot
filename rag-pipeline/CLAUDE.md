@@ -32,8 +32,9 @@ open http://localhost:8093/docs
 
 ```bash
 export HF_TOKEN=hf_...          # HuggingFace token (NVIDIA models are gated)
-bash runpod_deploy.sh           # create 4 RTX 5090 pods + wait for readiness
+bash runpod_deploy.sh           # create 3 RTX 3090 pods + wait for readiness
 bash test_api.sh                # build rag-api locally, run end-to-end tests
+bash test_runpod_endpoints.sh   # validate vLLM endpoints against .env.runpod
 bash runpod_teardown.sh         # stop pods + delete templates when done
 ```
 
@@ -45,7 +46,7 @@ See `TESTING.md` for full details, manual curl examples, and troubleshooting.
 |---------|------|-------|---------|
 | rag-text-embed | 8090 | vllm/vllm-openai:latest | nvidia/llama-embed-nemotron-8b text embeddings |
 | rag-multimodal-embed | 8091 | vllm/vllm-openai:latest | nvidia/nemotron-colembed-vl-8b-v2 multimodal embeddings |
-| rag-reranker | 8092 | vllm/vllm-openai:latest | Qwen3-VL-Reranker-2B scoring via /score endpoint |
+| rag-reranker | 8092 | vllm/vllm-openai:latest | Qwen3-VL-Reranker-8B scoring via /score endpoint |
 | rag-api | 8093 | rag-api (ubuntu:24.04) | FastAPI, durable SQLite queue, ingestion worker, search |
 | milvus-standalone | 19530 | milvusdb/milvus:latest | Vector store |
 

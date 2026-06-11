@@ -2,7 +2,7 @@
 # Deploy 3 RunPod GPU pods for RAG pipeline testing + start local Milvus:
 #   - text-embed: RTX 3090, vllm/vllm-openai:latest + nvidia/llama-embed-nemotron-8b
 #   - mm-embed:   RTX 3090, vllm/vllm-openai:latest + nvidia/nemotron-colembed-vl-8b-v2
-#   - reranker:   RTX 3090, vllm/vllm-openai:latest + Qwen/Qwen3-VL-Reranker-2B
+#   - reranker:   RTX 3090, vllm/vllm-openai:latest + Qwen/Qwen3-VL-Reranker-8B
 #   - milvus:     local Docker (milvusdb/milvus:latest) via runpod_start_local_milvus.sh
 #
 # Uses the cheapest GPU with enough VRAM (24 GB) for 8B-parameter models:
@@ -109,7 +109,7 @@ echo "Creating text-embed template..."
 TEXT_TPL=$(create_template "rag-text-embed-$TS" \
   --image "vllm/vllm-openai:latest" \
   --docker-entrypoint "/bin/bash" \
-  --docker-start-cmd "-c,exec python3 -m vllm.entrypoints.openai.api_server --model nvidia/llama-embed-nemotron-8b --trust-remote-code --task embed --port 8000 --gpu-memory-utilization 0.90 --max-model-len 32768" \
+  --docker-start-cmd "-c,exec python3 -m vllm.entrypoints.openai.api_server --model nvidia/llama-embed-nemotron-8b --trust-remote-code --port 8000 --gpu-memory-utilization 0.90 --max-model-len 8192" \
   --env "$HF_ENV_JSON" \
   --ports "8000/http" \
   --container-disk-in-gb 50)
@@ -156,15 +156,22 @@ MM_POD=$(create_pod "rag-mm-embed" \
 echo "  pod: $MM_POD"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 4. RERANKER — Qwen/Qwen3-VL-Reranker-2B (vLLM /score endpoint)
-#    hf-overrides JSON goes in env var HF_OVERRIDES to avoid shell-quoting issues.
+# 4. RERANKER — Qwen/Qwen3-VL-Reranker-8B (vLLM pooling mode, /score endpoint)
+#    hf-overrides JSON goes in env var HF_OVERRIDES to avoid RunPod's
+#    comma-splitting of the docker-start-cmd string.
+#    Validated: --task score and --hf-overrides (hyphen) NOT supported by
+#    current vllm-openai:latest; use --runner pooling + --hf_overrides (underscore).
 # ─────────────────────────────────────────────────────────────────────────────
 RERANKER_ENV_JSON=$(python3 -c "
 import json
 d = {
     'HF_TOKEN': '${HF_TOKEN}',
     'HUGGING_FACE_HUB_TOKEN': '${HF_TOKEN}',
-    'HF_OVERRIDES': json.dumps({'architectures': ['Qwen3VLForSequenceClassification'], 'classifier_from_token': ['no','yes'], 'is_original_qwen3_reranker': True})
+    'HF_OVERRIDES': json.dumps({
+        'architectures': ['Qwen3VLForSequenceClassification'],
+        'classifier_from_token': ['no', 'yes'],
+        'is_original_qwen3_reranker': True
+    })
 }
 print(json.dumps(d))")
 
@@ -172,7 +179,7 @@ echo "Creating reranker template..."
 RERANKER_TPL=$(create_template "rag-reranker-$TS" \
   --image "vllm/vllm-openai:latest" \
   --docker-entrypoint "/bin/bash" \
-  --docker-start-cmd '-c,exec python3 -m vllm.entrypoints.openai.api_server --model Qwen/Qwen3-VL-Reranker-2B --trust-remote-code --task score --port 8000 --gpu-memory-utilization 0.90 --hf-overrides "$HF_OVERRIDES"' \
+  --docker-start-cmd '-c,exec python3 -m vllm.entrypoints.openai.api_server --model Qwen/Qwen3-VL-Reranker-8B --runner pooling --trust-remote-code --port 8000 --gpu-memory-utilization 0.90 --max-model-len 4096 --hf-overrides "$HF_OVERRIDES"' \
   --env "$RERANKER_ENV_JSON" \
   --ports "8000/http" \
   --container-disk-in-gb 50)
