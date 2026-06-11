@@ -115,6 +115,7 @@ class LiteLLMClient:
     def chat_completion_stream(self, messages: list[dict[str, str]], **kwargs):
         model = self._select_model(messages)
         _debug_log(messages, model, kwargs)
+        start = time.time()
         try:
             completion = self._get_client()
             call_kwargs = dict(
@@ -135,8 +136,14 @@ class LiteLLMClient:
             if "tool_choice" in kwargs:
                 call_kwargs["tool_choice"] = kwargs["tool_choice"]
             response = completion(**call_kwargs)
+            last_chunk = None
             for chunk in response:
+                last_chunk = chunk
                 yield chunk
+            if last_chunk:
+                duration = time.time() - start
+                self._log_usage(last_chunk, "chat_stream", duration)
+                logger.info("[TIMING] streaming_llm=%.3fs model=%s", duration, model)
         except Exception as e:
             raise self._normalize_error(e)
 

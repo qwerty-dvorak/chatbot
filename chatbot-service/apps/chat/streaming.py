@@ -1,5 +1,6 @@
 import json
 import logging
+import time
 
 from django.http import StreamingHttpResponse
 
@@ -46,6 +47,7 @@ def _event_stream(message, user, client, context_messages, tool_schemas):
       If tool_calls: execute each tool, emit tool_result events, then
       Round 2 — LLM continuation with tool results → final text → done.
     """
+    _start = time.time()
     try:
         handler1 = StreamHandler(message)
         kwargs   = {"tools": tool_schemas} if tool_schemas else {}
@@ -55,6 +57,8 @@ def _event_stream(message, user, client, context_messages, tool_schemas):
                 yield f"data: {json.dumps(event)}\n\n"
 
         if not handler1.completed_tool_calls:
+            duration = time.time() - _start
+            logger.info("[TIMING] chat_stream_total=%.3fs tools=0", duration)
             return
 
         tool_result_messages: list[dict] = []
@@ -94,6 +98,9 @@ def _event_stream(message, user, client, context_messages, tool_schemas):
         for chunk in client.chat_completion_stream(continuation):
             for event in handler2.handle_chunk(chunk):
                 yield f"data: {json.dumps(event)}\n\n"
+
+        duration = time.time() - _start
+        logger.info("[TIMING] chat_stream_total=%.3fs tools=%d", duration, len(handler1.completed_tool_calls))
 
     except Exception as exc:
         logger.exception("Streaming failed")

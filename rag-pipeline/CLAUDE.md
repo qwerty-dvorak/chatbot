@@ -7,13 +7,17 @@ LLM/embedding/reranker calls go to local or RunPod endpoints.
 
 ```bash
 # 1. Clone models to sibling ../models/ repo (one-time, requires git-lfs, ~24GB per model)
-bash clone_models.sh
+bash ../models/clone_models.sh
 
-# 2. Start all services (Milvus + PostgreSQL + RAG API)
-bash start-services.sh
-bash start-services.sh --clean   # tear down and restart
+# 2. Start infrastructure (Milvus + PostgreSQL)
+bash ../milvus/start.sh
+bash ../db/start.sh
 
-# 3. Queue documents for ingestion and poll the returned job URL
+# 3. Start RAG API (local GPU or cloud)
+bash run.sh local
+bash run.sh runpod              # RunPod cloud GPU
+
+# 4. Queue documents for ingestion and poll the returned job URL
 curl -X POST http://localhost:8093/v1/ingest -F "files=@document.pdf"
 curl -X POST http://localhost:8093/v1/ingest \
   -F "files=@report.pdf" -F "files=@notes.md" \
@@ -33,10 +37,10 @@ open http://localhost:8093/docs
 
 ```bash
 export HF_TOKEN=hf_...          # HuggingFace token (NVIDIA models are gated)
-bash runpod_deploy.sh           # create 3 RTX 3090 pods + wait for readiness
-bash test_api.sh                # build rag-api locally, run end-to-end tests
-bash test_runpod_endpoints.sh   # validate vLLM endpoints against .env.runpod
-bash runpod_teardown.sh         # stop pods + delete templates when done
+bash ../models/deploy-runpod.sh # create RunPod pods + wait for readiness
+bash ../tests/rag/test_api.sh   # build rag-api locally, run end-to-end tests
+bash ../tests/rag/test_runpod_endpoints.sh  # validate vLLM endpoints against .env.runpod
+bash ../models/teardown-runpod.sh           # stop pods + delete templates when done
 ```
 
 See `TESTING.md` for full details, manual curl examples, and troubleshooting.
@@ -78,12 +82,6 @@ pipeline/
   search.py                <- Search orchestrator (includes query-to-query resolution)
   text_pipeline.py         <- Full text ingest: chunk → hyde → persist → embed → index
   image_pipeline.py        <- Image-only document ingest
-mock_server/
-  server.py                <- 5-port stdlib-only mock server
-  Dockerfile               <- minimal mock image
-  start.sh                 <- build/start the mock container
-  .env                     <- RAG API configuration for mock endpoints
-  test_integration.sh      <- mock + Milvus end-to-end test
 ```
 
 ## Key concepts
@@ -114,48 +112,6 @@ independently and are always active when `HYPOTHETICAL_QUESTIONS_PER_CHUNK > 0`.
 Use a single PostgreSQL instance shared between rag-pipeline and
 chatbot-service. Set `POSTGRES_HOST=<server-ip>` in both env files. Ensure
 PostgreSQL listens on `*` and permits remote connections.
-
-## Local mock endpoints
-
-Two mock servers provide a complete offline test environment:
-
-### Mock AI Model Server (`mock_server/`)
-
-Matches `docs/runpod_api.md` API shapes:
-
-| Port | Endpoint | Purpose |
-|------|----------|---------|
-| 9000 | `POST /v1/chat/completions` | General chat/query enhancement |
-| 9001 | `POST /v1/embeddings` | Text embedding |
-| 9002 | `POST /pooling` | Multimodal ColBERT-style pooling |
-| 9003 | `POST /score` | Reranking |
-| 9004 | `POST /v1/chat/completions` | PaddleOCR-VL |
-
-### Mock RAG API Server (`mock_rag/`)
-
-Matches `docs/api.md` — all RAG pipeline endpoints on port 8093:
-
-| Endpoint | Description |
-|----------|-------------|
-| `POST /v1/ingest` | File upload with async ingestion |
-| `GET /v1/ingestions` | List jobs |
-| `GET /v1/ingestions/{id}` | Poll job |
-| `POST /v1/search` | Search |
-| `POST /v1/promote` | Tier promotion |
-| `GET /health` | Health checks |
-| `GET /v1/collections` | List collections |
-
-```bash
-# Start all mock services (no GPUs, no downloads)
-bash start_mock_all.sh
-
-# Run integration tests
-bash mock_server/test_integration.sh
-bash mock_rag/test.sh
-
-# Tear down
-bash start_mock_all.sh --clean
-```
 
 ## API endpoints
 

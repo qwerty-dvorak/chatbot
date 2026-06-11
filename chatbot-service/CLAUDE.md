@@ -6,26 +6,25 @@ See root `CLAUDE.md` for overall setup. See `docs/` for architecture details.
 ## Commands
 
 ```bash
-# Start all chatbot services (builds image, starts postgres, file-server, gemma inference, web, worker)
-bash start-services.sh
+# Start chatbot-service (uses models/.env.local for endpoints)
+bash run.sh local
+
+# Start with RunPod cloud GPU (uses models/.env.runpod)
+bash run.sh runpod
 
 # Start with mock LLM (no GPU required)
-bash start-services-no-gemma.sh
+bash run.sh no-gemma
 
-# Start with RunPod cloud GPU (no local GPU needed)
-# First deploy the model on RunPod, then:
-bash start-services-with-runpod.sh
-
-# Run all tests (auto-detects RunPod or local; starts stack if needed)
-bash test-all.sh                          # detect mode
-bash test-all.sh --runpod                 # use RunPod GPU
-bash test-all.sh --local                  # use local GPU
-bash test-all.sh --runpod --clean         # test then teardown
-bash test-all.sh --runpod --keepdb apps.chat.tests  # specific app
+# Run all chatbot tests (auto-detects RunPod or local; starts stack if needed)
+bash ../tests/run.sh chatbot                          # detect mode
+bash ../tests/run.sh chatbot --runpod                 # use RunPod GPU
+bash ../tests/run.sh chatbot --local                  # use local GPU
+bash ../tests/run.sh chatbot --runpod --clean         # test then teardown
+bash ../tests/run.sh chatbot --runpod --keepdb apps.chat.tests  # specific app
 
 # Run tests against an already-running stack
-bash run-tests.sh
-bash run-tests.sh --keepdb apps.chat.tests.test_chat_api
+bash ../tests/chatbot/run-tests.sh
+bash ../tests/chatbot/run-tests.sh --keepdb apps.chat.tests.test_chat_api
 
 # Sync built-in tool definitions into DB
 docker exec web uv run python manage.py sync_builtin_tools --settings=config.settings.production
@@ -34,9 +33,8 @@ docker exec web uv run python manage.py sync_builtin_tools --settings=config.set
 docker build -t chatbot . && docker run -p 8000:8000 chatbot
 
 # Toggle every repository Dockerfile between public and BARC sources
-cd ..
-bash configure-build-sources.sh apply
-bash configure-build-sources.sh revert
+bash ../configure-build-sources.sh apply
+bash ../configure-build-sources.sh revert
 ```
 
 ## Adding dependencies
@@ -130,30 +128,28 @@ live RunPod pod (`google/gemma-4-E4B-it`) or a local GPU (`gemma4-26B-A4b`).
 Use the unified orchestrator to start the stack + run tests in one command:
 
 ```bash
-bash test-all.sh                          # auto-detect mode
-bash test-all.sh --runpod                 # RunPod cloud GPU
-bash test-all.sh --runpod --clean         # test then teardown
-bash test-all.sh --local                  # local GPU
-bash test-all.sh --local --clean          # test then teardown
+bash ../tests/run.sh chatbot              # auto-detect mode
+bash ../tests/run.sh chatbot --runpod     # RunPod cloud GPU
+bash ../tests/run.sh chatbot --local      # local GPU
 
 # Pass Django test labels:
-bash test-all.sh --runpod --keepdb apps.chat.tests
-bash test-all.sh --runpod --keepdb apps.chat.tests.test_chat_api
+bash ../tests/run.sh chatbot --runpod --keepdb apps.chat.tests
+bash ../tests/run.sh chatbot --runpod --keepdb apps.chat.tests.test_chat_api
 
 # If the stack is already running, skip startup:
-bash test-all.sh --runpod --no-start
-bash test-all.sh --local --no-start --keepdb apps.chat.tests.test_context
+bash ../tests/run.sh chatbot --runpod --no-start
+bash ../tests/run.sh chatbot --local --no-start --keepdb apps.chat.tests.test_context
 ```
 
 ### Legacy test runner (requires running stack)
 
 ```bash
-bash run-tests.sh
-bash run-tests.sh --keepdb
-bash run-tests.sh apps.chat.tests
+bash ../tests/chatbot/run-tests.sh
+bash ../tests/chatbot/run-tests.sh --keepdb
+bash ../tests/chatbot/run-tests.sh apps.chat.tests
 ```
 
-The test image (`Dockerfile.test`) connects to the stack's PostgreSQL
+The test image (`tests/chatbot/Dockerfile`) connects to the stack's PostgreSQL
 on the `chatbot_net` Docker network. The runner:
 1. Verifies the stack is running
 2. Grants CREATEDB to the chatbot DB user
@@ -162,19 +158,19 @@ on the `chatbot_net` Docker network. The runner:
 
 ### RunPod Cloud GPU Setup
 
-Deploy the chat LLM on a RunPod GPU, then test:
+Deploy all model pods on RunPod, then test:
 
 ```bash
 # Terminal 1: deploy (15-30 min for model download)
 export HF_TOKEN=hf_...
-bash runpod_deploy_chat.sh
+bash ../models/deploy-runpod.sh
 
-# Terminal 2: start stack + run tests (or use bash test-all.sh --runpod)
-bash start-services-with-runpod.sh
-bash test-all.sh --runpod --no-start
+# Terminal 2: start stack + run tests
+bash run.sh runpod
+bash ../tests/run.sh chatbot --runpod --no-start
 
-# Stop the RunPod pod when done
-bash runpod_teardown_chat.sh
+# Stop the RunPod pods when done
+bash ../models/teardown-runpod.sh
 ```
 
 The deploy script creates one RTX 4090 (or override with `GPU_ID=...`) pod running
@@ -186,28 +182,24 @@ Requires 2x NVIDIA GPUs with 16GB+ VRAM:
 
 ```bash
 # Clone model files first
-bash ../rag-pipeline/clone_models.sh
+bash ../models/clone_models.sh
 
-# Start the full stack (builds image, starts gemma inference, postgres, web, worker)
-bash start-services.sh
-bash test-all.sh --local --no-start
+# Start infrastructure (PostgreSQL + Milvus)
+bash ../db/start.sh
+bash ../milvus/start.sh
+
+# Deploy local model endpoints
+bash ../models/deploy-local.sh
+
+# Start the full stack (builds image, starts gemma inference, web, worker)
+bash run.sh local
+bash ../tests/run.sh chatbot --local --no-start
 ```
 
-### Mock Stack (no GPU required, limited test coverage)
+### Mock LLM (no GPU required, limited test coverage)
 
-Some tests that don't require the LLM can run with the mock server:
+Start the stack without a real LLM (uses a stub chat endpoint):
 
 ```bash
-# 1. Start all RAG pipeline mock services
-cd ../rag-pipeline && bash start_mock_all.sh
-
-# 2. Start chatbot service (builds image, starts mock server + postgres + web + worker)
-cd ../chatbot-service && bash start-services-no-gemma.sh
-
-# Creates:
-#   chatbot-mock-server  — chat (9000), embed (9001), reranker (9003) on chatbot_net
-#   postgres             — port 5433
-#   file-server          — port 8888
-#   web                  — port 8080
-#   worker               — ingestion worker
+bash run.sh no-gemma
 ```

@@ -1,4 +1,5 @@
 import logging
+import time
 
 from django.conf import settings
 
@@ -19,6 +20,7 @@ class RerankerClient:
         except ImportError:
             raise LLMProviderError("litellm is not installed")
 
+        start = time.time()
         try:
             response = rerank(
                 model=self.model,
@@ -28,6 +30,8 @@ class RerankerClient:
                 api_base=self.base_url,
                 api_key=self.api_key,
             )
+            duration = time.time() - start
+            logger.info("[TIMING] reranker=%.3fs model=%s docs=%d", duration, self.model, len(documents))
             results = []
             for r in response.results:
                 results.append({
@@ -37,7 +41,8 @@ class RerankerClient:
                 })
             return results
         except Exception as e:
-            logger.error(f"Rerank failed: {e}")
+            duration = time.time() - start
+            logger.error(f"Rerank failed after {duration:.3f}s: {e}")
             raise LLMProviderError(str(e))
 
 

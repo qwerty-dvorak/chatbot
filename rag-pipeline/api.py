@@ -131,6 +131,16 @@ app = FastAPI(
 )
 
 
+@app.middleware("http")
+async def timing_middleware(request, call_next):
+    import time
+    start = time.time()
+    response = await call_next(request)
+    duration = time.time() - start
+    logger.info("[TIMING] %.3fs %s %s %s", duration, request.method, request.url.path, response.status_code)
+    return response
+
+
 class SearchRequest(BaseModel):
     query: str = Field(min_length=1)
     top_k: int = Field(default=5, ge=1, le=100)

@@ -1,11 +1,12 @@
 # CLAUDE.md — Monorepo Root
 
-The RAG pipeline runs fully locally. The chatbot-service can use either a local GPU
-(in Docker via `start-services.sh`), a mock LLM (`start-services-no-gemma.sh`), or
-a RunPod cloud GPU (`start-services-with-runpod.sh` + `runpod_deploy_chat.sh`).
+The chatbot-service can use a local GPU (`bash chatbot-service/run.sh local`),
+a mock LLM (`bash chatbot-service/run.sh no-gemma`), or a RunPod cloud GPU
+(`bash chatbot-service/run.sh runpod`). The RAG pipeline has similar modes
+via `bash rag-pipeline/run.sh {local|runpod}`.
 
-Tests hit the **real LLM endpoint** — no mocks or fakes. See `chatbot-service/test-all.sh`
-for the unified test orchestrator (`--runpod` or `--local`).
+Tests hit the **real LLM endpoint** — no mocks or fakes. See `tests/run.sh`
+for the unified test orchestrator.
 
 ## Structure
 
@@ -13,12 +14,18 @@ for the unified test orchestrator (`--runpod` or `--local`).
 |-----------|---------|
 | `chatbot-service/` | Django chatbot with streaming LLM, RAG, memory, tool calling |
 | `rag-pipeline/` | Standalone document ingestion + advanced RAG pipeline |
+| `models/` | Model deployment scripts + .env configs (deploy-local.sh, deploy-runpod.sh, teardown-runpod.sh, clone_models.sh) |
+| `db/` | PostgreSQL management scripts (start, stop, clear, exec, health) — port 5433 |
+| `milvus/` | Milvus+minio+etcd management scripts (start, stop, clear, check) |
+| `tests/` | Unified test orchestrator: tests/run.sh dispatches to tests/chatbot/, tests/rag/, tests/integration/ |
+| `seed_data/` | Seed data for tests |
+| `sample_data/` | Sample documents (text/, pdf/, image/) |
 
 ## Models
 
 Model files live in a **separate git repo** at the same level as this repo (`../models/`).
 They are mounted as Docker volumes at runtime — never copied into this repo.
-See `rag-pipeline/start-services.sh` and `chatbot-service/start-services.sh` for mount paths.
+See `chatbot-service/shell_scripts/start-services.sh` and `rag-pipeline/shell_scripts/start-services.sh` for mount paths.
 
 ```
 barc/
@@ -32,7 +39,7 @@ barc/
 
 To clone models locally:
 ```bash
-bash rag-pipeline/clone_models.sh
+bash models/clone_models.sh
 ```
 
 ## Architecture Overview
@@ -95,14 +102,14 @@ pg_hba.conf      →  host chatbot chatbot <client-ip>/32 md5
 ## Key principles
 
 - **Models outside repo** — all model files live in a sibling `../models/` git repo;
-  cloned once via `rag-pipeline/clone_models.sh`. Docker volumes mount them at runtime.
+  cloned once via `models/clone_models.sh`. Docker volumes mount them at runtime.
 - **No Docker Compose** — services are started with plain `docker run` commands or
   native processes.
 - **Python images** always use `FROM ubuntu:24.04` as base; dependencies managed with `uv`.
 - **Reproducible uv resolution** — every `pyproject.toml` contains `[tool.uv]` with
   `exclude-newer = "2025-10-23T12:36:00Z"`.
-- **Milvus** is the vector store, started via `rag-pipeline/start-services.sh`.
-- **PostgreSQL 16** runs as a standalone container shared between services.
+- **Milvus** is the vector store, started via `milvus/start.sh`.
+- **PostgreSQL 16** runs as a standalone container shared between services, started via `db/start.sh`.
 - **Adding Python dependencies** — always use `uv add <package>` inside the relevant
   subdirectory (`chatbot-service/` or `rag-pipeline/`). Never edit `pyproject.toml`
   or `uv.lock` manually.

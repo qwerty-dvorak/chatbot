@@ -63,32 +63,24 @@ class RagApiClient:
         if not path.exists():
             logger.error("File not found: %s", file_path)
             return None
+        start = time.time()
         try:
             with open(path, "rb") as f:
                 files = {"files": (path.name, f)}
                 data = {"tier": tier}
                 if strategy:
                     data["strategy"] = strategy
-                resp = requests.post(
-                    f"{self.base_url}/v1/ingest",
-                    files=files,
-                    data=data,
-                    timeout=self.timeout,
-                )
-                resp.raise_for_status()
+                resp = self._timed_request("POST", f"{self.base_url}/v1/ingest", files=files, data=data, timeout=self.timeout)
                 return resp.json()
         except requests.RequestException as exc:
-            logger.error("RAG API ingest failed: %s", exc)
+            duration = time.time() - start
+            logger.error("RAG API ingest failed after %.3fs: %s", duration, exc)
             return None
 
     def get_job(self, job_id: str) -> dict | None:
         """Fetch current job status from the RAG API (single request, no polling)."""
         try:
-            resp = requests.get(
-                f"{self.base_url}/v1/ingestions/{job_id}",
-                timeout=10,
-            )
-            resp.raise_for_status()
+            resp = self._timed_request("GET", f"{self.base_url}/v1/ingestions/{job_id}", timeout=10)
             return resp.json()
         except requests.RequestException as exc:
             logger.warning("RAG API get_job failed: %s", exc)
@@ -98,11 +90,7 @@ class RagApiClient:
         """Poll a job until completion or failure."""
         for _ in range(max_retries):
             try:
-                resp = requests.get(
-                    f"{self.base_url}/v1/ingestions/{job_id}",
-                    timeout=10,
-                )
-                resp.raise_for_status()
+                resp = self._timed_request("GET", f"{self.base_url}/v1/ingestions/{job_id}", timeout=10)
                 data = resp.json()
                 status = data.get("status", "")
                 if status in ("succeeded", "failed", "cancelled"):
@@ -112,6 +100,19 @@ class RagApiClient:
             time.sleep(interval)
         logger.warning("RAG API poll timed out for job %s", job_id)
         return None
+
+    def _timed_request(self, method: str, url: str, **kwargs) -> requests.Response:
+        start = time.time()
+        try:
+            resp = requests.request(method, url, **kwargs)
+            resp.raise_for_status()
+            duration = time.time() - start
+            logger.info("[TIMING] rag_api_%s %.3fs %s %s", method.lower(), duration, resp.status_code, url)
+            return resp
+        except requests.RequestException:
+            duration = time.time() - start
+            logger.warning("[TIMING] rag_api_%s %.3fs FAILED %s", method.lower(), duration, url)
+            raise
 
     def search(self, query: str, top_k: int = 5, mode: str = "hybrid",
                use_reranker: bool | None = None, tier: str | None = None,
@@ -139,12 +140,7 @@ class RagApiClient:
         if stepback is not None:
             body["stepback"] = stepback
         try:
-            resp = requests.post(
-                f"{self.base_url}/v1/search",
-                json=body,
-                timeout=30,
-            )
-            resp.raise_for_status()
+            resp = self._timed_request("POST", f"{self.base_url}/v1/search", json=body, timeout=30)
             return resp.json()
         except requests.RequestException as exc:
             logger.error("RAG API search failed: %s", exc)

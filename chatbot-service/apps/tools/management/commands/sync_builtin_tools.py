@@ -54,6 +54,18 @@ BUILTIN_TOOL_DEFS = [
         },
     },
     {
+        "name": "memory.aggregate",
+        "display_name": "Memory Aggregate",
+        "description": "Scan recent chat history to extract user facts and save them as memories",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "chat_id": {"type": "string", "description": "Optional chat ID to analyze"},
+            },
+            "required": [],
+        },
+    },
+    {
         "name": "chat.compact",
         "display_name": "Chat Compaction",
         "description": "Compact older chat history to save context",

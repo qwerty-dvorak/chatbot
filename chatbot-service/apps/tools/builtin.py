@@ -72,8 +72,8 @@ def memory_save(arguments: dict[str, Any], context: dict = {}) -> dict:
         return {"saved": False, "message": "No user context."}
 
     try:
-        from apps.memory.models import Memory
-        mem = Memory.objects.create(user=user, content=content, importance=importance)
+        from apps.memory.services import save_memory
+        mem = save_memory(user, content, importance)
         return {
             "saved":   True,
             "id":      str(mem.id),
@@ -83,6 +83,70 @@ def memory_save(arguments: dict[str, Any], context: dict = {}) -> dict:
     except Exception as exc:
         logger.exception("memory.save failed")
         return {"saved": False, "error": str(exc)}
+
+
+# ── memory.aggregate ──────────────────────────────────────────────────────────
+
+@register_builtin("memory.aggregate")
+def memory_aggregate(arguments: dict[str, Any], context: dict = {}) -> dict:
+    """Scan recent chat history for user preferences/facts and save as memories."""
+    user = context.get("user")
+    chat = context.get("chat")
+
+    if not user:
+        return {"aggregated": False, "message": "No user context."}
+
+    try:
+        from apps.chat.models import Message
+        from apps.memory.services import save_memory
+        from apps.llm.clients import LiteLLMClient
+
+        recent = Message.objects.filter(
+            chat__user=user, role=Message.Role.USER,
+            status=Message.Status.COMPLETED,
+        ).order_by("-created_at")[:20]
+
+        if not recent:
+            return {"aggregated": False, "message": "No chat history to analyze."}
+
+        chat_text = "\n".join(
+            f"User: {m.content[:500]}" for m in reversed(recent)
+        )
+
+        client = LiteLLMClient()
+        response = client.chat_completion(
+            messages=[{"role": "user", "content": (
+                "Extract factual statements about the user from this chat history. "
+                "Return a JSON array of objects with 'content' (the fact) and 'importance' (1-5). "
+                "Focus on preferences, interests, goals, and personal context. "
+                "Return [] if nothing can be extracted.\n\n"
+                f"Chat history:\n{chat_text}"
+            )}],
+            max_tokens=1000,
+            temperature=0.1,
+        )
+        content = response.get("content", "").strip()
+        if content.startswith("```"):
+            content = content.split("\n", 1)[-1]
+            if "```" in content:
+                content = content.split("```")[0]
+
+        import json
+        facts = json.loads(content) if content else []
+        saved = []
+        for fact in facts:
+            mem = save_memory(user, fact.get("content", ""), int(fact.get("importance", 1)))
+            saved.append({"content": mem.content, "importance": mem.importance})
+
+        return {
+            "aggregated": True,
+            "count": len(saved),
+            "memories": saved,
+            "message": f"Extracted and saved {len(saved)} memories from chat history.",
+        }
+    except Exception as exc:
+        logger.exception("memory.aggregate failed")
+        return {"aggregated": False, "error": str(exc)}
 
 
 # ── rag.search ─────────────────────────────────────────────────────────────────

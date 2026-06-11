@@ -1,11 +1,12 @@
 import base64
 import json
 import logging
+import time
 
 from django.conf import settings
 from django.core.files.storage import default_storage
 
-from apps.llm.prompts import RAG_CONTEXT_PROMPT, SYSTEM_PROMPT
+from apps.llm.prompts import MEMORY_CONTEXT_PROMPT, RAG_CONTEXT_PROMPT, SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +127,9 @@ class ContextBuilder:
         rag_context = self._search_rag(user_message_text)
         if rag_context:
             system_content += f"\n\n{RAG_CONTEXT_PROMPT.format(results=rag_context)}"
+        memories = self._load_memories()
+        if memories:
+            system_content += f"\n\n{MEMORY_CONTEXT_PROMPT.format(memories=memories)}"
         self.messages = [{"role": "system", "content": system_content}]
         self._add_recent_chat_history()
         attachments = list(self.user_message.attachments) if self.user_message and self.user_message.attachments else []
@@ -135,6 +139,7 @@ class ContextBuilder:
 
     def _decide_enhancements(self, query: str) -> dict:
         """Ask the LLM which retrieval enhancements to enable for this query."""
+        start = time.time()
         try:
             from apps.llm.clients import LiteLLMClient
             client = LiteLLMClient()
@@ -159,17 +164,21 @@ class ContextBuilder:
                 temperature=0.1,
             )
             content = response.get("content", "").strip()
-            # Strip markdown fences
             if content.startswith("```"):
                 content = content.split("\n", 1)[-1]
                 if "```" in content:
                     content = content.split("```")[0]
-            return json.loads(content)
+            result = json.loads(content)
+            duration = time.time() - start
+            logger.info("[TIMING] enhance_decide=%.3fs query_len=%d decision=%s", duration, len(query), result)
+            return result
         except Exception:
-            logger.warning("Failed to decide enhancements via LLM, using defaults")
+            duration = time.time() - start
+            logger.warning("[TIMING] enhance_decide=%.3fs FAILED, using defaults", duration)
             return {}
 
     def _search_rag(self, query: str) -> str | None:
+        start = time.time()
         if not query or not getattr(settings, "RAG_ENABLED", False):
             return None
         try:
@@ -183,7 +192,6 @@ class ContextBuilder:
                     stepback=enhancements.get("stepback"),
                 )
                 results = rag_response.get("results", [])
-                # Log the search to the database
                 _log_rag_search(
                     user=self.user,
                     chat=self.chat,
@@ -193,6 +201,8 @@ class ContextBuilder:
                 )
             else:
                 results = self._local_search(query)
+            duration = time.time() - start
+            logger.info("[TIMING] rag_search=%.3fs results=%d", duration, len(results if results else []))
             if not results:
                 return None
             lines = []
@@ -208,7 +218,8 @@ class ContextBuilder:
                     lines.append(text[:500])
             return "\n\n".join(lines) if lines else None
         except Exception:
-            logger.exception("RAG search failed")
+            duration = time.time() - start
+            logger.exception("[TIMING] rag_search=%.3fs FAILED", duration)
             return None
 
     def _local_search(self, query: str) -> list[dict]:
@@ -241,6 +252,26 @@ class ContextBuilder:
                 "role": msg.role,
                 "content": content,
             })
+
+    def _load_memories(self) -> str | None:
+        """Load user memories and format them for context injection."""
+        if not self.user or not self.user.is_authenticated:
+            return None
+        try:
+            from apps.memory.services import get_user_memories
+            from apps.memory.models import MemorySettings
+            settings_obj = MemorySettings.objects.filter(user=self.user).first()
+            if settings_obj and not settings_obj.is_enabled:
+                return None
+            max_memories = min(settings_obj.max_tokens // 50 if settings_obj else 5, 20)
+            memories = get_user_memories(self.user, top_k=max_memories)
+            if not memories:
+                return None
+            lines = [f"- {m.content}" for m in memories]
+            return "\n".join(lines)
+        except Exception:
+            logger.debug("Failed to load memories for context")
+            return None
 
     def estimate_tokens(self, text: str) -> int:
         return len(text) // 4
