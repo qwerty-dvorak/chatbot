@@ -1,6 +1,7 @@
 # CLAUDE.md — rag-pipeline
 
-Standalone document ingestion and advanced RAG pipeline. All LLM/embedding/reranker calls go to local endpoints (real vLLM servers started via `start-services.sh`).
+Standalone document ingestion and advanced RAG pipeline. All
+LLM/embedding/reranker calls go to local or RunPod endpoints.
 
 ## Quick start
 
@@ -8,7 +9,7 @@ Standalone document ingestion and advanced RAG pipeline. All LLM/embedding/reran
 # 1. Clone models to sibling ../models/ repo (one-time, requires git-lfs, ~24GB per model)
 bash clone_models.sh
 
-# 2. Start all services (Milvus + vLLM servers + RAG API)
+# 2. Start all services (Milvus + PostgreSQL + RAG API)
 bash start-services.sh
 bash start-services.sh --clean   # tear down and restart
 
@@ -46,14 +47,21 @@ See `TESTING.md` for full details, manual curl examples, and troubleshooting.
 |---------|------|-------|---------|
 | rag-text-embed | 8090 | vllm/vllm-openai:latest | nvidia/llama-embed-nemotron-8b text embeddings |
 | rag-multimodal-embed | 8091 | vllm/vllm-openai:latest | nvidia/nemotron-colembed-vl-8b-v2 multimodal embeddings |
-| rag-reranker | 8092 | vllm/vllm-openai:latest | Qwen3-VL-Reranker-8B scoring via /score endpoint |
+| rag-reranker | 8092 | vllm/vllm-openai:latest | Qwen3-VL-Reranker-8B pooling via /pooling endpoint |
 | rag-api | 8093 | rag-api (ubuntu:24.04) | FastAPI, durable SQLite queue, ingestion worker, search |
+| postgres | 5432 | postgres:16 | Shared DB with chatbot-service |
 | milvus-standalone | 19530 | milvusdb/milvus:latest | Vector store |
 
 ## Architecture
 
+See `docs/architecture.md` for complete topology diagrams including:
+
+- Single-server vs two-server (production) deployment
+- Ingestion pipeline with hypothetical question vector indexing
+- Search pipeline with query-to-query resolution
+- PostgreSQL remote access configuration
+
 ```
-start-services.sh          <- starts all Docker containers
 pipeline/
   config.py                <- Config dataclass loaded from .env
   models.py                <- RawDocument, Chunk, EmbeddedChunk, SearchResult
@@ -62,11 +70,14 @@ pipeline/
   embed.py                 <- Text + multimodal embedding via OpenAI-compatible API
   index.py                 <- Milvus indexing + BM25 index
   retrieve.py              <- Vector search, BM25 search, RRF hybrid fusion, reranker
-  query.py                 <- Query enhancement (HyDE, sub-queries, stepback, hypothetical Qs)
+  query.py                 <- Query-time enhancement (HyDE, sub-queries, stepback)
+                             AND index-time hypothetical question generation
   ingest.py                <- Ingestion orchestrator
   jobs.py                  <- SQLite job store + single background worker
   tiers.py                 <- Tier policies and promotion
-  search.py                <- Search orchestrator
+  search.py                <- Search orchestrator (includes query-to-query resolution)
+  text_pipeline.py         <- Full text ingest: chunk → hyde → persist → embed → index
+  image_pipeline.py        <- Image-only document ingest
 mock_server/
   server.py                <- 5-port stdlib-only mock server
   Dockerfile               <- minimal mock image
@@ -74,6 +85,35 @@ mock_server/
   .env                     <- RAG API configuration for mock endpoints
   test_integration.sh      <- mock + Milvus end-to-end test
 ```
+
+## Key concepts
+
+### Hypothetical Questions (index-time)
+
+Each chunk generates N hypothetical questions during ingestion. **Each question
+is embedded as a separate vector** in Milvus (`chunk_type = hypothetical_question`,
+`parent_id` → source chunk). At search time, query-to-query matching resolves
+question hits back to source chunks. This is distinct from **HyDE** (query-time
+document generation). See `docs/query-enhancements.md` for the full comparison.
+
+### Query-time enhancements
+
+Set `QUERY_ENHANCEMENTS` in `.env`:
+
+| Enhancement | Description |
+|-------------|-------------|
+| `hyde` | Generate a hypothetical answer and embed it instead of the raw query |
+| `sub_queries` | Decompose complex query into 2-4 simpler sub-queries |
+| `stepback` | Abstract query to a broader question for better recall |
+
+These are applied at search time. Hypothetical questions (index-time) operate
+independently and are always active when `HYPOTHETICAL_QUESTIONS_PER_CHUNK > 0`.
+
+### Two-server deployment
+
+Use a single PostgreSQL instance shared between rag-pipeline and
+chatbot-service. Set `POSTGRES_HOST=<server-ip>` in both env files. Ensure
+PostgreSQL listens on `*` and permits remote connections.
 
 ## Local mock endpoints
 
@@ -141,10 +181,13 @@ bash start_mock_all.sh --clean
 
 | Enhancement | Description |
 |-------------|-------------|
-| `hyde` | Generate a hypothetical answer and embed it instead of the raw query |
-| `sub_queries` | Decompose complex query into 2-4 simpler sub-queries |
-| `stepback` | Abstract query to a broader question for better recall |
-| `hypothetical_questions` | Index-time only: generate questions per chunk for richer retrieval |
+| `hyde` | Query-time: Generate a hypothetical answer and embed it instead of the raw query |
+| `sub_queries` | Query-time: Decompose complex query into 2-4 simpler sub-queries |
+| `stepback` | Query-time: Abstract query to a broader question for better recall |
+
+The index-time `hypothetical_questions` enhancement is always active when
+`HYPOTHETICAL_QUESTIONS_PER_CHUNK > 0`. It is NOT controlled by
+`QUERY_ENHANCEMENTS`.
 
 ## Adding dependencies
 
@@ -169,6 +212,7 @@ EMBEDDING_BASE_URL, EMBEDDING_API_KEY, TEXT_EMBEDDING_MODEL, TEXT_EMBEDDING_DIM
 MULTIMODAL_EMBEDDING_BASE_URL, MULTIMODAL_EMBEDDING_MODEL, MULTIMODAL_EMBEDDING_DIM
 RERANKER_BASE_URL, RERANKER_API_KEY, RERANKER_MODEL
 MILVUS_HOST, MILVUS_PORT
+POSTGRES_HOST, POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_PORT
 CHUNK_STRATEGY, CHUNK_SIZE, CHUNK_OVERLAP
-QUERY_ENHANCEMENTS
+QUERY_ENHANCEMENTS, HYPOTHETICAL_QUESTIONS_PER_CHUNK
 ```

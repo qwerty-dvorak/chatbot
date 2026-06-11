@@ -64,6 +64,22 @@ Compatibility health endpoint. It reports configuration and queue state but
 does not fail when Milvus is unavailable. Use `/health/ready` for readiness
 probes.
 
+```json
+{
+  "status": "ok",
+  "milvus_host": "test-milvus",
+  "milvus_port": 19530,
+  "worker_running": true,
+  "queue": {
+    "queued": 0,
+    "running": 0,
+    "succeeded": 5,
+    "failed": 0,
+    "cancelled": 0
+  }
+}
+```
+
 ## Queue Ingestion
 
 ### `POST /v1/ingest`
@@ -83,7 +99,7 @@ Tier defaults:
 
 | Tier | Extraction | Image embedding | Chunking | Hypothetical questions |
 |------|------------|-----------------|----------|------------------------|
-| `instant` | Existing text layer | No | `recursive` | Disabled |
+| `instant` | Existing text layer | No | `recursive` | Disabled (0 per chunk) |
 | `slow` | Text plus OCR for extracted images | Yes | `sentence_window` | 2 per text chunk |
 | `global` | Text plus OCR for extracted images | Yes | `hierarchical` | 3 per text chunk |
 
@@ -139,7 +155,7 @@ to `/v1/promote`:
     "files_failed": 0,
     "files_skipped_duplicate": 0,
     "chunks_created": 84,
-    "embeddings_indexed": 88,
+    "embeddings_indexed": 111,
     "errors": [],
     "source_paths": [
       "/app/data/ingestion/uploads/daaa89d8131946138f87b84ef9fa291b/notes.md",
@@ -148,6 +164,11 @@ to `/v1/promote`:
   }
 }
 ```
+
+Note: `embeddings_indexed` includes both document chunk vectors and hypothetical
+question vectors. For example, 84 document chunks + 27 question vectors = 111
+total. The `hyde_generated` field in the per-file results shows the question
+count.
 
 ### `GET /v1/ingestions`
 
@@ -205,8 +226,9 @@ Response: `202 Accepted` with the same job resource shape as ingestion and
 `"kind": "promote"`.
 
 Promotion runs through the same single worker. When `delete_old_chunks` is
-true, it removes matching Milvus rows and matching BM25 chunks before indexing
-the new representation.
+true, it removes matching Milvus rows (both document chunks and hypothetical
+question chunks with matching `source_path`) and matching BM25 chunks before
+indexing the new representation.
 
 ## Search
 
@@ -230,6 +252,14 @@ Tier search defaults:
 | `instant` | none | off |
 | `slow` | `hyde` | on |
 | `global` | `hyde,sub_queries,stepback` | on |
+
+**Query-to-query resolution:** The search pipeline automatically resolves
+hypothetical question vector hits to their source document chunks. If a query
+vector matches a `hypothetical_question` chunk in Milvus, the result is
+replaced with its parent chunk (found via `parent_id`). The `method` field
+in the response is set to `"query_to_query"` for these results. This happens
+transparently — the caller always receives document chunks, never raw question
+vectors.
 
 ```bash
 curl -X POST http://localhost:8093/v1/search \
@@ -264,6 +294,25 @@ curl -X POST http://localhost:8093/v1/search \
 }
 ```
 
+Possible `method` values in search results:
+
+| Method | Meaning |
+|--------|---------|
+| `vector` | Vector similarity match (inner product) |
+| `bm25` | BM25 keyword match |
+| `hybrid` | RRF fusion of vector + BM25 |
+| `reranked` | Cross-encoder re-scored by reranker |
+| `query_to_query` | Hypothetical question vector match, resolved to parent chunk |
+
+### `GET /v1/search?q=...`
+
+Quick search via query parameter (same logic as POST, but returns raw
+`SearchResult` objects for CLI testing).
+
+```bash
+curl "http://localhost:8093/v1/search?q=what+is+the+Acheron+Trough"
+```
+
 ## Collection Administration
 
 ### `GET /v1/collections`
@@ -278,6 +327,19 @@ Returns Milvus collection names.
 
 Drops a complete Milvus collection. This is destructive and does not remove
 the BM25 index, registry, uploaded files, or job history.
+
+## Ingestion Job Result Fields
+
+Per-file results returned in the job's `results` array:
+
+| Field | Type | Example | Description |
+|-------|------|---------|-------------|
+| `document_id` | string | `"fcfd2559-..."` | PostgreSQL `documents` UUID |
+| `object_key` | string | `"abc123..."` | SHA-256 key in object store |
+| `chunks_created` | int | `9` | Number of document chunks created |
+| `embeddings_indexed` | int | `36` | Total vectors indexed (doc + question) |
+| `hyde_generated` | int | `27` | Total hypothetical questions generated |
+| `question_chunks_indexed` | int | `27` | Number of question vectors indexed |
 
 ## Errors
 

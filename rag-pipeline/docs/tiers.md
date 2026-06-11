@@ -162,9 +162,16 @@ Every ingest and promote call returns a stats dict:
   "files_processed": 3,
   "files_skipped_duplicate": 1,
   "chunks_created": 87,
-  "embeddings_indexed": 87
+  "embeddings_indexed": 174,
+  "hyde_generated": 261,
+  "question_chunks_indexed": 87
 }
 ```
+
+Note: `embeddings_indexed` includes both document chunk vectors AND hypothetical
+question chunk vectors. For example, 87 document chunks + 87 question vectors
+(3 per chunk for 29 chunks at the slow tier) = 174 total. The `hyde_generated`
+and `question_chunks_indexed` fields break down the counts separately.
 
 Promote adds:
 
@@ -174,3 +181,6 @@ Promote adds:
   "deleted_image_chunks": 12
 }
 ```
+
+Promotion deletes both document chunks and hypothetical question vectors
+(sharing the same `source_path`).

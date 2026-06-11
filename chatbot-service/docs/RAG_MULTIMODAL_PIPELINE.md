@@ -206,8 +206,36 @@ def _search_rag(self, query: str) -> str | None:
 
 When `RAG_API_ENABLED=true`, search calls the standalone RAG Pipeline API (`/v1/search`),
 which returns actual uploaded document content with filenames. This enables the LLM to
-reference and cite specific documents in its answers. Fallback uses text-level `icontains`
-search on local `DocumentChunk` records.
+reference and cite specific documents in its answers. The RAG pipeline handles all
+model calls (embedding, reranking, query enhancement) and query-to-query resolution
+(see `rag-pipeline/docs/query-enhancements.md`). The chatbot-service never needs to
+call embedding or reranker models for RAG — everything goes through the RAG API.
+
+Fallback uses text-level `icontains` search on local `DocumentChunk` records.
+
+### Two-server deployment
+
+In production, the chatbot-service and rag-pipeline run on separate machines:
+
+```text
+Server A (RAG pipeline):
+  rag-api (port 8093)  — handles all ingest + search
+  PostgreSQL (:5432)   — shared tables (documents, chunks)
+  Milvus (:19530)      — vector store
+  RunPod endpoints     — embed/rerank/chat
+
+Server B (Chatbot):
+  Django web + worker  — chat UI, memory, tool calling
+  RAG_API_BASE_URL=http://<server-a>:8093
+  POSTGRES_HOST=<server-a>   — same PostgreSQL
+  MILVUS_HOST=<server-a>     — shared Milvus for user memories
+```
+
+PostgreSQL must be configured for remote access on Server A:
+```ini
+postgresql.conf  →  listen_addresses = '*'
+pg_hba.conf      →  host chatbot chatbot <server-b-ip>/32 md5
+```
 
 The context builder should enforce a token budget:
 

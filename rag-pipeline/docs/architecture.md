@@ -14,6 +14,80 @@ Primary constraints:
 - Durable uploads, job state, registry, and BM25 data under `data/`.
 - Search remains available while ingestion jobs run.
 
+## Deployment Topologies
+
+### Single-server (dev / small-scale)
+
+All services run on one machine, typically inside Docker containers on a shared
+network (`rag_net`):
+
+```text
+┌─────────────── host machine ───────────────────────────────────────┐
+│                                                                     │
+│  rag-api (port 8093) ──┐                                           │
+│                        │                                           │
+│  RunPod / vLLM   ◄─────┤  HTTP calls for embed/rerank/chat/OCR     │
+│  endpoints       ◄─────┤                                           │
+│                        │                                           │
+│  Milvus (:19530) ◄────┤  vector reads/writes                       │
+│                        │                                           │
+│  PostgreSQL (:5432) ◄─┤  document + chunk CRUD                     │
+│  (rag-postgres)        │                                           │
+│                        │                                           │
+│  chatbot-service       │  (optional — can run on same host)        │
+│  (port 8080)  ◄────────┘  connects to same PostgreSQL + Milvus     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Two-server (production)
+
+The RAG pipeline and chatbot-service run on separate machines, sharing
+PostgreSQL and (optionally) Milvus. The chatbot-service calls the RAG API for
+ingest + search, avoiding the need to embed documents on the chat server.
+
+```text
+┌── Server A: RAG Pipeline ───────────────────────────────────────┐
+│  rag-api (port 8093)       ←── RAG_API_BASE_URL                   │
+│                                                                   │
+│  Milvus (:19530)           ── vector store                         │
+│  PostgreSQL (:5432)        ── shared tables                        │
+│                                                                   │
+│  RunPod / vLLM endpoints   ── embed/rerank/chat/OCR               │
+└───────────────────────────┬────────────────────────────────────────┘
+                            │ HTTP :8093 (search/ingest)
+                            │ TCP :5432  (PostgreSQL)
+                            │ TCP :19530 (Milvus — optional)
+┌───────────────────────────┴────────────────────────────────────────┐
+│  Server B: Chatbot Service                                          │
+│  chatbot-service (port 8080)  Django web + worker                   │
+│  RAG_API_BASE_URL=http://<server-a>:8093                            │
+│  POSTGRES_HOST=<server-a>     (same PostgreSQL)                     │
+│  MILVUS_HOST=<server-a>       (same Milvus, for user memories)      │
+│  Chat LLM endpoint            (RunPod or other)                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**PostgreSQL remote access setup:**
+
+On the PostgreSQL server, two configuration changes are required so the
+chatbot-service can connect over TCP:
+
+```ini
+postgresql.conf  →  listen_addresses = '*'
+```
+
+```text
+pg_hba.conf  →  host chatbot chatbot <client-ip>/32 md5
+```
+
+**Milvus sharing:**
+
+Both services can share one Milvus instance. The chatbot-service stores user
+memory vectors in the `user_memories` collection; the rag-pipeline stores
+document chunks in `rag_text_chunks` and `rag_image_chunks`. Ensure the
+Milvus server's `--bind-address` listens on `0.0.0.0` so the remote
+chatbot-service can connect.
+
 ## Runtime Topology
 
 ```text
@@ -34,20 +108,20 @@ Client
 |                                           |                                  |
 |                                           |  single worker thread            |
 |                                           |    claim oldest queued job       |
-|                                           |    extract -> OCR -> chunk       |
-|                                           |    augment -> embed -> index     |
-|                                           |                                  |
+|                                           |    extract → OCR → chunk        |
+|                                           |    → hyde → embed → index       |
+|                                           |    (see Ingestion Pipeline)      |
 |                                           +-------------------------+        |
 +--------------------------------------------------------------------|--------+
-                                                                     |
-                 +--------------------+--------------------+----------+
-                 |                    |                    |
-                 v                    v                    v
-          model endpoints          Milvus           local data volume
-          chat/embed/OCR/           :19530           uploads/
-          reranker                                   jobs.sqlite3
-                                                     registry JSON
-                                                     BM25 pickle
+                                                                      |
+                  +--------------------+--------------------+----------+
+                  |                    |                    |
+                  v                    v                    v
+           model endpoints          Milvus           local data volume
+           chat/embed/OCR/           :19530           uploads/
+           reranker                                   jobs.sqlite3
+                                                      registry JSON
+                                                      BM25 pickle
 ```
 
 The Docker image runs Uvicorn with `--workers 1`. Multiple Uvicorn processes
@@ -62,9 +136,8 @@ process and adding a cross-process lease.
 1. FastAPI validates multipart fields.
 2. Each filename is reduced to its basename and de-duplicated within the
    request.
-3. Files stream to
-   `INGESTION_DATA_DIR/uploads/<job-id>/`; the request does not buffer the
-   entire file in memory.
+3. Files stream to `INGESTION_DATA_DIR/uploads/<job-id>/`; the request does
+   not buffer the entire file in memory.
 4. A `queued` row is committed to SQLite only after all files are durable.
 5. The worker is notified.
 6. The API returns `202 Accepted` and a job status URL.
@@ -135,7 +208,7 @@ extract.py
   |-- PDF: pypdf text layer plus extractable embedded images
   `-- image: raw bytes
   |
-  +-- slow/global image bytes --> ocr.py --> OCR text
+  +-- slow/global image bytes → ocr.py → OCR text
   |
   v
 RawDocument
@@ -146,17 +219,43 @@ chunk.py
   |-- sentence_window
   `-- hierarchical
   |
-  +-- optional hypothetical questions via query.py
+  +-- hypothetical questions via query.py
+  |   For each chunk, LLM generates N questions.  Each question becomes a
+  |   Chunk with chunk_type=HYPOTHETICAL_QUESTION and parent_id pointing
+  |   to the source chunk.  These question chunks are embedded and indexed
+  |   into Milvus as separate vectors alongside the document chunks.
   |
-  +-- text chunks  --> embed.py /v1/embeddings
-  `-- image chunks --> embed.py /pooling
+  +-- text chunks  → embed.py /v1/embeddings
+  `-- image chunks → embed.py /pooling
   |
   v
 index.py
   |-- rag_text_chunks in Milvus
+  |   Contains both document chunks (text/parent/child/sentence_window)
+  |   and hypothetical question vectors (HYPOTHETICAL_QUESTION type with
+  |   parent_id → source chunk).
   |-- rag_image_chunks in Milvus
   `-- atomic BM25 pickle replacement
 ```
+
+### Step Detail — Hypothetical Question Vector Indexing
+
+1. For each text chunk, the LLM generates N hypothetical questions that the
+   chunk would answer (N = `hypothetical_questions_per_chunk`, configured per
+   tier: 0 for instant, 2 for slow, 3 for global).
+2. Each question is placed into its own `Chunk` object with:
+   - `chunk_type = ChunkType.HYPOTHETICAL_QUESTION`
+   - `parent_id = <source chunk's UUID>`
+   - `text = <the question text>`
+   - `source_path = <same as parent>`
+3. These question chunks are embedded using the same text embedding model as
+   the document chunks.
+4. They are indexed into the same Milvus collection (`rag_text_chunks`) as
+   separate rows with `chunk_type='hypothetical_question'` and the
+   `parent_id` field pointing to the source document chunk.
+5. The original `hyde_questions` field in the PostgreSQL chunk metadata JSONB
+   is still populated for reproducibility, but it is the **Milvus vectors**
+   that power query-to-query search.
 
 PDF handling is intentionally described narrowly: the current extractor uses
 the existing PDF text layer and images exposed by `pypdf`. It does not render
@@ -189,7 +288,7 @@ file fails, the worker marks the job `failed`.
 | Text embedding | yes | yes | yes |
 | Image embedding | no | yes | yes |
 | Chunk strategy | recursive | sentence window | hierarchical |
-| Hypothetical questions | 0 | 2/chunk | 3/chunk |
+| Hypothetical questions per chunk | 0 | 2 | 3 |
 | Query enhancements | none | HyDE | HyDE, sub-query, stepback |
 | Reranker | off | on | on |
 
@@ -201,7 +300,8 @@ generation without mutating global configuration.
 Promotion is represented as a queue job, not an inline API operation:
 
 1. verify the persisted source exists;
-2. optionally delete source rows from both Milvus collections;
+2. optionally delete source rows from both Milvus collections (including
+   hypothetical question vectors with matching `parent_id`);
 3. remove matching source chunks from BM25 and atomically rebuild it;
 4. remove the source from the ingestion registry;
 5. ingest with the target tier;
@@ -221,21 +321,47 @@ request query
   v
 query.py: raw / HyDE / sub-queries / stepback
   |
-  +-- text embedding
+  +-- text embedding (each enhanced query)
   |
-  +-- vector search in Milvus
+  +-- vector search in Milvus → returns both document chunks AND
+  |   hypothetical question chunks (if query matches a question vector)
+  |
   +-- lexical search in BM25
-  `-- hybrid weighted reciprocal-rank fusion
+  |
+  +-- hybrid weighted reciprocal-rank fusion
+  |
+  v
+  +-- QUERY-TO-QUERY RESOLUTION:
+  |   For each result whose chunk_type is HYPOTHETICAL_QUESTION:
+  |     1. Query Milvus by parent_id to find the source document chunk.
+  |     2. Replace the question chunk with the parent chunk in the result.
+  |     3. Mark retrieval_method as "query_to_query".
+  |     4. If the same parent chunk was also found directly, dedup
+  |        keeps the highest score.
   |
   v
 deduplicate by chunk ID
   |
-  +-- optional reranker /score
+  +-- optional reranker /score (uses original query, not enhanced)
   |
-  +-- best-effort parent context fetch
+  +-- best-effort parent context fetch (for CHILD chunks)
   v
 SearchResponse
 ```
+
+### Query Enhancement Quick Reference
+
+| Technique | When | What it does | Implemented in |
+|-----------|------|-------------|----------------|
+| HyDE | Query-time | LLM writes a hypothetical *document* from user query; embed that doc → search against chunk vectors | `query.py:hyde()` |
+| Sub-queries | Query-time | Decompose complex query into 2-4 simpler sub-questions | `query.py:sub_queries()` |
+| Stepback | Query-time | Broader reformulation for recall | `query.py:stepback()` |
+| Hypothetical Questions | **Index-time** | LLM generates questions per chunk → each question embedded as separate vector in Milvus → query-to-query search resolves back to source chunks | `query.py:hypothetical_questions_for_chunk()` + `text_pipeline.py` embed/index + `search.py` resolution |
+
+The key distinction: **HyDE** is a query-time embedding-space trick (replace
+query → search doc vectors). **Hypothetical Questions** is an index-time
+data-augmentation strategy (pre-compute question vectors → search questions →
+resolve to docs). Both can be active simultaneously and complement each other.
 
 Enhancement selection is passed as a function argument. Request handlers do not
 mutate the global `cfg.query_enhancements`, avoiding cross-request leakage.
@@ -245,18 +371,24 @@ mutate the global `cfg.query_enhancements`, avoiding cross-request leakage.
 Text and image embeddings use separate collections because their dimensions
 can differ.
 
+### rag_text_chunks
+
 | Field | Type | Notes |
 |-------|------|-------|
-| `id` | VARCHAR(64) | Chunk primary key |
-| `source_path` | VARCHAR(512) | Persisted upload path |
-| `text` | VARCHAR(65535) | Extracted, OCR, or generated text |
-| `chunk_type` | VARCHAR(32) | text/image/parent/child/window/summary |
-| `parent_id` | VARCHAR(64) | Parent context reference |
-| `window_text` | VARCHAR(65535) | Sentence window or fetched parent |
+| `id` | VARCHAR(64) | Chunk primary key (UUID hex) |
+| `source_path` | VARCHAR(512) | Persisted upload path inside container |
+| `text` | VARCHAR(65535) | Extracted, OCR, or **generated question text** |
+| `chunk_type` | VARCHAR(32) | `text`/`image`/`parent`/`child`/`sentence_window`/`summary`/ **`hypothetical_question`** |
+| `parent_id` | VARCHAR(64) | Parent chunk UUID (for CHILD/SENTENCE_WINDOW/HYPOTHETICAL_QUESTION) |
+| `window_text` | VARCHAR(65535) | Sentence window or fetched parent context |
 | `metadata_json` | VARCHAR(4096) | Tier and source metadata |
-| `embedding` | FLOAT_VECTOR | Configured model dimension |
+| `embedding` | FLOAT_VECTOR(4096) | Embedding vector using inner-product distance |
 
 The vector index is `IVF_FLAT` with inner-product distance.
+
+### rag_image_chunks
+
+Same schema but `embedding` uses `MULTIMODAL_EMBEDDING_DIM`.
 
 ## Module Ownership
 
@@ -270,9 +402,11 @@ The vector index is `IVF_FLAT` with inner-product distance.
 | `pipeline/chunk.py` | Chunking strategies |
 | `pipeline/embed.py` | Text and multimodal model adapters |
 | `pipeline/index.py` | Milvus schema/writes and atomic BM25 persistence |
-| `pipeline/query.py` | Query and index-time LLM enhancements |
+| `pipeline/query.py` | Query-time enhancements (HyDE/sub-queries/stepback) AND index-time hypothetical question generation |
 | `pipeline/retrieve.py` | Vector, BM25, hybrid fusion, reranking |
-| `pipeline/search.py` | End-to-end synchronous retrieval |
+| `pipeline/search.py` | End-to-end synchronous retrieval including query-to-query resolution |
+| `pipeline/text_pipeline.py` | Document ingest orchestration: chunk → hyde → persist → embed → index (including hypothetical question chunks) |
+| `pipeline/image_pipeline.py` | Image-only document ingest orchestration |
 | `mock_server/server.py` | Deterministic local model API substitutes |
 
 ## Deployment And Persistence
@@ -298,6 +432,38 @@ INGESTION_DATA_DIR=/app/data/ingestion
 Do not run multiple `rag-api` containers against the same queue directory. The
 SQLite claim is safe, but each container also owns a worker and can execute
 different ingestion jobs concurrently, reintroducing shared-index races.
+
+### Two-server deployment (rag-api + chatbot-service on separate machines)
+
+```bash
+# Server A (RAG pipeline) — start Milvus + PostgreSQL + rag-api
+docker run -d --name test-milvus \
+  --network rag_net \
+  milvusdb/milvus:latest
+
+docker run -d --name rag-postgres \
+  --network rag_net \
+  -e POSTGRES_DB=chatbot \
+  -e POSTGRES_USER=chatbot \
+  -e POSTGRES_PASSWORD=chatbot \
+  -p 5432:5432 \
+  postgres:16
+
+docker run -d --name rag-api \
+  --network rag_net \
+  --env-file .env \
+  -v "$PWD/data:/app/data" \
+  -p 8093:8093 \
+  rag-api
+
+# Server B (Chatbot) — connect to remote PostgreSQL + rag-api
+docker run -d --name chatbot-web \
+  -e POSTGRES_HOST=<server-a-ip> \
+  -e RAG_API_ENABLED=true \
+  -e RAG_API_BASE_URL=http://<server-a-ip>:8093 \
+  -p 8080:8080 \
+  chatbot
+```
 
 ## Mock Test Topology
 
