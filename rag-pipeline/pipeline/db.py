@@ -86,7 +86,12 @@ def _ensure_pipeline_source() -> str:
     """Get-or-create a KnowledgeSource row for pipeline-ingested documents."""
     global _PIPELINE_SOURCE_ID
     if _PIPELINE_SOURCE_ID:
-        return _PIPELINE_SOURCE_ID
+        rows = execute(
+            "SELECT id FROM knowledge_sources WHERE id = %s LIMIT 1",
+            (_PIPELINE_SOURCE_ID,), fetch=True,
+        )
+        if rows:
+            return _PIPELINE_SOURCE_ID
 
     rows = execute(
         "SELECT id FROM knowledge_sources WHERE source_type = 'api' AND name = 'rag-pipeline' LIMIT 1",
@@ -98,12 +103,21 @@ def _ensure_pipeline_source() -> str:
 
     source_id = str(uuid.uuid4())
     execute(
-        """INSERT INTO knowledge_sources (id, name, source_type, visibility, metadata)
-           VALUES (%s, 'rag-pipeline', 'api', 'private', '{}')""",
+        """INSERT INTO knowledge_sources
+           (id, name, source_type, visibility, metadata, created_at, updated_at)
+           VALUES (%s, 'rag-pipeline', 'api', 'private', '{}', NOW(), NOW())""",
         (source_id,),
     )
     _PIPELINE_SOURCE_ID = source_id
     return source_id
+
+
+def reset_pipeline_source() -> None:
+    """Clear cached pipeline source ID so _ensure_pipeline_source re-searches.
+    Only needed in tests where the DB is cleaned between runs.
+    """
+    global _PIPELINE_SOURCE_ID
+    _PIPELINE_SOURCE_ID = None
 
 
 # ---------------------------------------------------------------------------
@@ -127,8 +141,8 @@ def insert_document(
     execute(
         """INSERT INTO documents
            (id, source_id, title, original_filename, mime_type, sha256, status,
-            extracted_text, metadata)
-           VALUES (%s, %s, %s, %s, %s, %s, 'ready', %s, %s)""",
+            extracted_text, analysis_summary, metadata, created_at, updated_at)
+           VALUES (%s, %s, %s, %s, %s, %s, 'ready', %s, '', %s, NOW(), NOW())""",
         (
             doc_id, source_id, title, original_filename or title,
             mime_type, sha256, extracted_text,
@@ -166,8 +180,8 @@ def insert_chunk(
     execute(
         """INSERT INTO document_chunks
            (id, document_id, asset_id, chunk_index, content, content_hash,
-            token_count, metadata)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+            token_count, metadata, created_at)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())""",
         (
             chunk_id, document_id, asset_id, chunk_index, content,
             content_hash or _simple_hash(content),
@@ -195,8 +209,8 @@ def insert_chunks_batch(rows: list[dict]) -> list[str]:
     execute_many(
         """INSERT INTO document_chunks
            (id, document_id, asset_id, chunk_index, content, content_hash,
-            token_count, metadata)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+            token_count, metadata, created_at)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())""",
         param_rows,
     )
     return ids
