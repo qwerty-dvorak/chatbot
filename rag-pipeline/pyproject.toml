@@ -20,6 +20,7 @@ dependencies = [
     "python-multipart>=0.0.20,<0.0.21",
     "litellm>=1.40,<2",
     "aiofiles>=24.1,<26",
+    "psycopg2-binary>=2.9.11",
 ]
 
 [tool.uv]
