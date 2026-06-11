@@ -3,20 +3,33 @@ __pycache__/
 *.pyc
 .venv/
 .env
+.env.bak
+.env.mock
 
 # Model directories live in sibling ../models/ repo (not in this repo)
 
 # Docker runtime data
 rag-pipeline/volumes/
+milvus/volumes/
 
-# Generated files
+# Generated runtime files
 rag-pipeline/data/bm25_index.pkl
 rag-pipeline/data/ingested_registry.json
 rag-pipeline/bm25_index.pkl
 rag-pipeline/bm25_index_mock.pkl
-
-# RunPod testing
+rag-pipeline/data/ingestion/
+rag-pipeline/data/object_store/
 rag-pipeline/.runpod_state
-rag-pipeline/.env.runpod
 
-data/object_store/
+# Object store (root-level file server data)
+/data/object_store/
+
+# Root data directory (file server uploads)
+/data/
+
+# RunPod state
+models/.runpod_state
+
+# Seed data (keep .gitignore, ignore everything else)
+seed_data/*
+!seed_data/.gitignore
