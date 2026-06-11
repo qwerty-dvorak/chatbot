@@ -102,7 +102,7 @@ echo "  milvus      -> localhost:19530  (start with: bash runpod_start_local_mil
 echo ""
 echo "══════════════════════════════════════════════════"
 echo " Phase 3: waiting for vLLM servers (model download"
-echo "          ~16 GB each on RTX 5090, ~15-30 min)"
+echo "          ~16 GB each on RTX 3090, ~15-30 min)"
 echo "══════════════════════════════════════════════════"
 wait_http "text-embed" "$TEXT_URL/health"
 wait_http "mm-embed"   "$MM_URL/health"

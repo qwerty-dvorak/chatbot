@@ -1,13 +1,13 @@
 #!/bin/bash
 # Deploy 3 RunPod GPU pods for RAG pipeline testing + start local Milvus:
-#   - text-embed: H100 SXM,  vllm/vllm-openai:latest + nvidia/llama-embed-nemotron-8b
-#   - mm-embed:   H100 SXM,  vllm/vllm-openai:latest + nvidia/nemotron-colembed-vl-8b-v2
-#   - reranker:   H100 SXM,  vllm/vllm-openai:latest + Qwen/Qwen3-VL-Reranker-2B
+#   - text-embed: RTX 3090, vllm/vllm-openai:latest + nvidia/llama-embed-nemotron-8b
+#   - mm-embed:   RTX 3090, vllm/vllm-openai:latest + nvidia/nemotron-colembed-vl-8b-v2
+#   - reranker:   RTX 3090, vllm/vllm-openai:latest + Qwen/Qwen3-VL-Reranker-2B
 #   - milvus:     local Docker (milvusdb/milvus:latest) via runpod_start_local_milvus.sh
 #
-# NOTE: RTX 5090 (Blackwell CC 10.0) requires CUDA 12.8+ which vllm:latest may
-#       not include; H100 SXM (Hopper CC 9.0) is fully supported. Override via:
-#         GPU_ID="NVIDIA GeForce RTX 5090" bash runpod_deploy.sh
+# Uses the cheapest GPU with enough VRAM (24 GB) for 8B-parameter models:
+#   NVIDIA GeForce RTX 3090. Override via:
+#     GPU_ID="NVIDIA GeForce RTX 4090" bash runpod_deploy.sh
 #
 # Usage:
 #   export HF_TOKEN=<your_hf_token>
@@ -20,7 +20,7 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-GPU_ID="${GPU_ID:-H100 SXM}"
+GPU_ID="${GPU_ID:-NVIDIA GeForce RTX 3090}"
 CLOUD_TYPE="${CLOUD_TYPE:-community}"
 NO_WAIT=false
 [[ "${1:-}" == "--no-wait" ]] && NO_WAIT=true
@@ -115,7 +115,7 @@ TEXT_TPL=$(create_template "rag-text-embed-$TS" \
   --container-disk-in-gb 50)
 echo "  template: $TEXT_TPL"
 
-echo "Creating text-embed pod (RTX 5090)..."
+echo "Creating text-embed pod (RTX 3090)..."
 TEXT_POD=$(create_pod "rag-text-embed" \
   --template-id "$TEXT_TPL" \
   --gpu-id "$GPU_ID" \
@@ -136,7 +136,7 @@ MM_TPL=$(create_template "rag-mm-embed-$TS" \
   --container-disk-in-gb 50)
 echo "  template: $MM_TPL"
 
-echo "Creating multimodal-embed pod (RTX 5090)..."
+echo "Creating multimodal-embed pod (RTX 3090)..."
 MM_POD=$(create_pod "rag-mm-embed" \
   --template-id "$MM_TPL" \
   --gpu-id "$GPU_ID" \
@@ -167,7 +167,7 @@ RERANKER_TPL=$(create_template "rag-reranker-$TS" \
   --container-disk-in-gb 50)
 echo "  template: $RERANKER_TPL"
 
-echo "Creating reranker pod (RTX 5090)..."
+echo "Creating reranker pod (RTX 3090)..."
 RERANKER_POD=$(create_pod "rag-reranker" \
   --template-id "$RERANKER_TPL" \
   --gpu-id "$GPU_ID" \
@@ -192,9 +192,9 @@ echo ""
 echo "3 RunPod pods provisioning + local Milvus running. IDs saved to $STATE_FILE"
 echo ""
 echo "  milvus         (local)   localhost:19530"
-echo "  rag-text-embed (RTX5090) $TEXT_POD"
-echo "  rag-mm-embed   (RTX5090) $MM_POD"
-echo "  rag-reranker   (RTX5090) $RERANKER_POD"
+echo "  rag-text-embed (RTX3090) $TEXT_POD"
+echo "  rag-mm-embed   (RTX3090) $MM_POD"
+echo "  rag-reranker   (RTX3090) $RERANKER_POD"
 
 if $NO_WAIT; then
   echo ""
