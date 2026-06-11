@@ -323,12 +323,12 @@ query.py: raw / HyDE / sub-queries / stepback
   |
   +-- text embedding (each enhanced query)
   |
-  +-- vector search in Milvus → returns both document chunks AND
-  |   hypothetical question chunks (if query matches a question vector)
+  +-- ┌─ Vector Store (dense semantic) ──→ top_k pool ─┐
+  |   │                                               │
+  |   └─ BM25 (sparse keyword)     ──→ top_k pool ─┘
+  |                both channels run in parallel
   |
-  +-- lexical search in BM25
-  |
-  +-- hybrid weighted reciprocal-rank fusion
+  +-- hybrid RRF pre-merge (weighted by HYBRID_ALPHA)
   |
   v
   +-- QUERY-TO-QUERY RESOLUTION:
@@ -342,7 +342,10 @@ query.py: raw / HyDE / sub-queries / stepback
   v
 deduplicate by chunk ID
   |
-  +-- optional reranker /score (uses original query, not enhanced)
+  +── optional reranker /score (central fusion node)
+  |   Cross-encoder scores ALL candidates from both channels,
+  |   deduplicates overlapping records, outputs re-ordered list.
+  |   Uses original query (not enhanced variants).
   |
   +-- best-effort parent context fetch (for CHILD chunks)
   v
@@ -624,4 +627,111 @@ curl -X POST http://localhost:8093/v1/search \
 
 ```bash
 POSTGRES_HOST=localhost MILVUS_HOST=localhost .venv/bin/python tests/test_hierarchical.py
+```
+
+## Hybrid Retrieve & Reranking Workflow
+
+The architecture blends dense semantic retrieval (Vector store) and sparse lexical
+retrieval (BM25) in parallel, with a cross-encoder reranker as the central fusion
+node. Keyword search excels at exact-term matches (serial numbers, product codes);
+vector search captures conceptual intent. Running both side-by-side maximises
+recall before a single reranker stage scores, deduplicates, and re-orders.
+
+### Architecture diagram
+
+```text
+                    ┌──────────────┐
+                    │    Query     │
+                    └──────┬───────┘
+                           │ ② parallel retrieval
+                           ▼
+         ┌─────────────────────────────────────┐
+         │  Vector Store (dense semantic)      │
+         │  ┌───────────────────────────────┐  │
+         │  │          [matched]            │  │
+         │  │ green bg, red border          │  │  ③ top-k
+         │  └───────────────────────────────┘  │    pools
+         └────────────┬────────────────────────┘
+                      │ ④ forward pools
+                      ▼
+         ┌─────────────────────────────────────┐
+         │  BM25 Retrieval (sparse keyword)    │
+         │  ┌───────────────────────────────┐  │
+         │  │          [matched]            │  │
+         │  │ green bg, red border          │  │
+         │  └───────────────────────────────┘  │
+         └────────────┬────────────────────────┘
+                      │
+                      ▼
+              ┌──────────────────┐
+              │    Reranker      │
+              │  (Cross-Encoder  │  ⑤ unified
+              │   / Fusion)      │    relevance
+              │   = dedup +      │    score
+              │     score        │
+              └────────┬─────────┘
+                       │ ⑥ refined context
+                       ▼
+              ┌──────────────────┐
+              │ Refined Context  │
+              │ Block (green+red)│
+              └────────┬─────────┘
+                       │ ⑦ prompt
+                       ▼
+              ┌──────────────────┐
+              │    LLM ⑧        │
+              └────────┬─────────┘
+                       │ ⑨ answer
+                       ▼
+              ┌──────────────────┐
+              │    Answer        │
+              └──────────────────┘
+```
+
+### Sequential execution
+
+*Ingestion & Indexing (offline)*
+
+| Step | Action |
+|------|--------|
+| **①** | Raw documents are split into chunks and indexed into **both** the Milvus vector store and the BM25 inverted index. |
+
+*Online inference*
+
+| Step | Action |
+|------|--------|
+| **②** | Query forks — dense vector similarity search + sparse BM25 keyword search run in parallel. |
+| **③** | Each channel produces a top-K pool of candidate chunks (controlled by `RETRIEVAL_TOP_K`). |
+| **④** | Both pools are forwarded to the reranker. No early trimming — all candidates are preserved. |
+| **⑤** | The cross-encoder reranker computes a unified relevance score for every (query, chunk) pair, deduplicates overlapping records, and outputs a re-ordered list. |
+| **⑥** | The top `RERANK_TOP_K` chunks form the refined context block. |
+| **⑦–⑨** | The context + query is sent to the LLM, which generates the final answer. |
+
+### Implementation
+
+| Component | File | Role |
+|-----------|------|------|
+| `vector_search()` | `pipeline/retrieve.py` | Dense Milvus IVF_FLAT inner-product search |
+| `bm25_search()` | `pipeline/retrieve.py` | Sparse BM25Okapi keyword search |
+| `hybrid_search()` | `pipeline/retrieve.py` | RRF pre-merge of both channels (no early trim) |
+| `rerank()` | `pipeline/retrieve.py` | Cross-encoder via `POST /score` (vLLM) or `/v1/rerank` fallback |
+| `search()` | `pipeline/search.py` | Orchestrator: enhancements → retrieval → RRF → dedup → reranker → LLM |
+
+**Key design choice:** `hybrid_search()` no longer trims to `RETRIEVAL_TOP_K` — it
+returns **all** candidates from both channels (up to `2 × RETRIEVAL_TOP_K`). The
+reranker is the sole scoring authority; RRF is used only for pre-merging the two
+channels' result lists before dedup.
+
+### Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `RETRIEVAL_TOP_K` | `20` | Per-channel raw fetch count |
+| `RERANK_TOP_K` | `5` | Final results after reranker |
+| `HYBRID_ALPHA` | `0.5` | RRF weight for vector vs BM25 pre-merge (0=pure BM25, 1=pure vector) |
+
+### Test
+
+```bash
+POSTGRES_HOST=localhost MILVUS_HOST=localhost bash test_hybrid_rerank.sh
 ```

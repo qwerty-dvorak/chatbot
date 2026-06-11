@@ -260,8 +260,12 @@ token overlap with real documents).
 
 ### `hybrid_search(query, query_embedding, top_k) -> list[SearchResult]`
 
-Weighted RRF of vector + BM25 results. Weights:
+Weighted RRF pre-merge of vector + BM25 results. Weights:
 `[cfg.hybrid_alpha, 1 - cfg.hybrid_alpha]`.
+
+Returns **all** candidates from both channels (up to `2 × top_k`). No early
+trimming — the reranker (see `search.py`) acts as the central fusion node,
+scoring every candidate before the final top-K selection.
 
 ### `rerank(query, results, top_k) -> list[SearchResult]`
 

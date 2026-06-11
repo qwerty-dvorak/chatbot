@@ -141,6 +141,30 @@ def hybrid_search(
     top_k: int | None = None,
     extra_filter: str | None = None,
 ) -> list[SearchResult]:
+    """Hybrid (vector + BM25) parallel retrieval.
+
+    Runs dense semantic search and sparse keyword search simultaneously,
+    then fuses results via weighted Reciprocal Rank Fusion (RRF).
+
+    The fused list includes **all** candidates from both channels (up to
+    ``2 × top_k`` items).  No early trimming — the reranker (if enabled)
+    acts as the central fusion node, scoring every candidate before the
+    final top-K selection.  See ``docs/architecture.md`` → *Hybrid
+    Retrieve & Reranking Workflow*.
+
+    Args:
+        query: Raw query text (for BM25).
+        query_embedding: Dense embedding (for vector search).
+        top_k: How many candidates each sub-channel retrieves.  Defaults
+               to ``cfg.retrieval_top_k``.
+        extra_filter: Optional Milvus scalar filter expression forwarded
+                      to :func:`vector_search`.
+
+    Returns:
+        RRF-fused list of :class:`SearchResult` objects from both
+        channels.  Length can be up to ``2 × top_k`` (minus any chunks
+        returned by both channels, which are deduplicated by RRF).
+    """
     if top_k is None:
         top_k = cfg.retrieval_top_k
 
@@ -152,8 +176,10 @@ def hybrid_search(
         weights=[cfg.hybrid_alpha, 1.0 - cfg.hybrid_alpha],
     )
 
-    # Trim to requested top_k.
-    return fused[:top_k]
+    # No trim — every candidate from both channels goes to the caller so
+    # that the reranker (if enabled downstream) can score them all before
+    # the final top-K selection.
+    return fused
 
 
 def rerank(
