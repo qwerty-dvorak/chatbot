@@ -31,10 +31,11 @@ _failures = 0
 QUERY = "What is the Acheron Trough Expedition?"
 
 print("══════════════════════════════════════════════════")
-print(" HyDE Multi-Document Test")
+print(" HyDE + Sub-Queries Test")
 print("══════════════════════════════════════════════════")
 print(f"  Chat endpoint: {cfg.chat_base_url}")
 print(f"  HyDE n_documents: {cfg.hyde_n_documents}")
+print(f"  Sub-queries count: {cfg.sub_queries_count}")
 print()
 
 # ── Sanity: check that _chat works ─────────────────────
@@ -107,10 +108,72 @@ results2 = enhance_query(QUERY, enhancements=None)
 check(len(results2) >= 1, f"default-config returned {len(results2)} query(ies)")
 print()
 
-# ── Summary ─────────────────────────────────────────────
+# ═══════════════════════════════════════════════════
+# Sub-Queries Tests
+# ═══════════════════════════════════════════════════
+print()
+print("══════════════════════════════════════════════════")
+print(" Sub-Queries Test")
+print("══════════════════════════════════════════════════")
+print(f"  Sub-queries count (config): {cfg.sub_queries_count}")
+print()
+
+# ── Test 8: sub_queries() returns N sub-queries + original ─
+print("§8  sub_queries() with default n (cfg.sub_queries_count)...")
+sqs = sub_queries(QUERY)
+check(len(sqs) >= 2, f"returned {len(sqs)} queries (≥2)")
+check(len(sqs) == cfg.sub_queries_count + 1,
+      f"returned {len(sqs)} queries (expected {cfg.sub_queries_count} + 1 = {cfg.sub_queries_count + 1})")
+check(QUERY in sqs, "original query present in sub_queries output")
+for i, q in enumerate(sqs):
+    print(f"    query[{i}]: {q[:100]}...")
+print()
+
+# ── Test 9: sub_queries() with explicit n=3 ──────────────
+print("§9  sub_queries() with explicit n=3...")
+sqs = sub_queries(QUERY, n=3)
+check(len(sqs) >= 2, f"returned {len(sqs)} queries (≥2)")
+check(QUERY in sqs, "original query present")
+for i, q in enumerate(sqs):
+    print(f"    query[{i}]: {q[:100]}...")
+print()
+
+# ── Test 10: Sub-queries are distinct from each other ────
+print("§10 sub-queries are distinct from each other...")
+sqs_no_orig = [q for q in sqs if q != QUERY]
+unique = set(sqs_no_orig)
+check(len(unique) == len(sqs_no_orig),
+      f"{len(unique)} unique / {len(sqs_no_orig)} sub-queries — "
+      f"{'all distinct' if len(unique) == len(sqs_no_orig) else 'DUPES FOUND'}")
+print()
+
+# ── Test 11: enhance_query with sub_queries only ─────────
+print("§11 enhance_query(query, enhancements='sub_queries')...")
+enhanced = enhance_query(QUERY, enhancements="sub_queries")
+check(len(enhanced) >= 2, f"returned {len(enhanced)} query strings (≥2)")
+check(QUERY in enhanced, "original query present")
+for i, q in enumerate(enhanced):
+    print(f"    query[{i}]: {q[:100]}...")
+print()
+
+# ── Test 12: enhance_query with sub_queries+hyde ─────────
+print("§12 enhance_query with sub_queries+hyde combines all strategies...")
+enhanced = enhance_query(QUERY, enhancements="sub_queries,hyde")
+check(len(enhanced) >= 3,
+      f"returned {len(enhanced)} query strings (≥3: hyde docs + sub-queries + original)")
+check(QUERY in enhanced, "original query present")
+has_sub = any("?" in q for q in enhanced if q != QUERY)
+check(has_sub, "sub-queries present")
+for i, q in enumerate(enhanced):
+    print(f"    query[{i}]: {q[:100]}...")
+print()
+
+# ═══════════════════════════════════════════════════
+# Summary
+# ═══════════════════════════════════════════════════
 print("══════════════════════════════════════════════════")
 if _failures == 0:
-    print(f" All {7 - (_failures > 0)} checks passed! HyDE pipeline validated.")
+    print(f" All {12 - (_failures > 0)} checks passed! HyDE + sub-queries pipeline validated.")
 else:
     print(f" {_failures} check(s) failed.")
     sys.exit(1)

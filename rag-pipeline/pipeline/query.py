@@ -69,27 +69,17 @@ def hyde(query: str, n: int | None = None) -> list[str]:
     return docs[:n] if n else docs
 
 
-def sub_queries(query: str) -> list[str]:
-    """Decompose a complex query into 2-4 simpler sub-queries.
+def sub_queries(query: str, n: int | None = None) -> list[str]:
+    if n is None:
+        n = cfg.sub_queries_count
 
-    The LLM is prompted to break the query down into independent sub-questions,
-    each on its own line starting with a '-' or a number.  Lines that do not
-    start with '-' or a digit are ignored.  The original query is always
-    appended as the final element.
-
-    Args:
-        query: The user's original search query.
-
-    Returns:
-        A list of sub-query strings (may overlap), with the original query
-        appended last.
-    """
     system = (
-        "You are an expert at breaking down complex questions. "
-        "Given a query, decompose it into 2-4 simpler, focused sub-questions "
-        "that together cover all aspects of the original question. "
-        "Return each sub-question on its own line, prefixed with a '-'. "
-        "Output only the sub-questions, nothing else."
+        f"You are an expert at breaking down complex questions. "
+        f"Given a query, decompose it into exactly {n} simpler, focused "
+        f"sub-questions that together cover all aspects of the original "
+        f"question. "
+        f"Return each sub-question on its own line, prefixed with '-'. "
+        f"Output only the sub-questions, nothing else."
     )
     user = f"Query: {query}"
     raw = _chat(system, user)
@@ -99,18 +89,16 @@ def sub_queries(query: str) -> list[str]:
         stripped = line.strip()
         if not stripped:
             continue
-        # Accept lines starting with '-' or a digit (e.g. "1.", "2)")
         if stripped.startswith("-"):
             q = stripped.lstrip("-").strip()
             if q:
                 results.append(q)
         elif stripped and stripped[0].isdigit():
-            # Strip leading "1." / "1)" / "1:" etc.
             q = stripped.lstrip("0123456789").lstrip(".):- ").strip()
             if q:
                 results.append(q)
 
-    # Always include the original query last
+    results = results[:n]  # keep at most n sub-queries
     results.append(query)
     return results
 

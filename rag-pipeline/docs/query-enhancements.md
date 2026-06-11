@@ -41,18 +41,69 @@ during ingestion.
 
 **Key insight:** Complex questions ("compare transformer and RNN performance on
 long sequences") have multiple aspects. A single embedding may not surface
-documents that address each aspect.
+documents that address each aspect. By decomposing the query into independent
+atomic sub-questions, each can independently retrieve its own relevant context.
+
+**Architecture diagram (Sub-query RAG Workflow):**
+```
+                    ┌──────────────┐
+                    │   Query      │
+                    │  (complex)   │
+                    └──────┬───────┘
+                           │ ② LLM decomposes
+                           ▼
+              ┌────────────┼────────────┐
+              ▼            ▼            │
+       ┌──────────┐ ┌──────────┐       │
+       │sub query1│ │sub query2│       │ original
+       └─────┬────┘ └─────┬────┘       │
+             │ ③ embed    │            │
+             ▼   + search ▼            ▼
+         ┌──────────────────────────┐
+         │ Vector Store:            │
+         │ ┌─[hit 1]─────────────┐ │
+         │ └─────────────────────┘ │
+         │ ┌─[hit 2]─────────────┐ │
+         │ └─────────────────────┘ │
+         │ ┌─────────────────────┐ │ ④ parallel lookups
+         │ └─────────────────────┘ │
+         └────────┬────────────────┘
+                  │ ⑤ gather top-k
+          ┌───────┴────────┐
+          ▼                ▼
+   ┌──────────────┐ ┌──────────────┐
+   │ top-k chunk 1│ │ top-k chunk 2│
+   └──────┬───────┘ └──────┬───────┘
+          │ ⑥ merged       │
+          └────────┬────────┘
+                   ▼
+            ┌──────────┐
+            │   LLM    │
+            └────┬─────┘
+                 │ ⑦ synthesize
+                 ▼
+            ┌──────────┐
+            │  Answer  │
+            └──────────┘
+```
 
 **How it works:**
-1. The LLM decomposes the query into 2-4 simpler, focused sub-questions.
-2. Each sub-question is embedded and searched independently.
-3. All result lists are merged via RRF fusion.
-4. The original query is always appended so broad matches are not missed.
+1. The LLM decomposes the complex query into exactly N simpler, focused
+   sub-questions (N = `SUB_QUERIES_COUNT`, default 2 to match the diagram).
+2. Each sub-question is embedded and searched **independently** against the
+   vector store — performing separate semantic lookups.
+3. The independent vector lookups return their respective top-K relevant chunks
+   (isolated context buckets per sub-query).
+4. The original query is also embedded and searched for recall.
+5. All result lists (sub-query hits + original query hits) are fused via RRF
+   and re-scored by the reranker.
+6. The merged context is synthesized by the final LLM into a cohesive answer.
 
 **When to use:** Multi-aspect, comparative, or open-ended questions. Global tier
 only by default.
 
-**Trade-off:** O(N) embedding + retrieval calls (N = number of sub-queries + 1).
+**Trade-off:** O(N + 1) embedding + retrieval calls (N sub-queries + original
+query). Configurable via `SUB_QUERIES_COUNT`.
 
 ---
 
@@ -178,8 +229,8 @@ Reciprocal Rank Fusion (RRF):
 
 ```
 original query
-  ├── hyde → [passage_1, passage_2, ..., original]
-  ├── sub_queries → [sub_q1, sub_q2, original]
+  ├── hyde → [hyde_passage_1, hyde_passage_2, ..., original]
+  ├── sub_queries → [sub_q1, sub_q2, ..., original]
   └── stepback → stepback_question + original
 ```
 
