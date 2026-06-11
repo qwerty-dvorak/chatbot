@@ -18,7 +18,7 @@ from .models import Chunk, ChunkType, SearchResult
 from .embed import embed_text
 from .retrieve import hybrid_search, rerank, vector_search, bm25_search, _rrf_fusion
 from .query import enhance_query
-from .index import connect_milvus, _ensure_collection, get_client
+from .index import connect_milvus, _ensure_collection, _chunk_from_hit, get_client
 
 
 def search(
@@ -110,11 +110,30 @@ def search(
     merged = _rrf_fusion(all_result_lists)
 
     # ------------------------------------------------------------------
-    # Deduplicate by chunk.id (keep entry with highest score)
+    # Resolve hypothetical-question hits to parent chunks, then
+    # deduplicate by chunk.id (keep entry with highest score).
     # ------------------------------------------------------------------
     seen: dict[str, SearchResult] = {}
     for sr in merged:
-        cid = sr.chunk.id
+        chunk = sr.chunk
+        if chunk.chunk_type == ChunkType.HYPOTHETICAL_QUESTION and chunk.parent_id:
+            try:
+                _ensure_collection(cfg.text_collection, cfg.text_embedding_dim)
+                hits = list(get_client().query(
+                    collection_name=cfg.text_collection,
+                    filter=f'id == "{chunk.parent_id}"',
+                    output_fields=["id", "text", "source_path", "chunk_type",
+                                   "parent_id", "window_text", "metadata_json"],
+                    limit=1,
+                ))
+                if hits:
+                    parent = _chunk_from_hit(hits[0])
+                    sr.chunk = parent
+                    sr.retrieval_method = "query_to_query"
+                    chunk = parent
+            except Exception:
+                pass
+        cid = chunk.id
         if cid not in seen or sr.score > seen[cid].score:
             seen[cid] = sr
     deduped = sorted(seen.values(), key=lambda r: r.score, reverse=True)

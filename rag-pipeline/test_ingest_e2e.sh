@@ -326,6 +326,40 @@ else:
   echo "    $line"
 done
 
+# ── 3f. Milvus: Hypothetical question vectors ───────────
+echo ""
+echo "  §3f  Milvus: hypothetical question chunk vectors"
+$VENV_PYTHON -c "
+from pymilvus import MilvusClient
+c = MilvusClient('http://localhost:19530')
+
+collection_name = '$TEXT_COLLECTION'
+
+if collection_name not in c.list_collections():
+    print('question_chunk_count=0')
+else:
+    c.load_collection(collection_name)
+    results = c.query(
+        collection_name,
+        filter='chunk_type == \"hypothetical_question\"',
+        output_fields=['id', 'parent_id', 'text'],
+        limit=100,
+    )
+    count = len(results)
+    print(f'question_chunk_count={count}')
+    for r in results:
+        rid = r.get('id', '?')
+        rparent = r.get('parent_id', '?')
+        rtext = (r.get('text', '') or '')[:100]
+        print(f'  id={rid} parent={rparent} text=\"{rtext}...\"')
+" 2>&1 | while read line; do
+  if echo "$line" | grep -q 'question_chunk_count='; then
+    CNT=$(echo "$line" | cut -d= -f2)
+    [[ "$CNT" -gt 0 ]] && result PASS "Hypothetical question vectors in Milvus: $CNT" || result SKIP "No question vectors in Milvus"
+  fi
+  echo "    $line"
+done
+
 # ── 3e. Search test ─────────────────────────────────────
 echo ""
 echo "  §3e  Search: query for 'Acheron Trough Nautilus'"

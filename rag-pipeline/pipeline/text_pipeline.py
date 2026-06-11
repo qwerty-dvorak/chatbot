@@ -11,6 +11,7 @@ The live chatbot-service server only ever references records by their UUID.
 
 import json
 import logging
+import uuid
 from dataclasses import dataclass
 from typing import Optional
 
@@ -163,8 +164,9 @@ def process_document(
     if progress:
         progress.complete("chunk", f"{len(text_chunks)} text chunks")
 
-    # Step 4 — HyDE question generation
+    # Step 4 — Hypothetical question generation
     hyde_count = 0
+    question_chunks: list[Chunk] = []
     if progress:
         progress.start("hyde", "generating hypothetical questions")
     embed_params = _embed_params(p)
@@ -186,6 +188,24 @@ def process_document(
                 log("[text_pipeline] step=hyde chunk=%s.. questions=%d",
                     c.id[:8], len(hyde_questions))
 
+            # Create separate chunk objects for each question so they get
+            # embedded as vectors and indexed into Milvus (hypothetical question
+            # chunk type with parent_id pointing back to source chunk).
+            for q_text in hyde_questions:
+                q_chunk = Chunk(
+                    id=uuid.uuid4().hex,
+                    source_path=c.source_path,
+                    text=q_text,
+                    chunk_type=ChunkType.HYPOTHETICAL_QUESTION,
+                    parent_id=c.id,
+                    metadata={
+                        "chunk_type": ChunkType.HYPOTHETICAL_QUESTION.value,
+                        "source_chunk_id": c.id,
+                        "chunk_index": idx,
+                    },
+                )
+                question_chunks.append(q_chunk)
+
         chunk_meta["hyde_questions"] = hyde_questions
         chunk_meta["parent_id"] = c.parent_id or ""
         if c.window_text:
@@ -198,8 +218,10 @@ def process_document(
             "document_id": doc_id,
         })
 
-    log("[text_pipeline] step=hyde total_questions=%d", hyde_count)
-    print(f"[text_pipeline] step=hyde generated {hyde_count} questions")
+    log("[text_pipeline] step=hyde total_questions=%d question_chunks=%d",
+        hyde_count, len(question_chunks))
+    print(f"[text_pipeline] step=hyde generated {hyde_count} questions "
+          f"({len(question_chunks)} vector chunks)")
     if progress:
         progress.complete("hyde", f"{hyde_count} questions")
 
@@ -212,15 +234,16 @@ def process_document(
     if progress:
         progress.complete("persist", f"{len(chunk_ids)} chunks")
 
-    # Step 6 — embed
+    # Step 6 — embed (text chunks + hypothetical question chunks)
+    all_to_embed = text_chunks + question_chunks
     if progress:
         progress.start("embed", f"model={p.embedding_model}")
-    log("[text_pipeline] step=embed model=%s dim=%d chunks=%d",
-        p.embedding_model, p.embedding_dim, len(text_chunks))
+    log("[text_pipeline] step=embed model=%s dim=%d chunks=%d questions=%d",
+        p.embedding_model, p.embedding_dim, len(text_chunks), len(question_chunks))
     print(f"[text_pipeline] step=embed model={p.embedding_model} "
-          f"dim={p.embedding_dim} chunks={len(text_chunks)}")
+          f"dim={p.embedding_dim} chunks={len(text_chunks)} questions={len(question_chunks)}")
     connect_milvus()
-    text_embedded: list[EmbeddedChunk] = embed_text(text_chunks)
+    text_embedded: list[EmbeddedChunk] = embed_text(all_to_embed)
     log("[text_pipeline] step=embed embedded=%d", len(text_embedded))
     print(f"[text_pipeline] step=embed {len(text_embedded)} embeddings")
     if progress:
@@ -230,10 +253,12 @@ def process_document(
     if progress:
         progress.start("index", "indexing into Milvus")
     if text_embedded:
-        log("[text_pipeline] step=index inserting %d vectors into Milvus collection=%s",
-            len(text_embedded), cfg.text_collection)
+        log("[text_pipeline] step=index inserting %d vectors into Milvus collection=%s"
+            " (%d doc chunks + %d question chunks)",
+            len(text_embedded), cfg.text_collection, len(text_chunks), len(question_chunks))
         print(f"[text_pipeline] step=index collection={cfg.text_collection} "
-              f"vectors={len(text_embedded)}")
+              f"vectors={len(text_embedded)} "
+              f"({len(text_chunks)} doc + {len(question_chunks)} question)")
         index_chunks(text_embedded)
     log("[text_pipeline] step=index done")
     print("[text_pipeline] step=index complete")
@@ -246,9 +271,10 @@ def process_document(
         "chunks_created": len(text_chunks),
         "embeddings_indexed": len(text_embedded),
         "hyde_generated": hyde_count,
+        "question_chunks_indexed": len(question_chunks),
     }
-    log("[text_pipeline] done doc_id=%s chunks=%d embeddings=%d hyde=%d",
-        doc_id, len(text_chunks), len(text_embedded), hyde_count)
+    log("[text_pipeline] done doc_id=%s chunks=%d embeddings=%d hyde=%d questions=%d",
+        doc_id, len(text_chunks), len(text_embedded), hyde_count, len(question_chunks))
     print(f"[text_pipeline] done doc_id={doc_id} chunks={len(text_chunks)} "
-          f"embeddings={len(text_embedded)} hyde={hyde_count}")
+          f"embeddings={len(text_embedded)} hyde={hyde_count} questions={len(question_chunks)}")
     return result

@@ -10,6 +10,7 @@ class ChunkType(str, Enum):
     CHILD = "child"
     SENTENCE_WINDOW = "sentence_window"
     SUMMARY = "summary"
+    HYPOTHETICAL_QUESTION = "hypothetical_question"
 
 
 class IngestionTier(str, Enum):
