@@ -62,6 +62,7 @@ class Config:
 
     # Query enhancements
     query_enhancements: str = field(default_factory=lambda: os.getenv("QUERY_ENHANCEMENTS", "hyde"))
+    hyde_n_documents: int = field(default_factory=lambda: int(os.getenv("HYDE_N_DOCUMENTS", "2")))
     hypothetical_questions_per_chunk: int = field(default_factory=lambda: int(os.getenv("HYPOTHETICAL_QUESTIONS_PER_CHUNK", "3")))
 
     # PostgreSQL knowledge store — connects to the *chatbot-service* database.

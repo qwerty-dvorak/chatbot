@@ -36,28 +36,37 @@ def _chat(system: str, user: str) -> str:
 # Enhancement functions
 # ---------------------------------------------------------------------------
 
-def hyde(query: str) -> str:
-    """Hypothetical Document Embeddings (HyDE).
+def hyde(query: str, n: int | None = None) -> list[str]:
+    if n is None:
+        n = cfg.hyde_n_documents
 
-    Asks the LLM to write a short hypothetical document or passage that
-    would directly answer the query.  The returned text is intended to be
-    embedded and used for retrieval *instead of* the raw query, because a
-    hypothetical answer lives in the same embedding space as real documents.
-
-    Args:
-        query: The user's original search query.
-
-    Returns:
-        A short hypothetical document / passage as a plain string.
-    """
     system = (
-        "You are a helpful assistant that generates hypothetical documents. "
-        "When given a query, write a short, realistic passage (2-4 sentences) "
-        "that would directly answer or address the query. "
-        "Write only the passage itself — no preamble, no explanation."
+        f"You are a helpful assistant that generates hypothetical documents. "
+        f"Given a query, write exactly {n} short, realistic passages (2-4 "
+        f"sentences each) that would directly answer or address the query. "
+        f"Each passage should use different wording or cover different aspects "
+        f"of the query. "
+        f"Return each passage on its own line prefixed with '-'. "
+        f"Write only the passages — no preamble, no explanation."
     )
     user = f"Query: {query}"
-    return _chat(system, user).strip()
+    raw = _chat(system, user)
+
+    docs: list[str] = []
+    for line in raw.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("-"):
+            d = stripped.lstrip("-").strip()
+            if d:
+                docs.append(d)
+        elif stripped and stripped[0].isdigit():
+            d = stripped.lstrip("0123456789").lstrip(".):- ").strip()
+            if d:
+                docs.append(d)
+
+    return docs[:n] if n else docs
 
 
 def sub_queries(query: str) -> list[str]:
@@ -184,29 +193,6 @@ def hypothetical_questions_for_chunk(chunk_text: str, n: int | None = None) -> l
 # ---------------------------------------------------------------------------
 
 def enhance_query(query: str, enhancements: str | list[str] | None = None) -> list[str]:
-    """Apply all enabled query enhancements from ``cfg.query_enhancements``.
-
-    ``cfg.query_enhancements`` is a comma-separated string of strategy names.
-    Recognised names: ``"hyde"``, ``"sub_queries"``, ``"stepback"``,
-    ``"hypothetical_questions"``.
-
-    Strategy behaviour:
-    - ``hyde``:                  Replace the query with the HyDE document.
-    - ``sub_queries``:           Add the decomposed sub-queries.
-    - ``stepback``:              Add the stepback question *and* the original.
-    - ``hypothetical_questions``: Ignored at query time (index-time only).
-
-    If no strategies are enabled (or the config value is empty / unknown),
-    returns ``[query]``.
-
-    Duplicate strings are removed while preserving order.
-
-    Args:
-        query: The user's original search query.
-
-    Returns:
-        A deduplicated list of query strings to use for retrieval.
-    """
     configured = cfg.query_enhancements if enhancements is None else enhancements
     if isinstance(configured, str):
         enabled = {s.strip() for s in configured.split(",") if s.strip()}
@@ -216,9 +202,10 @@ def enhance_query(query: str, enhancements: str | list[str] | None = None) -> li
     collected: list[str] = []
 
     if "hyde" in enabled:
-        hyde_doc = hyde(query)
-        if hyde_doc:
-            collected.append(hyde_doc)
+        hyde_docs = hyde(query)
+        if hyde_docs:
+            collected.extend(hyde_docs)
+        collected.append(query)
 
     if "sub_queries" in enabled:
         for sq in sub_queries(query):
@@ -230,13 +217,9 @@ def enhance_query(query: str, enhancements: str | list[str] | None = None) -> li
             collected.append(sb)
         collected.append(query)
 
-    # hypothetical_questions is index-time only; skip at query time.
-
-    # If nothing was added by any strategy, fall back to the original query.
     if not collected:
         return [query]
 
-    # Deduplicate while preserving order.
     seen: set[str] = set()
     result: list[str] = []
     for q in collected:

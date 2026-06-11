@@ -15,17 +15,21 @@ answer ("Self-attention is a mechanism where each token…") lives much closer t
 the real documents.
 
 **How it works:**
-1. The LLM generates a short (2-4 sentence) hypothetical passage that would
-   answer the query.
-2. That passage is embedded **at query time** instead of (or in addition to)
-   the raw query.
-3. Retrieval finds chunks whose vectors are near the hypothetical passage.
+1. The LLM generates N (default 2) short (2-4 sentence) hypothetical passages
+   that would answer the query, each covering a different aspect or using
+   different wording.
+2. Each passage is embedded **at query time** independently.
+3. The original query is also embedded and included in the search for recall.
+4. All result lists are merged via RRF fusion.
+5. Retrieval finds chunks whose vectors are near any of the hypothetical
+   passages or the original query.
 
 **When to use:** Almost always. HyDE is the default enhancement for slow and
 global tiers. It consistently improves recall for factual and descriptive
 queries.
 
-**Trade-off:** One extra LLM call per search. For instant-tier speed, skip it.
+**Trade-off:** One extra LLM call per search (returns N documents). O(N + 1)
+embedding + retrieval operations. Configure N via `HYDE_N_DOCUMENTS` (default 2).
 
 **Important:** HyDE is a **query-time** technique only. Do not confuse it with
 **Hypothetical Questions** (index-time), which pre-generates question vectors
@@ -107,11 +111,11 @@ phrasings will find it via question-to-question semantic matching.
 | Aspect | HyDE | Hypothetical Questions |
 |--------|------|------------------------|
 | When | Query-time | Index-time |
-| What is generated | Hypothetical *document* (answers query) | Hypothetical *questions* (that chunks answer) |
-| What gets embedded | The generated document text | The generated question text |
+| What is generated | N hypothetical *documents* (answer query) | Hypothetical *questions* (that chunks answer) |
+| What gets embedded | Each generated document text (N+1 with original query) | The generated question text |
 | Where stored | Not stored — generated fresh each query | Stored in Milvus as persistent vectors |
-| Search target | Document chunk vectors | Question vectors + query-to-query resolution |
-| Configuration | `QUERY_ENHANCEMENTS=hyde` | `HYPOTHETICAL_QUESTIONS_PER_CHUNK=N` |
+| Search target | Document chunk vectors (doc-to-doc) | Question vectors + query-to-query resolution |
+| Configuration | `QUERY_ENHANCEMENTS=hyde` + `HYDE_N_DOCUMENTS=N` | `HYPOTHETICAL_QUESTIONS_PER_CHUNK=N` |
 
 Both can be active simultaneously. HyDE transforms the query string, then the
 transformed query naturally matches question vectors during the index-time
@@ -174,7 +178,7 @@ Reciprocal Rank Fusion (RRF):
 
 ```
 original query
-  ├── hyde → hypothetical_passage
+  ├── hyde → [passage_1, passage_2, ..., original]
   ├── sub_queries → [sub_q1, sub_q2, original]
   └── stepback → stepback_question + original
 ```
@@ -190,13 +194,13 @@ document chunk (see the Hypothetical Questions section above).
 
 ## Performance Benchmarks (approximate)
 
-| Enhancement | Extra LLM calls | Latency overhead |
-|-------------|----------------|-----------------|
-| none | 0 | 0 ms |
-| hyde | 1 | ~200-500 ms |
-| sub_queries | 1 (returns 2-4 Qs) | ~300-600 ms + 2-4× retrieval |
-| stepback | 1 | ~200-400 ms + 1× retrieval |
-| all three | 3 | ~700 ms - 1.5 s + extra retrievals |
+| Enhancement | Extra LLM calls | Embedding/retrieval operations | Latency overhead |
+|-------------|----------------|-------------------------------|-----------------|
+| none | 0 | 1 | 0 ms |
+| hyde (N=2) | 1 (returns N docs) | N + 1 (hyde docs + original) | ~200-500 ms + 2-3× retrieval |
+| sub_queries | 1 (returns 2-4 Qs) | 2-5 (sub-Qs + original) | ~300-600 ms + 2-4× retrieval |
+| stepback | 1 (returns 1 Q) | 2 (stepback + original) | ~200-400 ms + 1× retrieval |
+| all three | 3 | N + 4+ | ~800 ms - 1.8 s + extra retrievals |
 | hypothetical questions (index-time) | N×Q at ingest | 0 ms at query time (vectors precomputed) |
 
 Latency is highly dependent on the LLM endpoint; these are rough estimates for a
