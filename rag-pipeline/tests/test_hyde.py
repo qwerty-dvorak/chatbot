@@ -118,39 +118,40 @@ print("════════════════════════�
 print(f"  Sub-queries count (config): {cfg.sub_queries_count}")
 print()
 
-# ── Test 8: sub_queries() returns N sub-queries + original ─
-print("§8  sub_queries() with default n (cfg.sub_queries_count)...")
+# ── Test 8: sub_queries() with default n (LLM decides) ───
+print("§8  sub_queries() with default n (LLM decides whether to decompose)...")
 sqs = sub_queries(QUERY)
-check(len(sqs) >= 2, f"returned {len(sqs)} queries (≥2)")
-check(len(sqs) == cfg.sub_queries_count + 1,
-      f"returned {len(sqs)} queries (expected {cfg.sub_queries_count} + 1 = {cfg.sub_queries_count + 1})")
+check(len(sqs) >= 1, f"returned {len(sqs)} query(ies) (≥1)")
 check(QUERY in sqs, "original query present in sub_queries output")
 for i, q in enumerate(sqs):
     print(f"    query[{i}]: {q[:100]}...")
 print()
 
 # ── Test 9: sub_queries() with explicit n=3 ──────────────
-print("§9  sub_queries() with explicit n=3...")
+print("§9  sub_queries() with explicit n=3 (LLM may or may not decompose)...")
 sqs = sub_queries(QUERY, n=3)
-check(len(sqs) >= 2, f"returned {len(sqs)} queries (≥2)")
+check(len(sqs) >= 1, f"returned {len(sqs)} query(ies) (≥1)")
 check(QUERY in sqs, "original query present")
 for i, q in enumerate(sqs):
     print(f"    query[{i}]: {q[:100]}...")
 print()
 
-# ── Test 10: Sub-queries are distinct from each other ────
-print("§10 sub-queries are distinct from each other...")
+# ── Test 10: Sub-queries distinctness (if multiple) ──────
+print("§10 sub-queries are distinct from each other (if multiple)...")
 sqs_no_orig = [q for q in sqs if q != QUERY]
-unique = set(sqs_no_orig)
-check(len(unique) == len(sqs_no_orig),
-      f"{len(unique)} unique / {len(sqs_no_orig)} sub-queries — "
-      f"{'all distinct' if len(unique) == len(sqs_no_orig) else 'DUPES FOUND'}")
+if len(sqs_no_orig) > 1:
+    unique = set(sqs_no_orig)
+    check(len(unique) == len(sqs_no_orig),
+          f"{len(unique)} unique / {len(sqs_no_orig)} sub-queries — "
+          f"{'all distinct' if len(unique) == len(sqs_no_orig) else 'DUPES FOUND'}")
+else:
+    check(True, f"skipped — only {len(sqs_no_orig)} sub-query (no comparison needed)")
 print()
 
 # ── Test 11: enhance_query with sub_queries only ─────────
 print("§11 enhance_query(query, enhancements='sub_queries')...")
 enhanced = enhance_query(QUERY, enhancements="sub_queries")
-check(len(enhanced) >= 2, f"returned {len(enhanced)} query strings (≥2)")
+check(len(enhanced) >= 1, f"returned {len(enhanced)} query string(s) (≥1)")
 check(QUERY in enhanced, "original query present")
 for i, q in enumerate(enhanced):
     print(f"    query[{i}]: {q[:100]}...")
@@ -159,11 +160,9 @@ print()
 # ── Test 12: enhance_query with sub_queries+hyde ─────────
 print("§12 enhance_query with sub_queries+hyde combines all strategies...")
 enhanced = enhance_query(QUERY, enhancements="sub_queries,hyde")
-check(len(enhanced) >= 3,
-      f"returned {len(enhanced)} query strings (≥3: hyde docs + sub-queries + original)")
+check(len(enhanced) >= 2,
+      f"returned {len(enhanced)} query strings (≥2: hyde docs + sub-queries + original)")
 check(QUERY in enhanced, "original query present")
-has_sub = any("?" in q for q in enhanced if q != QUERY)
-check(has_sub, "sub-queries present")
 for i, q in enumerate(enhanced):
     print(f"    query[{i}]: {q[:100]}...")
 print()

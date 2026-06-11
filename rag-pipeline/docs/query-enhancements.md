@@ -88,16 +88,33 @@ atomic sub-questions, each can independently retrieve its own relevant context.
 ```
 
 **How it works:**
-1. The LLM decomposes the complex query into exactly N simpler, focused
-   sub-questions (N = `SUB_QUERIES_COUNT`, default 2 to match the diagram).
-2. Each sub-question is embedded and searched **independently** against the
+1. The LLM analyzes whether the query needs decomposition:
+   - **Simple query** ("how does gradient descent work?") → returned as-is.
+   - **Complex / multi-faceted query** ("compare Milvus and Zilliz Cloud")
+     → decomposed into N simpler sub-questions (up to `SUB_QUERIES_COUNT`,
+     default 2).
+2. The original query is always appended for recall.
+3. Each sub-question is embedded and searched **independently** against the
    vector store — performing separate semantic lookups.
-3. The independent vector lookups return their respective top-K relevant chunks
+4. The independent vector lookups return their respective top-K relevant chunks
    (isolated context buckets per sub-query).
-4. The original query is also embedded and searched for recall.
 5. All result lists (sub-query hits + original query hits) are fused via RRF
    and re-scored by the reranker.
 6. The merged context is synthesized by the final LLM into a cohesive answer.
+
+**Example — complex query decomposition:**
+```
+User query: "What are the differences in features between Milvus and Zilliz Cloud?"
+                     │
+                     ▼  (LLM decides to decompose)
+                     │
+          ┌──────────┴──────────┐
+          ▼                     ▼
+  Sub-query 1:           Sub-query 2:
+  "What are the          "What are the
+  features of            features of
+  Milvus?"               Zilliz Cloud?"
+```
 
 **When to use:** Multi-aspect, comparative, or open-ended questions. Global tier
 only by default.

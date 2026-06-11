@@ -74,10 +74,14 @@ def sub_queries(query: str, n: int | None = None) -> list[str]:
         n = cfg.sub_queries_count
 
     system = (
-        f"You are an expert at breaking down complex questions. "
-        f"Given a query, decompose it into exactly {n} simpler, focused "
-        f"sub-questions that together cover all aspects of the original "
-        f"question. "
+        f"You are an expert at breaking down complex questions into "
+        f"simpler sub-questions.  Given a query, decide if it needs "
+        f"decomposition:\n"
+        f"- If the query is simple and straightforward, return the "
+        f"original query as-is.\n"
+        f"- If the query is complex or multi-faceted, break it into "
+        f"up to {n} simpler, focused sub-questions that together "
+        f"cover all aspects of the original question.\n"
         f"Return each sub-question on its own line, prefixed with '-'. "
         f"Output only the sub-questions, nothing else."
     )
@@ -98,8 +102,10 @@ def sub_queries(query: str, n: int | None = None) -> list[str]:
             if q:
                 results.append(q)
 
-    results = results[:n]  # keep at most n sub-queries
-    results.append(query)
+    if not results:
+        results.append(query)
+    elif query not in results:
+        results.append(query)
     return results
 
 
