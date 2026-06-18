@@ -177,6 +177,19 @@ class ContextBuilderMultimodalTest(TestCase):
         finally:
             default_storage.delete(path)
 
+    @override_settings(RAG_ENABLED=False)
+    def test_thinking_mode_prefixes_outbound_prompt_only(self):
+        msg = Message.objects.create(
+            chat=self.chat,
+            role=Message.Role.USER,
+            content="Who are you?",
+            metadata={"thinking_mode": True},
+        )
+        result = ContextBuilder(self.chat, self.user).build(msg.content, msg)
+        self.assertEqual(result[-1]["content"], "<|think|> Who are you?")
+        msg.refresh_from_db()
+        self.assertEqual(msg.content, "Who are you?")
+
     def test_history_with_attachment(self):
         png_data = _make_minimal_png()
         path = default_storage.save("test_ctx/history_img.png", ContentFile(png_data))

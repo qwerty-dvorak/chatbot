@@ -41,17 +41,17 @@ docker exec "$POSTGRES_CONTAINER" \
   su - postgres -c "psql -c \"ALTER USER ${POSTGRES_USER} CREATEDB;\"" 2>/dev/null || true
 
 echo "Building test image '$TEST_IMAGE'..."
-docker build -f "$SCRIPT_DIR/Dockerfile" -t "$TEST_IMAGE" "$SERVICE_DIR"
+docker build -f "$SCRIPT_DIR/Dockerfile" -t "$TEST_IMAGE" "$ROOT_DIR"
 
 echo ""
 echo "Running Django tests..."
-echo "  DB: $POSTGRES_USER@$POSTGRES_CONTAINER:5432/$POSTGRES_DB"
+echo "  DB: $POSTGRES_USER@$POSTGRES_CONTAINER:5433/$POSTGRES_DB"
 echo "  Args: ${EXTRA_ARGS[*]:-(none)}"
 
 docker run --rm \
   --network "$NETWORK_NAME" \
   -e POSTGRES_HOST="$POSTGRES_CONTAINER" \
-  -e POSTGRES_PORT=5432 \
+  -e POSTGRES_PORT=5433 \
   -e POSTGRES_DB="$POSTGRES_DB" \
   -e POSTGRES_USER="$POSTGRES_USER" \
   -e POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \

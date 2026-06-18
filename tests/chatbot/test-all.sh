@@ -70,12 +70,12 @@ echo "║  Labels:     ${TEST_LABELS[*]:-(all)}"
 echo "╚══════════════════════════════════════════════════╝"
 
 if [[ "$NO_START" == "false" ]]; then
-  echo "═══ Starting services (mode: $MODE) ═══"
   if [[ "$MODE" == "runpod" ]]; then
     source "$ROOT_DIR/models/.env.runpod"
-    bash "$SERVICE_DIR/shell_scripts/start-services-with-runpod.sh"
+    echo "═══ RunPod endpoints sourced (services assumed running) ═══"
   else
     source "$ROOT_DIR/models/.env.local"
+    echo "═══ Starting services (mode: $MODE) ═══"
     bash "$SERVICE_DIR/shell_scripts/start-services.sh"
   fi
 fi
@@ -87,10 +87,15 @@ docker exec chatbot-postgres su - postgres -c \
 
 echo ""
 echo "═══ Building test image ═══"
-docker build -f "$SCRIPT_DIR/Dockerfile" -t "$TEST_IMAGE" "$SERVICE_DIR"
+docker build -f "$SCRIPT_DIR/Dockerfile" -t "$TEST_IMAGE" "$ROOT_DIR"
 
 CHAT_BASE_URL="${CHAT_BASE_URL:-http://gemma-inference-server:8000/v1}"
 CHAT_MODEL="${CHAT_MODEL:-openai/google/gemma-4-E4B-it}"
+VISION_MODEL="${VISION_MODEL:-$CHAT_MODEL}"
+RAG_ENABLED="${RAG_ENABLED:-false}"
+TOOL_CALLS_ENABLED="${TOOL_CALLS_ENABLED:-true}"
+CHAT_REASONING_ENABLED="${CHAT_REASONING_ENABLED:-true}"
+CHAT_STREAMING_ENABLED="${CHAT_STREAMING_ENABLED:-true}"
 
 ARGS=()
 [[ "$KEEP_DB" == "true" ]] && ARGS+=("--keepdb")
@@ -98,19 +103,29 @@ ARGS+=("${TEST_LABELS[@]}")
 
 echo ""
 echo "═══ Running tests ═══"
-echo "  URL:   $CHAT_BASE_URL"
-echo "  Model: $CHAT_MODEL"
+echo "  URL:     $CHAT_BASE_URL"
+echo "  Model:   $CHAT_MODEL"
+echo "  Vision:  $VISION_MODEL"
+echo "  RAG:     $RAG_ENABLED"
+echo "  Tools:   $TOOL_CALLS_ENABLED"
+echo "  Reason:  $CHAT_REASONING_ENABLED"
+echo "  Stream:  $CHAT_STREAMING_ENABLED"
 
 docker run --rm \
   --network "$NETWORK_NAME" \
   -e POSTGRES_HOST=chatbot-postgres \
-  -e POSTGRES_PORT=5432 \
+  -e POSTGRES_PORT=5433 \
   -e POSTGRES_DB="$POSTGRES_DB" \
   -e POSTGRES_USER="$POSTGRES_USER" \
   -e POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
   -e CHAT_BASE_URL="$CHAT_BASE_URL" \
   -e CHAT_API_KEY="${CHAT_API_KEY:-dummy}" \
   -e CHAT_MODEL="$CHAT_MODEL" \
+  -e VISION_MODEL="$VISION_MODEL" \
+  -e RAG_ENABLED="$RAG_ENABLED" \
+  -e TOOL_CALLS_ENABLED="$TOOL_CALLS_ENABLED" \
+  -e CHAT_REASONING_ENABLED="$CHAT_REASONING_ENABLED" \
+  -e CHAT_STREAMING_ENABLED="$CHAT_STREAMING_ENABLED" \
   "$TEST_IMAGE" \
   "${ARGS[@]}"
 

@@ -37,12 +37,12 @@ RUN pip install --no-cache-dir --break-system-packages uv
 
 WORKDIR /app
 
-COPY pyproject.toml uv.lock README.md ./
+COPY chatbot-service/pyproject.toml chatbot-service/uv.lock chatbot-service/README.md /app/
 # BEGIN BARC UV SYNC
 RUN uv sync --frozen --no-dev
 # END BARC UV SYNC
 
-COPY . /app/
+COPY chatbot-service/ /app/
 
 ENTRYPOINT ["uv", "run", "python", "manage.py", "test"]
 CMD ["--settings=config.settings.test"]

@@ -54,7 +54,7 @@ docker run -d \
   -e MILVUS_HOST="milvus-standalone" \
   -e MILVUS_PORT="19530" \
   -e POSTGRES_HOST="chatbot-postgres" \
-  -e POSTGRES_PORT="5432" \
+  -e POSTGRES_PORT="5433" \
   -e POSTGRES_DB="${POSTGRES_DB:-chatbot}" \
   -e POSTGRES_USER="${POSTGRES_USER:-chatbot}" \
   -e POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-chatbot}" \

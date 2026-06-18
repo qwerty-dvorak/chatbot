@@ -241,13 +241,48 @@ class ChatDetailViewTest(TestCase):
         self.assertEqual(msgs[1].role, "assistant")
         self.assertEqual(msgs[1].status, "pending")
 
+    def test_post_thinking_message_sets_metadata(self):
+        self.client.post(
+            reverse("chat:detail", args=[self.chat.id]),
+            {"content": "Think about this", "thinking_mode": "1"},
+        )
+        messages = Message.objects.filter(chat=self.chat).order_by("created_at")
+        self.assertTrue(messages[0].metadata["thinking_mode"])
+        self.assertTrue(messages[1].metadata["thinking_mode"])
+
+    def test_detail_renders_thinking_for_multiple_assistant_messages(self):
+        Message.objects.create(
+            chat=self.chat,
+            role=Message.Role.ASSISTANT,
+            content="First answer",
+            metadata={"thinking_mode": True, "reasoning": "First reasoning trace"},
+        )
+        Message.objects.create(
+            chat=self.chat,
+            role=Message.Role.ASSISTANT,
+            content="Second answer",
+            metadata={"thinking_mode": True, "reasoning": "Second reasoning trace"},
+        )
+
+        response = self.client.get(reverse("chat:detail", args=[self.chat.id]))
+
+        self.assertEqual(
+            response.content.count(
+                b'class="reasoning-toggle" onclick="toggleReasoning(this)"'
+            ),
+            2,
+        )
+        self.assertContains(response, "First reasoning trace")
+        self.assertContains(response, "Second reasoning trace")
+
     def test_post_empty_message_rejected(self):
         response = self.client.post(
             reverse("chat:detail", args=[self.chat.id]),
             {"content": ""},
         )
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Message content or attachment is required.")
+        self.assertNotIn("Location", response)
+        self.assertContains(response, "Start a conversation")
 
     def test_detail_redirects_to_self_after_post(self):
         response = self.client.post(

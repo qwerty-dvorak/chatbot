@@ -35,7 +35,7 @@ RAG_ENABLED=false
 
 ```bash
 docker run -d --name chatbot-postgres \
-  -p 5432:5432 \
+  -p 5433:5433 \
   -e POSTGRES_DB=chatbot \
   -e POSTGRES_USER=chatbot \
   -e POSTGRES_PASSWORD=chatbot \
@@ -179,7 +179,7 @@ docker-compose up postgres
 Services:
 | Service     | Port  | Description |
 |-------------|-------|-------------|
-| postgres    | 5432  | PostgreSQL 16 (official postgres:16-alpine) |
+| postgres    | 5433  | PostgreSQL 16 (official postgres:16-alpine) |
 | mock        | 9000  | Mock LLM server — chat completions with tool calls |
 | mock        | 9001  | Mock LLM server — embeddings |
 | file-server | 8888  | Local file server — documents organised by user/date |

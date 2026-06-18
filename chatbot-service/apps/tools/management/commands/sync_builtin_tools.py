@@ -67,8 +67,11 @@ BUILTIN_TOOL_DEFS = [
     },
     {
         "name": "chat.compact",
-        "display_name": "Chat Compaction",
-        "description": "Compact older chat history to save context",
+        "display_name": "Compaction",
+        "description": (
+            "Ask the LLM to summarize older chat history and reduce context usage. "
+            "Use when the user asks to compact or when context is becoming full."
+        ),
         "schema": {
             "type": "object",
             "properties": {},

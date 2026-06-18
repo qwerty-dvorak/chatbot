@@ -92,11 +92,37 @@ class StreamHandlerTest(TestCase):
         list(self.handler._handle_text("World"))
         self.assertEqual(self.handler.accumulated_content, "Hello World")
 
+    def test_channel_markers_split_reasoning_from_final_text(self):
+        events = []
+        events.extend(self.handler._handle_content("<|channel>tho"))
+        events.extend(self.handler._handle_content("ught\nConsider this."))
+        events.extend(self.handler._handle_content("<channel|>Final answer"))
+        events.extend(self.handler._handle_stop())
+
+        reasoning = "".join(e["content"] for e in events if e["type"] == "reasoning")
+        text = "".join(e["content"] for e in events if e["type"] == "text")
+        self.assertEqual(reasoning, "\nConsider this.")
+        self.assertEqual(text, "Final answer")
+
+        self.msg.refresh_from_db()
+        self.assertEqual(self.msg.content, "Final answer")
+        self.assertEqual(self.msg.metadata["reasoning"], "Consider this.")
+
+    def test_split_final_channel_marker_is_not_rendered(self):
+        events = []
+        events.extend(self.handler._handle_content("<|channel>thoughtThink"))
+        events.extend(self.handler._handle_content("<channel|><|chan"))
+        events.extend(self.handler._handle_content("nel>finalAnswer"))
+        events.extend(self.handler._handle_stop())
+
+        text = "".join(e["content"] for e in events if e["type"] == "text")
+        self.assertEqual(text, "Answer")
+
     def test_handle_done_finalizes_message(self):
         list(self.handler._handle_text("Final "))
         list(self.handler._handle_stop())
         self.msg.refresh_from_db()
-        self.assertEqual(self.msg.content, "Final ")
+        self.assertEqual(self.msg.content, "Final")
         self.assertEqual(self.msg.status, Message.Status.COMPLETED)
 
     def test_delta_sequence_increments(self):

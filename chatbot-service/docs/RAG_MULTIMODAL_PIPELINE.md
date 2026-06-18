@@ -220,7 +220,7 @@ In production, the chatbot-service and rag-pipeline run on separate machines:
 ```text
 Server A (RAG pipeline):
   rag-api (port 8093)  — handles all ingest + search
-  PostgreSQL (:5432)   — shared tables (documents, chunks)
+  PostgreSQL (:5433)   — shared tables (documents, chunks)
   Milvus (:19530)      — vector store
   RunPod endpoints     — embed/rerank/chat
 

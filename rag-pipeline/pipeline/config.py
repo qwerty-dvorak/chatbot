@@ -75,7 +75,7 @@ class Config:
     postgres_user: str = field(default_factory=lambda: os.getenv("POSTGRES_USER", "chatbot"))
     postgres_password: str = field(default_factory=lambda: os.getenv("POSTGRES_PASSWORD", "chatbot"))
     postgres_host: str = field(default_factory=lambda: os.getenv("POSTGRES_HOST", "localhost"))
-    postgres_port: int = field(default_factory=lambda: int(os.getenv("POSTGRES_PORT", "5432")))
+    postgres_port: int = field(default_factory=lambda: int(os.getenv("POSTGRES_PORT", "5433")))
     postgres_pool_size: int = field(default_factory=lambda: int(os.getenv("POSTGRES_POOL_SIZE", "5")))
 
     # Object store (local file-system, content-addressed)

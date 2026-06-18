@@ -227,14 +227,34 @@ def chat_compact(arguments: dict[str, Any], context: dict = {}) -> dict:
     if not chat:
         return {"compacted": False, "message": "No chat context."}
     try:
-        from apps.chat.models import Message
-        count = Message.objects.filter(chat=chat, status="completed").count()
+        from apps.compaction.services import compact_chat, context_usage
+
+        before = context_usage(chat)
+        compaction = compact_chat(chat)
+        after = context_usage(chat)
+        if not compaction:
+            return {
+                "compacted": False,
+                "message": "Not enough uncompacted messages. At least 10 are required.",
+                "context": after,
+            }
         return {
-            "compacted": False,
-            "message":   f"Chat has {count} completed messages. "
-                         "Compaction would summarise older messages to free context.",
+            "compacted": True,
+            "messages_compacted": len(
+                list(
+                    compaction.chat.messages.filter(
+                        created_at__gte=compaction.from_message.created_at,
+                        created_at__lte=compaction.to_message.created_at,
+                    )
+                )
+            ),
+            "summary_tokens": compaction.token_count,
+            "context_before": before,
+            "context_after": after,
+            "message": "Older conversation context was summarized successfully.",
         }
     except Exception as exc:
+        logger.exception("chat.compact failed")
         return {"compacted": False, "error": str(exc)}
 
 

@@ -53,7 +53,7 @@ See `TESTING.md` for full details, manual curl examples, and troubleshooting.
 | rag-multimodal-embed | 8091 | vllm/vllm-openai:latest | nvidia/nemotron-colembed-vl-8b-v2 multimodal embeddings |
 | rag-reranker | 8092 | vllm/vllm-openai:latest | Qwen3-VL-Reranker-8B pooling via /pooling endpoint |
 | rag-api | 8093 | rag-api (ubuntu:24.04) | FastAPI, durable SQLite queue, ingestion worker, search |
-| postgres | 5432 | postgres:16 | Shared DB with chatbot-service |
+| postgres | 5433 | postgres:16 | Shared DB with chatbot-service |
 | milvus-standalone | 19530 | milvusdb/milvus:latest | Vector store |
 
 ## Architecture

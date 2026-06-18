@@ -30,9 +30,17 @@ def stream_chat_response(message: Message, user) -> StreamingHttpResponse:
 
     client      = LiteLLMClient()
     tool_schemas = registry.get_schemas(user)
+    thinking_mode = bool((message.metadata or {}).get("thinking_mode"))
 
     response = StreamingHttpResponse(
-        _event_stream(message, user, client, context_messages, tool_schemas),
+        _event_stream(
+            message,
+            user,
+            client,
+            context_messages,
+            tool_schemas,
+            thinking_mode=thinking_mode,
+        ),
         content_type="text/event-stream",
     )
     response["Cache-Control"]     = "no-cache"
@@ -40,7 +48,14 @@ def stream_chat_response(message: Message, user) -> StreamingHttpResponse:
     return response
 
 
-def _event_stream(message, user, client, context_messages, tool_schemas):
+def _event_stream(
+    message,
+    user,
+    client,
+    context_messages,
+    tool_schemas,
+    thinking_mode=False,
+):
     """
     Two-round streaming:
       Round 1 — LLM call with tools.  May produce text OR a tool_call.
@@ -50,7 +65,9 @@ def _event_stream(message, user, client, context_messages, tool_schemas):
     _start = time.time()
     try:
         handler1 = StreamHandler(message)
-        kwargs   = {"tools": tool_schemas} if tool_schemas else {}
+        kwargs = {"thinking_mode": thinking_mode}
+        if tool_schemas:
+            kwargs["tools"] = tool_schemas
 
         for chunk in client.chat_completion_stream(context_messages, **kwargs):
             for event in handler1.handle_chunk(chunk):
@@ -95,7 +112,10 @@ def _event_stream(message, user, client, context_messages, tool_schemas):
         handler2 = StreamHandler(message)
         handler2.sequence = handler1.sequence
 
-        for chunk in client.chat_completion_stream(continuation):
+        for chunk in client.chat_completion_stream(
+            continuation,
+            thinking_mode=thinking_mode,
+        ):
             for event in handler2.handle_chunk(chunk):
                 yield f"data: {json.dumps(event)}\n\n"
 

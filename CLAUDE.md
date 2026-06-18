@@ -75,9 +75,9 @@ RAG pipeline via HTTP (`RAG_API_BASE_URL`).
 ```
 ┌── Server A: RAG Pipeline ──────────────────────────┐
 │  rag-api (port 8093)    Milvus (:19530)              │
-│  PostgreSQL (:5432)     RunPod / vLLM endpoints       │
+│  PostgreSQL (:5433)     RunPod / vLLM endpoints       │
 └──────────────────────────────────────────────────────┘
-                │ HTTP :8093 │ TCP :5432 │ TCP :19530
+                │ HTTP :8093 │ TCP :5433 │ TCP :19530
 ┌──────────────────────────────────────────────────────┐
 │  Server B: Chatbot Service                             │
 │  chatbot-service (port 8080)  Chat LLM endpoint        │

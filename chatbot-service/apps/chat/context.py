@@ -6,7 +6,12 @@ import time
 from django.conf import settings
 from django.core.files.storage import default_storage
 
-from apps.llm.prompts import MEMORY_CONTEXT_PROMPT, RAG_CONTEXT_PROMPT, SYSTEM_PROMPT
+from apps.llm.prompts import (
+    COMPACTION_CONTEXT_PROMPT,
+    MEMORY_CONTEXT_PROMPT,
+    RAG_CONTEXT_PROMPT,
+    SYSTEM_PROMPT,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +118,20 @@ def _build_multimodal_content(text: str, attachments: list[dict]) -> str | list[
     return content_parts
 
 
+def _enable_thinking(content: str | list[dict]) -> str | list[dict]:
+    prefix = "<|think|> "
+    if isinstance(content, str):
+        return prefix + content
+
+    content = [dict(part) for part in content]
+    for part in content:
+        if part.get("type") == "text":
+            part["text"] = prefix + part.get("text", "")
+            return content
+    content.insert(0, {"type": "text", "text": prefix.rstrip()})
+    return content
+
+
 class ContextBuilder:
     def __init__(self, chat, user, user_message=None):
         self.chat = chat
@@ -124,6 +143,9 @@ class ContextBuilder:
     def build(self, user_message_text: str, user_message: object | None = None) -> list[dict]:
         self.user_message = user_message or self.user_message
         system_content = SYSTEM_PROMPT
+        compaction_context = self._load_compaction()
+        if compaction_context:
+            system_content += f"\n\n{compaction_context}"
         rag_context = self._search_rag(user_message_text)
         if rag_context:
             system_content += f"\n\n{RAG_CONTEXT_PROMPT.format(results=rag_context)}"
@@ -134,6 +156,8 @@ class ContextBuilder:
         self._add_recent_chat_history()
         attachments = list(self.user_message.attachments) if self.user_message and self.user_message.attachments else []
         content = _build_multimodal_content(user_message_text, attachments)
+        if self.user_message and self.user_message.metadata.get("thinking_mode"):
+            content = _enable_thinking(content)
         self.messages.append({"role": "user", "content": content})
         return self.messages
 
@@ -239,19 +263,34 @@ class ContextBuilder:
         return results
 
     def _add_recent_chat_history(self):
-        from .models import Message
+        from apps.compaction.services import messages_after_compaction
 
-        recent = Message.objects.filter(
-            chat=self.chat, status=Message.Status.COMPLETED
-        ).exclude(role=Message.Role.SYSTEM).order_by("-created_at")[:20]
+        recent = messages_after_compaction(self.chat)
+        if self.user_message:
+            recent = [message for message in recent if message.id != self.user_message.id]
 
-        for msg in reversed(recent):
+        for msg in recent[-20:]:
             attachments = list(msg.attachments) if msg.attachments else []
             content = _build_multimodal_content(msg.content, attachments)
             self.messages.append({
                 "role": msg.role,
                 "content": content,
             })
+
+    def _load_compaction(self) -> str | None:
+        from apps.compaction.services import latest_compaction
+
+        compaction = latest_compaction(self.chat)
+        if not compaction:
+            return None
+        facts = "\n".join(f"- {fact}" for fact in compaction.facts) or "None"
+        open_questions = (
+            "\n".join(f"- {question}" for question in compaction.open_questions) or "None"
+        )
+        return (
+            COMPACTION_CONTEXT_PROMPT.format(summary=compaction.summary, facts=facts)
+            + f"\n\nOpen questions from earlier context:\n{open_questions}"
+        )
 
     def _load_memories(self) -> str | None:
         """Load user memories and format them for context injection."""

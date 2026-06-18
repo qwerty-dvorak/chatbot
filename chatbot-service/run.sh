@@ -20,18 +20,22 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 case "${1:-}" in
   local)
+    shift
     export $(grep -v '^#' "$ROOT_DIR/models/.env.local" 2>/dev/null | xargs)
-    exec bash "$SCRIPT_DIR/shell_scripts/start-services.sh"
+    exec bash "$SCRIPT_DIR/shell_scripts/start-services.sh" "$@"
     ;;
   runpod)
+    shift
     export $(grep -v '^#' "$ROOT_DIR/models/.env.runpod" 2>/dev/null | xargs)
-    exec bash "$SCRIPT_DIR/shell_scripts/start-services-with-runpod.sh"
+    exec bash "$SCRIPT_DIR/shell_scripts/start-services-with-runpod.sh" "$@"
     ;;
   no-gemma|mock)
-    exec bash "$SCRIPT_DIR/shell_scripts/start-services-no-gemma.sh"
+    shift
+    exec bash "$SCRIPT_DIR/shell_scripts/start-services-no-gemma.sh" "$@"
     ;;
   debug)
-    exec bash "$SCRIPT_DIR/shell_scripts/start-debug.sh"
+    shift
+    exec bash "$SCRIPT_DIR/shell_scripts/start-debug.sh" "$@"
     ;;
   *)
     echo "Usage: bash run.sh {local|runpod|no-gemma|debug}"

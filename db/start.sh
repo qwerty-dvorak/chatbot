@@ -8,7 +8,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-SERVICE_DIR="$(cd "$SCRIPT_DIR/../chatbot-service" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+SERVICE_DIR="$ROOT_DIR/chatbot-service"
 export $(grep -v '^#' "$SCRIPT_DIR/../models/.env.local" 2>/dev/null | xargs || true)
 
 DB_NAME="${POSTGRES_DB:-chatbot}"
@@ -16,25 +17,29 @@ DB_USER="${POSTGRES_USER:-chatbot}"
 DB_PASS="${POSTGRES_PASSWORD:-chatbot}"
 EXTERNAL_PORT="${POSTGRES_PORT:-5433}"
 IMAGE_NAME="chatbot-base"
+NETWORK_NAME="chatbot_net"
 
 echo "Creating volume..."
 docker volume create postgres_data 2>/dev/null || true
+docker network create "$NETWORK_NAME" 2>/dev/null || true
 
 echo "Removing old container..."
 docker rm -f chatbot-postgres 2>/dev/null || true
 
-echo "Building base image '$IMAGE_NAME' from $SERVICE_DIR..."
-docker build -t "$IMAGE_NAME" "$SERVICE_DIR"
+echo "Building base image '$IMAGE_NAME' from repo root..."
+docker build -t "$IMAGE_NAME" -f "$SERVICE_DIR/Dockerfile" "$ROOT_DIR"
 
 echo "Starting PostgreSQL on port $EXTERNAL_PORT..."
 docker run -d \
   --name chatbot-postgres \
+  --network "$NETWORK_NAME" \
   -e POSTGRES_DB="$DB_NAME" \
   -e POSTGRES_USER="$DB_USER" \
   -e POSTGRES_PASSWORD="$DB_PASS" \
+  -e POSTGRES_PORT="$EXTERNAL_PORT" \
   -v postgres_data:/var/lib/postgresql/data \
-  -p "$EXTERNAL_PORT":5432 \
-  --health-cmd="runuser -u postgres -- /usr/lib/postgresql/16/bin/pg_isready -d $DB_NAME" \
+  -p "$EXTERNAL_PORT":"$EXTERNAL_PORT" \
+  --health-cmd="runuser -u postgres -- /usr/lib/postgresql/16/bin/pg_isready -p $EXTERNAL_PORT -d $DB_NAME" \
   --health-interval=5s \
   --health-timeout=5s \
   --health-retries=10 \

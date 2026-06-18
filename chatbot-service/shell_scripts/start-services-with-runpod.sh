@@ -1,37 +1,63 @@
 #!/bin/bash
-# Start chatbot services with ALL models on RunPod.
-# Infrastructure (PostgreSQL, Milvus) expected to be running via db/ and milvus/.
-# RAG pipeline expected to be running via rag-pipeline/shell_scripts/.
+# Start chatbot services with models on RunPod.
+# PostgreSQL is expected to be running via db/start.sh.
 #
 # Usage:
 #   bash shell_scripts/start-services-with-runpod.sh
 #   bash shell_scripts/start-services-with-runpod.sh --clean
+#   bash shell_scripts/start-services-with-runpod.sh --clean --no-rag
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SERVICE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 ROOT_DIR="$(cd "$SERVICE_DIR/.." && pwd)"
-NETWORK_NAME="rag_net"
+NETWORK_NAME="chatbot_net"
 IMAGE_NAME="chatbot-base"
+CLEAN=false
+NO_RAG=false
+
+for arg in "$@"; do
+  case "$arg" in
+    --clean) CLEAN=true ;;
+    --no-rag) NO_RAG=true ;;
+    --help|-h)
+      echo "Usage: bash shell_scripts/start-services-with-runpod.sh [--clean] [--no-rag]"
+      exit 0
+      ;;
+    *)
+      echo "ERROR: Unknown argument: $arg"
+      echo "Usage: bash shell_scripts/start-services-with-runpod.sh [--clean] [--no-rag]"
+      exit 1
+      ;;
+  esac
+done
 
 # Load model endpoints from models/.env.runpod
 if [ -f "$ROOT_DIR/models/.env.runpod" ]; then
   export $(grep -v '^#' "$ROOT_DIR/models/.env.runpod" | xargs)
 fi
 
-if [[ "$*" == *"--clean"* ]]; then
+if [[ "$CLEAN" == "true" ]]; then
   echo "Removing old containers..."
   docker rm -f web worker file-server 2>/dev/null || true
 fi
 
-echo "Checking RAG pipeline infrastructure..."
-if ! docker network inspect "$NETWORK_NAME" &>/dev/null; then
-  echo "ERROR: Network '$NETWORK_NAME' not found. Start RAG pipeline services first."
-  exit 1
+if [[ "$NO_RAG" == "true" ]]; then
+  RAG_API_ENABLED=false
+  RAG_ENABLED=false
+  RAG_API_BASE_URL=""
+else
+  RAG_API_ENABLED="${RAG_API_ENABLED:-true}"
+  RAG_ENABLED="${RAG_ENABLED:-true}"
+  RAG_API_BASE_URL="${RAG_API_BASE_URL:-http://rag-api:8093}"
 fi
 
-echo "Building base image '$IMAGE_NAME'..."
-docker build -t "$IMAGE_NAME" "$SERVICE_DIR"
+docker network create "$NETWORK_NAME" 2>/dev/null || true
+docker volume create media_data 2>/dev/null || true
+docker volume create docs_data 2>/dev/null || true
+
+echo "Building base image '$IMAGE_NAME' from repo root..."
+docker build -t "$IMAGE_NAME" -f "$SERVICE_DIR/Dockerfile" "$ROOT_DIR"
 
 echo "Starting File Server..."
 docker rm -f file-server 2>/dev/null || true
@@ -58,7 +84,7 @@ echo "Endpoint configuration (all RunPod):"
 echo "  Chat LLM          → $CHAT_BASE_URL"
 echo "  Text Embed        → $EMBEDDING_BASE_URL"
 echo "  Reranker          → $RERANKER_BASE_URL"
-echo "  RAG API (local)   → http://rag-api:8093"
+echo "  RAG               → $([[ "$NO_RAG" == "true" ]] && echo disabled || echo enabled)"
 
 echo "Starting Django Web App on port 8080..."
 docker run -d \
@@ -67,7 +93,7 @@ docker run -d \
   -e DJANGO_SETTINGS_MODULE=config.settings.production \
   -e SECRET_KEY="change-me-in-production" \
   -e POSTGRES_HOST=chatbot-postgres \
-  -e POSTGRES_PORT=5432 \
+  -e POSTGRES_PORT=5433 \
   -e POSTGRES_DB=chatbot \
   -e POSTGRES_USER=chatbot \
   -e POSTGRES_PASSWORD=chatbot \
@@ -84,9 +110,9 @@ docker run -d \
   -e RERANKER_MODEL="${RERANKER_MODEL:-Qwen/Qwen3-VL-Reranker-2B}" \
   -e MILVUS_HOST=milvus-standalone \
   -e MILVUS_PORT=19530 \
-  -e RAG_API_ENABLED=true \
-  -e RAG_API_BASE_URL="http://rag-api:8093" \
-  -e RAG_ENABLED=true \
+  -e RAG_API_ENABLED="$RAG_API_ENABLED" \
+  -e RAG_API_BASE_URL="$RAG_API_BASE_URL" \
+  -e RAG_ENABLED="$RAG_ENABLED" \
   -e RAG_TOP_K=5 \
   -e RAG_MIN_SIMILARITY=0.45 \
   -e TOOL_CALLS_ENABLED=true \
@@ -108,7 +134,7 @@ docker run -d \
   -e DJANGO_SETTINGS_MODULE=config.settings.production \
   -e SECRET_KEY="change-me-in-production" \
   -e POSTGRES_HOST=chatbot-postgres \
-  -e POSTGRES_PORT=5432 \
+  -e POSTGRES_PORT=5433 \
   -e POSTGRES_DB=chatbot \
   -e POSTGRES_USER=chatbot \
   -e POSTGRES_PASSWORD=chatbot \
@@ -124,9 +150,9 @@ docker run -d \
   -e RERANKER_MODEL="${RERANKER_MODEL:-Qwen/Qwen3-VL-Reranker-2B}" \
   -e MILVUS_HOST=milvus-standalone \
   -e MILVUS_PORT=19530 \
-  -e RAG_API_ENABLED=true \
-  -e RAG_API_BASE_URL="http://rag-api:8093" \
-  -e RAG_ENABLED=true \
+  -e RAG_API_ENABLED="$RAG_API_ENABLED" \
+  -e RAG_API_BASE_URL="$RAG_API_BASE_URL" \
+  -e RAG_ENABLED="$RAG_ENABLED" \
   -e TOOL_CALLS_ENABLED=true \
   -v media_data:/app/media \
   -v docs_data:/data/docs \
@@ -139,7 +165,7 @@ echo "All services started!"
 echo "  Chat LLM  (RunPod)  → $CHAT_BASE_URL"
 echo "  Embed     (RunPod)  → $EMBEDDING_BASE_URL"
 echo "  Reranker  (RunPod)  → $RERANKER_BASE_URL"
-echo "  RAG API   (local)   → http://rag-api:8093"
+echo "  RAG                   → $([[ "$NO_RAG" == "true" ]] && echo disabled || echo enabled)"
 echo "  File server         → http://localhost:8888/browse"
 echo "  Web app             → http://localhost:8080"
 echo ""

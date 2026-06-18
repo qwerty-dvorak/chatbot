@@ -11,7 +11,7 @@ DATABASES = {
         "USER": os.environ.get("POSTGRES_USER", "chatbot"),  # noqa: F405
         "PASSWORD": os.environ.get("POSTGRES_PASSWORD", "chatbot"),  # noqa: F405
         "HOST": os.environ.get("POSTGRES_HOST", "localhost"),  # noqa: F405
-        "PORT": os.environ.get("POSTGRES_PORT", "5432"),  # noqa: F405
+        "PORT": os.environ.get("POSTGRES_PORT", "5433"),  # noqa: F405
     }
 }
 

@@ -66,7 +66,7 @@ SECRET_KEY=change-me
 DEBUG=true
 ALLOWED_HOSTS=localhost,127.0.0.1
 
-DATABASE_URL=postgresql://chatbot:chatbot@localhost:5432/chatbot
+DATABASE_URL=postgresql://chatbot:chatbot@localhost:5433/chatbot
 
 MEDIA_ROOT=./media
 STATIC_ROOT=./staticfiles

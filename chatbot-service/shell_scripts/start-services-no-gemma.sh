@@ -24,8 +24,8 @@ docker volume create docs_data 2>/dev/null || true
 GATEWAY_IP="$(docker network inspect "$NETWORK_NAME" --format '{{(index .IPAM.Config 0).Gateway}}')"
 echo "Gateway IP: $GATEWAY_IP"
 
-echo "Building base image '$IMAGE_NAME'..."
-docker build -t "$IMAGE_NAME" "$SERVICE_DIR"
+echo "Building base image '$IMAGE_NAME' from repo root..."
+docker build -t "$IMAGE_NAME" -f "$SERVICE_DIR/Dockerfile" "$ROOT_DIR"
 
 docker rm -f "$MOCK_SERVER_CONTAINER" file-server web worker 2>/dev/null || true
 
@@ -60,7 +60,7 @@ docker run -d \
   --network "$NETWORK_NAME" \
   -e DJANGO_SETTINGS_MODULE=config.settings.production \
   -e POSTGRES_HOST=chatbot-postgres \
-  -e POSTGRES_PORT=5432 \
+  -e POSTGRES_PORT=5433 \
   -e POSTGRES_DB="$DB_NAME" \
   -e POSTGRES_USER="$DB_USER" \
   -e POSTGRES_PASSWORD="$DB_PASS" \
@@ -91,7 +91,7 @@ docker run -d \
   --network "$NETWORK_NAME" \
   -e DJANGO_SETTINGS_MODULE=config.settings.production \
   -e POSTGRES_HOST=chatbot-postgres \
-  -e POSTGRES_PORT=5432 \
+  -e POSTGRES_PORT=5433 \
   -e POSTGRES_DB="$DB_NAME" \
   -e POSTGRES_USER="$DB_USER" \
   -e POSTGRES_PASSWORD="$DB_PASS" \

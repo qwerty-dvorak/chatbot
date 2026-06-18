@@ -16,7 +16,7 @@
 #
 # Prerequisites:
 #   - rag-api running on localhost:8093
-#   - PostgreSQL (rag-postgres:5432)
+#   - PostgreSQL (rag-postgres:5433)
 #   - Milvus (test-milvus:19530)
 #   - RunPod endpoints active (text embed, chat for HyDE)
 set -euo pipefail
@@ -56,7 +56,7 @@ curl -sf "$API_URL/health" > /dev/null 2>&1 && result PASS "rag-api reachable" |
 # Check PostgreSQL
 $VENV_PYTHON -c "
 import psycopg2
-conn = psycopg2.connect(host='localhost', port=5432, dbname='chatbot', user='chatbot', password='chatbot')
+conn = psycopg2.connect(host='localhost', port=5433, dbname='chatbot', user='chatbot', password='chatbot')
 conn.close()
 " 2>/dev/null && result PASS "PostgreSQL reachable" || result FAIL "PostgreSQL not reachable"
 
@@ -81,7 +81,7 @@ print('Collections ready for pipeline to create')
 # Clean up previous ingestion data from PostgreSQL
 $VENV_PYTHON -c "
 import psycopg2
-conn = psycopg2.connect(host='localhost', port=5432, dbname='chatbot', user='chatbot', password='chatbot')
+conn = psycopg2.connect(host='localhost', port=5433, dbname='chatbot', user='chatbot', password='chatbot')
 cur = conn.cursor()
 cur.execute('DELETE FROM document_chunks')
 cur.execute('DELETE FROM documents')
@@ -192,7 +192,7 @@ echo ""
 echo "  §3a  PostgreSQL: document row"
 $VENV_PYTHON -c "
 import psycopg2, json
-conn = psycopg2.connect(host='localhost', port=5432, dbname='chatbot', user='chatbot', password='chatbot')
+conn = psycopg2.connect(host='localhost', port=5433, dbname='chatbot', user='chatbot', password='chatbot')
 cur = conn.cursor()
 
 # Count documents
@@ -219,7 +219,7 @@ echo ""
 echo "  §3b  PostgreSQL: chunk rows (content verification)"
 $VENV_PYTHON -c "
 import psycopg2, json
-conn = psycopg2.connect(host='localhost', port=5432, dbname='chatbot', user='chatbot', password='chatbot')
+conn = psycopg2.connect(host='localhost', port=5433, dbname='chatbot', user='chatbot', password='chatbot')
 cur = conn.cursor()
 
 # Count total chunks
@@ -256,7 +256,7 @@ echo ""
 echo "  §3c  PostgreSQL: hypothetical questions (HyDE)"
 $VENV_PYTHON -c "
 import psycopg2, json
-conn = psycopg2.connect(host='localhost', port=5432, dbname='chatbot', user='chatbot', password='chatbot')
+conn = psycopg2.connect(host='localhost', port=5433, dbname='chatbot', user='chatbot', password='chatbot')
 cur = conn.cursor()
 
 # Count chunks with HyDE questions (stored as metadata.hyde_questions array)

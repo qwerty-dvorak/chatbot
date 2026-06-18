@@ -35,8 +35,8 @@ docker network create "$NETWORK_NAME" 2>/dev/null || true
 docker volume create media_data 2>/dev/null || true
 docker volume create docs_data 2>/dev/null || true
 
-echo "Building base image '$IMAGE_NAME'..."
-docker build -t "$IMAGE_NAME" "$SERVICE_DIR"
+echo "Building base image '$IMAGE_NAME' from repo root..."
+docker build -t "$IMAGE_NAME" -f "$SERVICE_DIR/Dockerfile" "$ROOT_DIR"
 
 echo "Starting File Server..."
 docker rm -f file-server 2>/dev/null || true
@@ -64,7 +64,7 @@ docker run -d \
   --network "$NETWORK_NAME" \
   -e DJANGO_SETTINGS_MODULE=config.settings.production \
   -e POSTGRES_HOST=chatbot-postgres \
-  -e POSTGRES_PORT=5432 \
+  -e POSTGRES_PORT=5433 \
   -e POSTGRES_DB="$DB_NAME" \
   -e POSTGRES_USER="$DB_USER" \
   -e POSTGRES_PASSWORD="$DB_PASS" \
@@ -94,7 +94,7 @@ docker run -d \
   --network "$NETWORK_NAME" \
   -e DJANGO_SETTINGS_MODULE=config.settings.production \
   -e POSTGRES_HOST=chatbot-postgres \
-  -e POSTGRES_PORT=5432 \
+  -e POSTGRES_PORT=5433 \
   -e POSTGRES_DB="$DB_NAME" \
   -e POSTGRES_USER="$DB_USER" \
   -e POSTGRES_PASSWORD="$DB_PASS" \

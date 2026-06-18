@@ -31,7 +31,7 @@ network (`rag_net`):
 │                        │                                           │
 │  Milvus (:19530) ◄────┤  vector reads/writes                       │
 │                        │                                           │
-│  PostgreSQL (:5432) ◄─┤  document + chunk CRUD                     │
+│  PostgreSQL (:5433) ◄─┤  document + chunk CRUD                     │
 │  (rag-postgres)        │                                           │
 │                        │                                           │
 │  chatbot-service       │  (optional — can run on same host)        │
@@ -50,12 +50,12 @@ ingest + search, avoiding the need to embed documents on the chat server.
 │  rag-api (port 8093)       ←── RAG_API_BASE_URL                   │
 │                                                                   │
 │  Milvus (:19530)           ── vector store                         │
-│  PostgreSQL (:5432)        ── shared tables                        │
+│  PostgreSQL (:5433)        ── shared tables                        │
 │                                                                   │
 │  RunPod / vLLM endpoints   ── embed/rerank/chat/OCR               │
 └───────────────────────────┬────────────────────────────────────────┘
                             │ HTTP :8093 (search/ingest)
-                            │ TCP :5432  (PostgreSQL)
+                            │ TCP :5433  (PostgreSQL)
                             │ TCP :19530 (Milvus — optional)
 ┌───────────────────────────┴────────────────────────────────────────┐
 │  Server B: Chatbot Service                                          │
@@ -449,7 +449,7 @@ docker run -d --name rag-postgres \
   -e POSTGRES_DB=chatbot \
   -e POSTGRES_USER=chatbot \
   -e POSTGRES_PASSWORD=chatbot \
-  -p 5432:5432 \
+  -p 5433:5433 \
   postgres:16
 
 docker run -d --name rag-api \

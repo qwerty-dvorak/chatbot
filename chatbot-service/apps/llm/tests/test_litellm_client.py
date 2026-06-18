@@ -1,6 +1,6 @@
 from django.test import TestCase, override_settings
 
-from apps.llm.clients import LiteLLMClient
+from apps.llm.clients import LiteLLMClient, _openai_compatible_model
 from apps.llm.embeddings import FakeEmbeddingClient
 from apps.llm.errors import LLMConnectionError, LLMError, LLMProviderError, LLMTimeoutError
 from apps.llm.token_usage import record_token_usage
@@ -28,12 +28,44 @@ class LiteLLMClientChatCompletionTest(TestCase):
     def test_extra_body_reasoning_enabled(self):
         with override_settings(CHAT_REASONING_ENABLED=True):
             extra = self.client._extra_body()
-            self.assertEqual(extra, {"chat_template_kwargs": {"enable_thinking": True}})
+            self.assertEqual(
+                extra,
+                {
+                    "chat_template_kwargs": {"enable_thinking": True},
+                    "skip_special_tokens": False,
+                },
+            )
 
     def test_extra_body_reasoning_disabled(self):
         with override_settings(CHAT_REASONING_ENABLED=False):
             extra = self.client._extra_body()
             self.assertIsNone(extra)
+
+    def test_extra_body_uses_per_message_thinking_mode(self):
+        with override_settings(CHAT_REASONING_ENABLED=False):
+            self.assertEqual(
+                self.client._extra_body(True),
+                {
+                    "chat_template_kwargs": {"enable_thinking": True},
+                    "skip_special_tokens": False,
+                },
+            )
+            self.assertEqual(
+                self.client._extra_body(False),
+                {"chat_template_kwargs": {"enable_thinking": False}},
+            )
+
+    def test_openai_compatible_model_adds_provider(self):
+        self.assertEqual(
+            _openai_compatible_model("google/gemma-4-E4B-it"),
+            "openai/google/gemma-4-E4B-it",
+        )
+
+    def test_openai_compatible_model_preserves_provider(self):
+        self.assertEqual(
+            _openai_compatible_model("openai/google/gemma-4-E4B-it"),
+            "openai/google/gemma-4-E4B-it",
+        )
 
 
 class FakeEmbeddingClientTest(TestCase):

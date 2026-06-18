@@ -58,6 +58,10 @@ class CompactionServiceTest(TestCase):
         result = compact_chat(self.chat)
         self.assertIsNotNone(result)
         self.assertEqual(ChatCompaction.objects.filter(chat=self.chat).count(), 1)
+        self.assertTrue(result.summary)
+        self.assertEqual(result.from_message.content, "Message 0")
+        self.assertEqual(result.to_message.content, "Message 5")
+        self.assertGreater(result.token_count, 0)
 
     def test_compaction_does_not_delete_messages(self):
         for i in range(12):

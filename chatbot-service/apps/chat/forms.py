@@ -8,6 +8,7 @@ class MessageForm(forms.Form):
         required=False, widget=forms.Textarea(attrs={"rows": 3, "placeholder": "Type your message..."})
     )
     attachment = forms.FileField(required=False)
+    thinking_mode = forms.BooleanField(required=False)
 
     def clean(self):
         cleaned = super().clean()

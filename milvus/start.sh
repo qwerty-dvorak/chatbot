@@ -69,12 +69,16 @@ docker run -d \
   -e MINIO_ADDRESS=minio:9000 \
   -e MQ_TYPE=woodpecker \
   -v "$VOL_DIR/milvus:/var/lib/milvus" \
+  --health-cmd="curl -sf http://localhost:9091/healthz -o /dev/null || exit 1" \
+  --health-interval=10s --health-timeout=5s --health-retries=30 --health-start-period=30s \
   milvusdb/milvus:latest \
   milvus run standalone
 
-echo "Waiting 15s for Milvus to initialize..."
-sleep 15
+echo "Waiting for Milvus to become healthy..."
+while [ "$(docker inspect -f '{{.State.Health.Status}}' milvus-standalone 2>/dev/null)" != "healthy" ]; do
+  sleep 3
+done
 
 echo ""
-echo "Milvus ready at localhost:19530"
+echo "Milvus healthy at localhost:19530"
 echo "  MinIO console: http://localhost:9001 (minioadmin/minioadmin)"

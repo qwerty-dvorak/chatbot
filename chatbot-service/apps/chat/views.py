@@ -1,5 +1,6 @@
 import uuid
 
+from django.contrib import messages as flash_messages
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse
@@ -79,6 +80,9 @@ class ChatDetailView(LoginRequiredMixin, DetailView):
              and m.status in (Message.Status.PENDING, Message.Status.STREAMING)),
             None,
         )
+        from apps.compaction.services import context_usage
+
+        context["context_usage"] = context_usage(self.object)
         return context
 
     def post(self, request, *args, **kwargs):
@@ -90,12 +94,14 @@ class ChatDetailView(LoginRequiredMixin, DetailView):
                 role=Message.Role.USER,
                 content=form.cleaned_data.get("content", ""),
                 status=Message.Status.COMPLETED,
+                metadata={"thinking_mode": form.cleaned_data.get("thinking_mode", False)},
             )
             Message.objects.create(
                 chat=self.object,
                 role=Message.Role.ASSISTANT,
                 content="",
                 status=Message.Status.PENDING,
+                metadata={"thinking_mode": form.cleaned_data.get("thinking_mode", False)},
             )
             if form.cleaned_data.get("attachment"):
                 file = form.cleaned_data["attachment"]
@@ -127,6 +133,28 @@ class ChatArchiveView(LoginRequiredMixin, View):
         chat.save(update_fields=["archived"])
         next_url = request.POST.get("next") or reverse("chat:list")
         return redirect(next_url)
+
+
+class ChatCompactView(LoginRequiredMixin, View):
+    def post(self, request, chat_id):
+        chat = get_object_or_404(Chat, id=chat_id, user=request.user)
+        from apps.compaction.services import compact_chat
+
+        try:
+            compaction = compact_chat(chat)
+            if compaction:
+                flash_messages.success(
+                    request,
+                    f"Compacted older context into {compaction.token_count} summary tokens.",
+                )
+            else:
+                flash_messages.info(
+                    request,
+                    "At least 10 uncompacted messages are required before compaction.",
+                )
+        except Exception as exc:
+            flash_messages.error(request, f"Compaction failed: {exc}")
+        return redirect("chat:detail", chat_id=chat.id)
 
 
 class ChatShareView(LoginRequiredMixin, CreateView):

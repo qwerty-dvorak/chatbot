@@ -7,6 +7,80 @@ from apps.chat.models import Message, MessageDelta
 logger = logging.getLogger(__name__)
 
 
+class ChannelContentParser:
+    """Split Gemma channel markers carried in ordinary content deltas."""
+
+    THOUGHT_STARTS = ("<|channel>thought", "<|channel|>thought")
+    THOUGHT_ENDS = ("<channel|>", "<|end|>")
+    FINAL_STARTS = ("<|channel>final", "<|channel|>final")
+
+    def __init__(self):
+        self.mode = "text"
+        self.buffer = ""
+
+    def feed(self, content: str) -> list[tuple[str, str]]:
+        self.buffer += content
+        return self._drain(final=False)
+
+    def finish(self) -> list[tuple[str, str]]:
+        return self._drain(final=True)
+
+    def _drain(self, final: bool) -> list[tuple[str, str]]:
+        parts = []
+        while self.buffer:
+            if self.mode == "text":
+                marker = self._first_marker(self.THOUGHT_STARTS)
+                final_marker = self._first_marker(self.FINAL_STARTS)
+                if final_marker and (not marker or final_marker[0] < marker[0]):
+                    index, token = final_marker
+                    if index:
+                        parts.append(("text", self.buffer[:index]))
+                    self.buffer = self.buffer[index + len(token):]
+                    continue
+                if marker:
+                    index, token = marker
+                    if index:
+                        parts.append(("text", self.buffer[:index]))
+                    self.buffer = self.buffer[index + len(token):]
+                    self.mode = "reasoning"
+                    continue
+                safe = self._safe_length(self.THOUGHT_STARTS + self.FINAL_STARTS, final)
+                if safe:
+                    parts.append(("text", self.buffer[:safe]))
+                    self.buffer = self.buffer[safe:]
+                break
+
+            marker = self._first_marker(self.THOUGHT_ENDS)
+            if marker:
+                index, token = marker
+                if index:
+                    parts.append(("reasoning", self.buffer[:index]))
+                self.buffer = self.buffer[index + len(token):]
+                self.mode = "text"
+                continue
+            safe = self._safe_length(self.THOUGHT_ENDS, final)
+            if safe:
+                parts.append(("reasoning", self.buffer[:safe]))
+                self.buffer = self.buffer[safe:]
+            break
+        return [(kind, text) for kind, text in parts if text]
+
+    def _first_marker(self, markers: tuple[str, ...]) -> tuple[int, str] | None:
+        matches = [(self.buffer.find(marker), marker) for marker in markers]
+        matches = [match for match in matches if match[0] >= 0]
+        return min(matches, default=None, key=lambda match: match[0])
+
+    def _safe_length(self, markers: tuple[str, ...], final: bool) -> int:
+        if final:
+            return len(self.buffer)
+        held = 0
+        for marker in markers:
+            for length in range(1, min(len(marker), len(self.buffer)) + 1):
+                if self.buffer.endswith(marker[:length]):
+                    held = max(held, length)
+        return len(self.buffer) - held
+
+
 class StreamHandler:
     """
     Processes LiteLLM streaming chunks and converts them to SSE events.
@@ -25,6 +99,7 @@ class StreamHandler:
         self.message   = message
         self.accumulated_content = ""
         self.accumulated_reasoning = ""
+        self.channel_parser = ChannelContentParser()
         self._tc_acc: dict[int, dict] = {}
         self.completed_tool_calls: list[dict] = []
 
@@ -53,7 +128,7 @@ class StreamHandler:
                 yield from self._handle_reasoning(reasoning_content)
 
             if content:
-                yield from self._handle_text(content)
+                yield from self._handle_content(content)
 
             if tool_calls:
                 for tc in tool_calls:
@@ -92,6 +167,13 @@ class StreamHandler:
         self.sequence += 1
         yield {"type": "reasoning", "content": content}
 
+    def _handle_content(self, content: str) -> Generator[dict, None, None]:
+        for kind, parsed in self.channel_parser.feed(content):
+            if kind == "reasoning":
+                yield from self._handle_reasoning(parsed)
+            else:
+                yield from self._handle_text(parsed)
+
     def _handle_text(self, content: str) -> Generator[dict, None, None]:
         self.accumulated_content += content
         MessageDelta.objects.create(
@@ -104,6 +186,12 @@ class StreamHandler:
         yield {"type": "text", "content": content}
 
     def _handle_stop(self) -> Generator[dict, None, None]:
+        for kind, parsed in self.channel_parser.finish():
+            if kind == "reasoning":
+                yield from self._handle_reasoning(parsed)
+            else:
+                yield from self._handle_text(parsed)
+
         MessageDelta.objects.create(
             message=self.message,
             sequence=self.sequence,
@@ -112,11 +200,11 @@ class StreamHandler:
         )
         self.sequence += 1
 
-        self.message.content = self.accumulated_content
+        self.message.content = self.accumulated_content.strip()
         self.message.status  = Message.Status.COMPLETED
         if self.accumulated_reasoning:
             metadata = dict(self.message.metadata or {})
-            metadata["reasoning"] = self.accumulated_reasoning
+            metadata["reasoning"] = self.accumulated_reasoning.strip()
             self.message.metadata = metadata
             self.message.save(update_fields=["content", "status", "metadata"])
         else:

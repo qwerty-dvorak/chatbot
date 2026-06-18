@@ -14,7 +14,7 @@ ENV POSTGRES_DB=chatbot \
     POSTGRES_USER=chatbot \
     POSTGRES_PASSWORD=chatbot \
     POSTGRES_HOST=localhost \
-    POSTGRES_PORT=5432 \
+    POSTGRES_PORT=5433 \
     PGDATA=/var/lib/postgresql/data \
     PGBIN=/usr/lib/postgresql/16/bin \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -50,16 +50,16 @@ RUN pg_dropcluster 16 main --stop 2>/dev/null || true && \
 
 WORKDIR /app
 
-COPY pyproject.toml uv.lock README.md ./
+COPY chatbot-service/pyproject.toml chatbot-service/uv.lock chatbot-service/README.md /app/
 # BEGIN BARC UV SYNC
 RUN uv sync --frozen --no-dev
 # END BARC UV SYNC
 
-COPY . /app/
+COPY chatbot-service/ /app/
 
 RUN uv run python manage.py collectstatic --noinput --settings=config.settings.production
 
-COPY docker/entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+COPY db/entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 EXPOSE 8000

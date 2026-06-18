@@ -11,6 +11,13 @@ from .token_usage import record_token_usage
 logger = logging.getLogger(__name__)
 
 
+def _openai_compatible_model(model: str) -> str:
+    """Tell LiteLLM to use its OpenAI provider for our vLLM endpoints."""
+    if model.startswith("openai/"):
+        return model
+    return f"openai/{model}"
+
+
 def _truncate_payload(messages: list, max_chars: int = 2000) -> str:
     dump = json.dumps(messages, default=str)
     if len(dump) <= max_chars:
@@ -70,12 +77,20 @@ class LiteLLMClient:
     def _select_model(self, messages: list) -> str:
         if self._has_multimodal(messages):
             logger.debug("Detected multimodal content, using vision_model=%s", self.vision_model)
-            return self.vision_model
-        return self.chat_model
+            return _openai_compatible_model(self.vision_model)
+        return _openai_compatible_model(self.chat_model)
 
-    def _extra_body(self) -> dict | None:
+    def _extra_body(self, thinking_mode: bool | None = None) -> dict | None:
+        if thinking_mode is not None:
+            extra_body = {"chat_template_kwargs": {"enable_thinking": thinking_mode}}
+            if thinking_mode:
+                extra_body["skip_special_tokens"] = False
+            return extra_body
         if getattr(settings, "CHAT_REASONING_ENABLED", False):
-            return {"chat_template_kwargs": {"enable_thinking": True}}
+            return {
+                "chat_template_kwargs": {"enable_thinking": True},
+                "skip_special_tokens": False,
+            }
         return None
 
     def chat_completion(self, messages: list[dict[str, str]], **kwargs) -> dict[str, Any]:
@@ -93,7 +108,7 @@ class LiteLLMClient:
                 api_base=self.base_url,
                 api_key=self.api_key,
             )
-            extra_body = self._extra_body()
+            extra_body = self._extra_body(kwargs.get("thinking_mode"))
             if extra_body:
                 call_kwargs["extra_body"] = extra_body
             response = completion(**call_kwargs)
@@ -128,7 +143,7 @@ class LiteLLMClient:
                 api_base=self.base_url,
                 api_key=self.api_key,
             )
-            extra_body = self._extra_body()
+            extra_body = self._extra_body(kwargs.get("thinking_mode"))
             if extra_body:
                 call_kwargs["extra_body"] = extra_body
             if "tools" in kwargs:
@@ -174,5 +189,3 @@ class LiteLLMClient:
                 )
         except Exception as e:
             logger.warning(f"Failed to log token usage: {e}")
-
-

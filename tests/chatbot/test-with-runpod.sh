@@ -64,7 +64,7 @@ echo ""
 docker run --rm \
   --network "${NETWORK_NAME:-chatbot_net}" \
   -e POSTGRES_HOST=postgres \
-  -e POSTGRES_PORT=5432 \
+  -e POSTGRES_PORT=5433 \
   -e POSTGRES_DB="${POSTGRES_DB:-chatbot}" \
   -e POSTGRES_USER="${POSTGRES_USER:-chatbot}" \
   -e POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-chatbot}" \
