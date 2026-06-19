@@ -18,56 +18,6 @@ logger = logging.getLogger(__name__)
 MAX_IMAGE_SIZE = 20 * 1024 * 1024
 
 
-def _log_rag_search(user, chat, message, original_query, rag_response: dict):
-    """Persist a RAG search log entry to the database."""
-    try:
-        from apps.knowledge.models import RagSearchLog
-        enhanced = rag_response.get("enhanced_queries", [])
-        hyde_docs = []
-        sub_qs = []
-        stepback_q = ""
-        # Partition enhanced queries by similarity to originals
-        if enhanced:
-            orig_lower = original_query.lower().strip()
-            for eq in enhanced:
-                e = eq.strip()
-                if not e:
-                    continue
-                if e.lower() == orig_lower:
-                    continue
-                if len(e) > len(original_query) * 1.2 and original_query.lower() in e.lower():
-                    stepback_q = e
-                elif "?" in e or e.lower().startswith(("what", "how", "why", "when", "where", "which", "who", "is ", "are ", "do ", "does ", "can ", "could ")):
-                    if e.lower() != orig_lower:
-                        sub_qs.append(e)
-                else:
-                    hyde_docs.append(e)
-        source_titles = []
-        for r in rag_response.get("results", []):
-            meta = r.get("metadata", {}) or {}
-            filename = meta.get("filename", "") or r.get("source", "").split("/")[-1]
-            if filename:
-                source_titles.append(filename)
-        RagSearchLog.objects.create(
-            user=user,
-            chat=chat,
-            message=message,
-            original_query=original_query,
-            enhanced_queries=enhanced,
-            hyde_docs=hyde_docs,
-            sub_queries=sub_qs,
-            stepback_question=stepback_q,
-            retrieval_mode=rag_response.get("retrieval_mode", "hybrid"),
-            use_reranker=rag_response.get("use_reranker", True),
-            hierarchical=rag_response.get("hierarchical", True),
-            total_results=rag_response.get("total", 0),
-            result_sources=source_titles,
-            metadata={"timing": rag_response.get("timing", {})},
-        )
-    except Exception:
-        logger.exception("Failed to log RAG search")
-
-
 def _build_multimodal_content(text: str, attachments: list[dict]) -> str | list[dict]:
     if not attachments:
         return text
@@ -207,24 +157,16 @@ class ContextBuilder:
             return None
         try:
             from apps.knowledge.rag_client import rag_client
-            if rag_client.is_enabled():
-                enhancements = self._decide_enhancements(query)
-                rag_response = rag_client.search(
-                    query, top_k=5, tier=None,
-                    hyde=enhancements.get("hyde"),
-                    sub_queries=enhancements.get("sub_queries"),
-                    stepback=enhancements.get("stepback"),
-                )
-                results = rag_response.get("results", [])
-                _log_rag_search(
-                    user=self.user,
-                    chat=self.chat,
-                    message=self.user_message,
-                    original_query=query,
-                    rag_response=rag_response,
-                )
-            else:
-                results = self._local_search(query)
+            if not rag_client.is_enabled():
+                return None
+            enhancements = self._decide_enhancements(query)
+            rag_response = rag_client.search(
+                query, top_k=5,
+                hyde=enhancements.get("hyde"),
+                sub_queries=enhancements.get("sub_queries"),
+                stepback=enhancements.get("stepback"),
+            )
+            results = rag_response.get("results", [])
             duration = time.time() - start
             logger.info("[TIMING] rag_search=%.3fs results=%d", duration, len(results if results else []))
             if not results:
@@ -245,22 +187,6 @@ class ContextBuilder:
             duration = time.time() - start
             logger.exception("[TIMING] rag_search=%.3fs FAILED", duration)
             return None
-
-    def _local_search(self, query: str) -> list[dict]:
-        from apps.knowledge.models import DocumentChunk
-        qs = DocumentChunk.objects.select_related("document").filter(
-            document__owner=self.user,
-            content__icontains=query,
-        )[:5]
-        results = []
-        for c in qs:
-            results.append({
-                "text": c.content,
-                "score": 1.0,
-                "source": c.document.title,
-                "metadata": {"filename": c.document.original_filename or c.document.title},
-            })
-        return results
 
     def _add_recent_chat_history(self):
         from apps.compaction.services import messages_after_compaction

@@ -15,24 +15,17 @@
       <div class="doc-item">
         <a href="{% url 'knowledge:detail' doc.id %}" style="display:flex;align-items:center;gap:12px;flex:1;min-width:0;text-decoration:none">
           <div class="doc-icon">
-            {% if "pdf" in doc.mime_type %}PDF
-            {% elif "image" in doc.mime_type %}IMG
+            {% if "pdf" in doc.artifact_revision.blob.mime_type %}PDF
+            {% elif "image" in doc.artifact_revision.blob.mime_type %}IMG
             {% else %}TXT{% endif %}
           </div>
           <div class="doc-body">
             <div class="doc-title" style="color:var(--text)">{{ doc.title }}</div>
-            <div class="doc-meta">{{ doc.original_filename }} · {{ doc.created_at|timesince }} ago</div>
-            {% with ei=doc.metadata.embedding_info %}
-              {% if ei %}
-                <div class="doc-meta" style="font-size:.7rem;color:var(--text3)">
-                  <code>{{ ei.model }} · {{ ei.dimension }}d</code>
-                </div>
-              {% endif %}
-            {% endwith %}
+            <div class="doc-meta">{{ doc.artifact_revision.blob.mime_type }} · {{ doc.created_at|timesince }} ago</div>
           </div>
         </a>
         <div class="doc-actions">
-          <span class="badge badge-{{ doc.status }}">{{ doc.status }}</span>
+          <span class="badge badge-{{ doc.artifact_revision.processing_status }}">{{ doc.artifact_revision.processing_status }}</span>
           <form method="post" action="{% url 'knowledge:delete' doc.id %}" onsubmit="return confirm('Delete this document?')">
             {% csrf_token %}
             <button type="submit" class="btn btn-danger btn-sm">Delete</button>

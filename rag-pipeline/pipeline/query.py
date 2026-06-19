@@ -5,10 +5,11 @@ hypothetical questions) and a single public ``enhance_query`` entry point
 that applies whichever strategies are enabled in ``cfg.query_enhancements``.
 """
 
+import json
 import logging
 import time
-
-import litellm
+import urllib.error
+import urllib.request
 
 from .config import cfg
 
@@ -24,21 +25,38 @@ def _chat(system: str, user: str) -> str:
 
     Non-streaming.  Uses ``cfg.chat_model`` as the model name.
     """
-    t0 = time.time()
-    response = litellm.completion(
-        model=cfg.chat_model,
-        messages=[
+    url = f"{cfg.chat_base_url.rstrip('/')}/chat/completions"
+    body = json.dumps({
+        "model": cfg.chat_model,
+        "messages": [
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ],
-        api_base=cfg.chat_base_url,
-        api_key=cfg.chat_api_key,
-        stream=False,
-    )
+        "stream": False,
+    }).encode()
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": "opencode/1.0",
+    }
+    if cfg.chat_api_key:
+        headers["Authorization"] = f"Bearer {cfg.chat_api_key}"
+
+    t0 = time.time()
+    try:
+        req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+        resp = urllib.request.urlopen(req, timeout=120)
+        data = json.loads(resp.read().decode())
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"_chat HTTP {e.code}: {e.read().decode()}")
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"_chat connection error: {e}")
+
     duration = round(time.time() - t0, 4)
-    content = response.choices[0].message.content or ""
-    tokens_in = response.usage.prompt_tokens if response.usage else 0
-    tokens_out = response.usage.completion_tokens if response.usage else 0
+    choice = data["choices"][0]
+    content = choice["message"].get("content", "") or ""
+    usage = data.get("usage", {})
+    tokens_in = usage.get("prompt_tokens", 0)
+    tokens_out = usage.get("completion_tokens", 0)
     logger.info("[TIMING] _chat %.3fs %d+%d tokens model=%s",
                 duration, tokens_in, tokens_out, cfg.chat_model)
     return content

@@ -19,6 +19,8 @@ INSTALLED_APPS = [
     "apps.accounts",
     "apps.chat",
     "apps.memory",
+    "apps.documents",
+    "apps.observability",
     "apps.knowledge",
     "apps.ingestion",
     "apps.llm",
@@ -157,22 +159,14 @@ RAG_MIN_SIMILARITY = float(os.environ.get("RAG_MIN_SIMILARITY", "0.45"))
 RAG_CHUNK_TARGET_TOKENS = int(os.environ.get("RAG_CHUNK_TARGET_TOKENS", "700"))
 RAG_CHUNK_OVERLAP_TOKENS = int(os.environ.get("RAG_CHUNK_OVERLAP_TOKENS", "120"))
 
-# LoRA module names registered by vLLM. Deployment scripts populate the
-# comma-separated environment variable from ../lora_adapters/<provider>/<repo>.
-_lora_names = [
-    name.strip()
-    for name in os.environ.get("LORA_ADAPTERS", "").split(",")
-    if name.strip()
-]
-LORA_ADAPTERS = [("", "None (base model)")] + [
-    (name, name.replace("-", " ").replace("_", " ").title())
-    for name in _lora_names
-]
+# LoRA adapters are discovered at runtime by apps.llm.lora.get_lora_adapters()
+# which queries the chat model endpoint's /v1/models API. This static list is
+# only a fallback when the endpoint is unreachable.
+LORA_ADAPTERS = [("", "None (base model)")]
 
 # Upload settings
 MAX_UPLOAD_MB = int(os.environ.get("MAX_UPLOAD_MB", "50"))
 INGESTION_SYNC = os.environ.get("INGESTION_SYNC", "false").lower() in ("true", "1", "yes")
-KNOWLEDGE_DEFAULT_VISIBILITY = os.environ.get("KNOWLEDGE_DEFAULT_VISIBILITY", "private")
 MEMORY_AUTO_SAVE_DEFAULT = os.environ.get("MEMORY_AUTO_SAVE_DEFAULT", "true").lower() in ("true", "1", "yes")
 
 # Tool settings

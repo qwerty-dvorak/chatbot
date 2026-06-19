@@ -103,7 +103,6 @@ docker run -d \
   -e CHAT_API_KEY="dummy" \
   -e CHAT_MODEL="$CHAT_MODEL" \
   -e VISION_MODEL="$VISION_MODEL" \
-  -e LORA_ADAPTERS="${LORA_ADAPTERS:-}" \
   -e TEXT_EMBEDDING_MODEL="${TEXT_EMBEDDING_MODEL:-nvidia/llama-embed-nemotron-8b}" \
   -e EMBEDDING_BASE_URL="$EMBEDDING_BASE_URL" \
   -e EMBEDDING_API_KEY="dummy" \
@@ -144,7 +143,6 @@ docker run -d \
   -e CHAT_BASE_URL="$CHAT_BASE_URL" \
   -e CHAT_API_KEY="dummy" \
   -e CHAT_MODEL="$CHAT_MODEL" \
-  -e LORA_ADAPTERS="${LORA_ADAPTERS:-}" \
   -e TEXT_EMBEDDING_MODEL="${TEXT_EMBEDDING_MODEL:-nvidia/llama-embed-nemotron-8b}" \
   -e EMBEDDING_BASE_URL="$EMBEDDING_BASE_URL" \
   -e EMBEDDING_API_KEY="dummy" \

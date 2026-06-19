@@ -1,7 +1,6 @@
 import logging
 import os
 import time
-import uuid
 from pathlib import Path
 
 import requests
@@ -11,11 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 class RagApiClient:
-    """Client for the RAG Pipeline API.
-
-    Sends documents for ingestion and performs searches against the RAG API.
-    Configured via environment variables prefixed with RAG_API_.
-    """
+    """Client for the RAG Pipeline API."""
 
     def __init__(self):
         self.base_url = os.environ.get(
@@ -31,20 +26,6 @@ class RagApiClient:
     def is_enabled(self) -> bool:
         return self.enabled
 
-    def collection_stats(self, name: str | None = None) -> dict | None:
-        """Get embedding metadata (model, dimension, count) for a Milvus collection."""
-        try:
-            if name:
-                url = f"{self.base_url}/v1/collections/{name}/stats"
-            else:
-                url = f"{self.base_url}/v1/collections"
-            resp = requests.get(url, timeout=10)
-            resp.raise_for_status()
-            return resp.json()
-        except requests.RequestException as exc:
-            logger.warning("RAG API collection stats failed: %s", exc)
-            return None
-
     def health(self) -> dict | None:
         try:
             resp = requests.get(f"{self.base_url}/health", timeout=5)
@@ -54,9 +35,8 @@ class RagApiClient:
             logger.warning("RAG API health check failed: %s", exc)
             return None
 
-    def ingest(self, file_path: str, tier: str = "slow", strategy: str | None = None,
-               ocr_mode: str | None = None, document_id: str | None = None) -> dict | None:
-        """Upload a file to the RAG API and return the job response."""
+    def ingest(self, file_path: str, ocr_mode: str | None = None,
+               document_reference_id: str | None = None) -> dict | None:
         if not self.enabled:
             logger.info("RAG API disabled, skipping ingest for %s", file_path)
             return None
@@ -68,14 +48,12 @@ class RagApiClient:
         try:
             with open(path, "rb") as f:
                 files = {"files": (path.name, f)}
-                data = {"tier": tier}
-                if strategy:
-                    data["strategy"] = strategy
+                data = {}
                 if ocr_mode:
                     data["ocr_mode"] = ocr_mode
-                if document_id:
-                    data["document_id"] = document_id
-                resp = self._timed_request("POST", f"{self.base_url}/v1/ingest", files=files, data=data, timeout=self.timeout)
+                if document_reference_id:
+                    data["document_reference_id"] = document_reference_id
+                resp = self._timed_request("POST", f"{self.base_url}/v1/ingestions", files=files, data=data, timeout=self.timeout)
                 return resp.json()
         except requests.RequestException as exc:
             duration = time.time() - start
@@ -83,7 +61,6 @@ class RagApiClient:
             return None
 
     def get_job(self, job_id: str) -> dict | None:
-        """Fetch current job status from the RAG API (single request, no polling)."""
         try:
             resp = self._timed_request("GET", f"{self.base_url}/v1/ingestions/{job_id}", timeout=10)
             return resp.json()
@@ -92,7 +69,6 @@ class RagApiClient:
             return None
 
     def poll_job(self, job_id: str, max_retries: int = 120, interval: float = 1.0) -> dict | None:
-        """Poll a job until completion or failure."""
         for _ in range(max_retries):
             try:
                 resp = self._timed_request("GET", f"{self.base_url}/v1/ingestions/{job_id}", timeout=10)
@@ -119,25 +95,17 @@ class RagApiClient:
             logger.warning("[TIMING] rag_api_%s %.3fs FAILED %s", method.lower(), duration, url)
             raise
 
-    def search(self, query: str, top_k: int = 5, mode: str = "hybrid",
-               use_reranker: bool | None = None, tier: str | None = None,
-               hierarchical: bool | None = None,
+    def search(self, query: str, top_k: int = 5, artifact_ids: list[str] | None = None,
+               use_reranker: bool | None = None,
                hyde: bool | None = None, sub_queries: bool | None = None,
                stepback: bool | None = None) -> dict:
-        """Search the RAG index and return the full response dict.
-
-        Returns ``{"results": [...], "enhanced_queries": [...], ...}``
-        or ``{"results": []}`` on error / when disabled.
-        """
         if not self.enabled:
             return {"results": [], "enhanced_queries": []}
-        body = {"query": query, "top_k": top_k, "mode": mode}
+        body = {"query": query, "top_k": top_k}
+        if artifact_ids:
+            body["artifact_ids"] = artifact_ids
         if use_reranker is not None:
             body["use_reranker"] = use_reranker
-        if tier is not None:
-            body["tier"] = tier
-        if hierarchical is not None:
-            body["hierarchical"] = hierarchical
         if hyde is not None:
             body["hyde"] = hyde
         if sub_queries is not None:

@@ -1,11 +1,17 @@
 #!/usr/bin/env python
 import os
 import sys
+from pathlib import Path
 
 
 def main():
     from dotenv import load_dotenv
+
     load_dotenv()
+    mode = os.environ.get("MODE", "local").lower()
+    model_env = Path(__file__).resolve().parent.parent / "models" / f".env.{mode}"
+    if model_env.exists():
+        load_dotenv(str(model_env), override=False)
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.local")
     try:
         from django.core.management import execute_from_command_line

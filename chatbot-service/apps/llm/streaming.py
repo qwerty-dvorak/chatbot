@@ -111,21 +111,25 @@ class StreamHandler:
 
     # ── public interface ───────────────────────────────────────────────────────
 
-    def handle_chunk(self, chunk: Any) -> Generator[dict[str, Any], None, None]:
-        if not chunk.choices:
+    def handle_chunk(self, chunk: dict) -> Generator[dict[str, Any], None, None]:
+        choices = chunk.get("choices")
+        if not choices:
             return
 
-        choice       = chunk.choices[0]
-        delta        = getattr(choice, "delta", None)
-        finish       = getattr(choice, "finish_reason", None)
+        choice       = choices[0]
+        delta        = choice.get("delta")
+        finish       = choice.get("finish_reason")
 
         if delta:
-            content           = getattr(delta, "content", None)
-            reasoning_content = getattr(delta, "reasoning_content", None)
-            tool_calls        = getattr(delta, "tool_calls", None)
+            content           = delta.get("content")
+            reasoning_content = delta.get("reasoning_content")
+            reasoning         = delta.get("reasoning")
+            tool_calls        = delta.get("tool_calls")
 
             if reasoning_content:
                 yield from self._handle_reasoning(reasoning_content)
+            elif reasoning:
+                yield from self._handle_reasoning(reasoning)
 
             if content:
                 yield from self._handle_content(content)
@@ -141,18 +145,18 @@ class StreamHandler:
 
     # ── private helpers ────────────────────────────────────────────────────────
 
-    def _accumulate_tc(self, tc: Any) -> None:
-        idx = getattr(tc, "index", 0) or 0
+    def _accumulate_tc(self, tc: dict) -> None:
+        idx = tc.get("index", 0) or 0
         if idx not in self._tc_acc:
             self._tc_acc[idx] = {"id": "", "name": "", "args": ""}
 
-        if tc_id := getattr(tc, "id", None):
+        if tc_id := tc.get("id"):
             self._tc_acc[idx]["id"] = tc_id
 
-        fn = getattr(tc, "function", None)
+        fn = tc.get("function")
         if fn:
-            fn_name = getattr(fn, "name", None) or ""
-            fn_args = getattr(fn, "arguments", None) or ""
+            fn_name = fn.get("name", "") or ""
+            fn_args = fn.get("arguments", "") or ""
             self._tc_acc[idx]["name"] = self._tc_acc[idx]["name"] or fn_name
             self._tc_acc[idx]["args"] += fn_args
 

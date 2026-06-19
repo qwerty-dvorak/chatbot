@@ -1,7 +1,5 @@
 from typing import Any
 
-from apps.knowledge.models import Document
-
 from .base import BaseExtractor
 
 
@@ -12,16 +10,15 @@ class TextExtractor(BaseExtractor):
             "application/xml", "text/html",
         )
 
-    def extract(self, document: Document) -> dict[str, Any]:
-        if document.file and document.file != "":
-            from django.core.files.storage import default_storage
+    def extract(self, file_path: str, mime_type: str, extracted_text: str = "") -> dict[str, Any]:
+        content = extracted_text
+        if not content and file_path:
             try:
-                content = default_storage.open(document.file).read().decode("utf-8", errors="replace")
+                with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+                    content = f.read()
             except FileNotFoundError:
-                content = document.extracted_text or ""
-        else:
-            content = document.extracted_text or ""
+                pass
         return {
-            "text": content,
-            "metadata": {"parser": "text", "length": len(content)},
+            "text": content or "",
+            "metadata": {"parser": "text", "length": len(content or "")},
         }

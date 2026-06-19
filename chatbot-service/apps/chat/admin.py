@@ -33,8 +33,8 @@ class MessageDeltaAdmin(admin.ModelAdmin):
 
 @admin.register(MessageAttachment)
 class MessageAttachmentAdmin(admin.ModelAdmin):
-    list_display = ("original_filename", "mime_type", "size_bytes", "analysis_status", "message")
-    list_filter = ("analysis_status", "mime_type")
+    list_display = ("original_filename", "mime_type", "size_bytes", "message")
+    list_filter = ("mime_type",)
 
 
 @admin.register(ChatShare)

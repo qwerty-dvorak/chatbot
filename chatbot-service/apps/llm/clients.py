@@ -1,21 +1,14 @@
 import json
 import logging
 import time
+import urllib.request
 from typing import Any
 
 from django.conf import settings
 
 from .errors import LLMConnectionError, LLMProviderError, LLMRateLimitError, LLMTimeoutError
-from .token_usage import record_token_usage
 
 logger = logging.getLogger(__name__)
-
-
-def _openai_compatible_model(model: str) -> str:
-    """Tell LiteLLM to use its OpenAI provider for our vLLM endpoints."""
-    if model.startswith("openai/"):
-        return model
-    return f"openai/{model}"
 
 
 def _truncate_payload(messages: list, max_chars: int = 2000) -> str:
@@ -72,17 +65,10 @@ def _debug_log(messages: list, model: str, kwargs: dict):
 
 class LiteLLMClient:
     def __init__(self):
-        self.base_url = settings.CHAT_BASE_URL
+        self.base_url = settings.CHAT_BASE_URL.rstrip("/v1").rstrip("/")
         self.api_key = settings.CHAT_API_KEY
-        self.chat_model = settings.CHAT_MODEL
-        self.vision_model = settings.VISION_MODEL
-
-    def _get_client(self):
-        try:
-            from litellm import completion
-            return completion
-        except ImportError:
-            raise LLMProviderError("litellm is not installed")
+        self.chat_model = settings.CHAT_MODEL.removeprefix("openai/")
+        self.vision_model = settings.VISION_MODEL.removeprefix("openai/")
 
     def _has_multimodal(self, messages: list) -> bool:
         for m in messages:
@@ -95,26 +81,66 @@ class LiteLLMClient:
 
     def _select_model(self, messages: list, lora_adapter: str | None = None) -> str:
         if lora_adapter:
-            # vLLM registers LoRA modules as separate models via --lora-modules
-            return f"openai/{lora_adapter}"
+            return lora_adapter
         if self._has_multimodal(messages):
             logger.debug("Detected multimodal content, using vision_model=%s", self.vision_model)
-            return _openai_compatible_model(self.vision_model)
-        return _openai_compatible_model(self.chat_model)
+            return self.vision_model
+        return self.chat_model
 
-    def _extra_body(self, thinking_mode: bool | None = None,
-                    lora_adapter: str | None = None) -> dict | None:
-        extra_body = {}
+    def _build_body(self, model: str, messages: list, stream: bool,
+                    **kwargs) -> dict:
+        body: dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            "max_tokens": kwargs.get("max_tokens", settings.CHAT_RESPONSE_MAX_TOKENS),
+            "temperature": kwargs.get("temperature", 0.7),
+            "stream": stream,
+        }
+        if stream:
+            body["stream_options"] = {"include_usage": True}
+        if "tools" in kwargs:
+            body["tools"] = kwargs["tools"]
+        if "tool_choice" in kwargs:
+            body["tool_choice"] = kwargs["tool_choice"]
+
+        thinking_mode = kwargs.get("thinking_mode")
+        lora_adapter = kwargs.get("lora_adapter")
         if thinking_mode is not None:
-            extra_body.setdefault("chat_template_kwargs", {})["enable_thinking"] = thinking_mode
+            body.setdefault("chat_template_kwargs", {})["enable_thinking"] = thinking_mode
             if thinking_mode:
-                extra_body["skip_special_tokens"] = False
+                body["skip_special_tokens"] = False
         elif getattr(settings, "CHAT_REASONING_ENABLED", False):
-            extra_body.setdefault("chat_template_kwargs", {})["enable_thinking"] = True
-            extra_body["skip_special_tokens"] = False
+            body.setdefault("chat_template_kwargs", {})["enable_thinking"] = True
+            body["skip_special_tokens"] = False
         if lora_adapter:
-            extra_body["add_lora"] = lora_adapter
-        return extra_body or None
+            body["add_lora"] = lora_adapter
+        return body
+
+    def _request(self, body: dict, stream: bool = False):
+        url = f"{self.base_url}/v1/chat/completions"
+        data = json.dumps(body).encode()
+        req = urllib.request.Request(
+            url, data=data,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.api_key}",
+                "User-Agent": "opencode/1.0",
+            },
+        )
+        try:
+            return urllib.request.urlopen(req, timeout=120)
+        except urllib.error.HTTPError as e:
+            status = e.code
+            detail = e.read().decode()
+            if status == 401:
+                raise LLMProviderError(detail, provider="openai", status_code=401)
+            elif status == 429:
+                raise LLMRateLimitError(detail)
+            elif status == 408 or status == 504:
+                raise LLMTimeoutError(detail)
+            raise LLMProviderError(detail, provider="openai", status_code=status)
+        except urllib.error.URLError as e:
+            raise LLMConnectionError(str(e.reason))
 
     def chat_completion(self, messages: list[dict[str, str]], **kwargs) -> dict[str, Any]:
         lora_adapter = kwargs.get("lora_adapter")
@@ -122,37 +148,23 @@ class LiteLLMClient:
         _debug_log(messages, model, kwargs)
         start = time.time()
         try:
-            completion = self._get_client()
-            call_kwargs = dict(
-                model=model,
-                messages=messages,
-                max_tokens=kwargs.get("max_tokens", settings.CHAT_RESPONSE_MAX_TOKENS),
-                temperature=kwargs.get("temperature", 0.7),
-                stream=False,
-                api_base=self.base_url,
-                api_key=self.api_key,
-            )
-            extra_body = self._extra_body(
-                thinking_mode=kwargs.get("thinking_mode"),
-                lora_adapter=lora_adapter,
-            )
-            if extra_body:
-                call_kwargs["extra_body"] = extra_body
-            response = completion(**call_kwargs)
-            duration = time.time() - start
-            self._log_usage(response, "chat", duration)
-            msg = response.choices[0].message
+            body = self._build_body(model, messages, stream=False, **kwargs)
+            resp = self._request(body)
+            data = json.loads(resp.read().decode())
+            choice = data["choices"][0]
+            msg = choice["message"]
             result = {
-                "content": msg.content or "",
-                "finish_reason": response.choices[0].finish_reason,
-                "usage": dict(response.usage) if response.usage else {},
+                "content": msg.get("content", "") or "",
+                "finish_reason": choice.get("finish_reason"),
+                "usage": data.get("usage", {}),
             }
-            reasoning = getattr(msg, "reasoning", None)
-            if reasoning:
-                result["reasoning"] = reasoning
+            if msg.get("reasoning"):
+                result["reasoning"] = msg["reasoning"]
             return result
+        except (LLMConnectionError, LLMProviderError, LLMRateLimitError, LLMTimeoutError):
+            raise
         except Exception as e:
-            raise self._normalize_error(e)
+            raise LLMProviderError(str(e), provider="openai")
 
     def chat_completion_stream(self, messages: list[dict[str, str]], **kwargs):
         lora_adapter = kwargs.get("lora_adapter")
@@ -160,63 +172,21 @@ class LiteLLMClient:
         _debug_log(messages, model, kwargs)
         start = time.time()
         try:
-            completion = self._get_client()
-            call_kwargs = dict(
-                model=model,
-                messages=messages,
-                max_tokens=kwargs.get("max_tokens", settings.CHAT_RESPONSE_MAX_TOKENS),
-                temperature=kwargs.get("temperature", 0.7),
-                stream=True,
-                stream_options={"include_usage": True},
-                api_base=self.base_url,
-                api_key=self.api_key,
-            )
-            extra_body = self._extra_body(
-                thinking_mode=kwargs.get("thinking_mode"),
-                lora_adapter=lora_adapter,
-            )
-            if extra_body:
-                call_kwargs["extra_body"] = extra_body
-            if "tools" in kwargs:
-                call_kwargs["tools"] = kwargs["tools"]
-            if "tool_choice" in kwargs:
-                call_kwargs["tool_choice"] = kwargs["tool_choice"]
-            response = completion(**call_kwargs)
+            body = self._build_body(model, messages, stream=True, **kwargs)
+            resp = self._request(body, stream=True)
             last_chunk = None
-            for chunk in response:
-                last_chunk = chunk
-                yield chunk
+            for line in resp:
+                line = line.decode().strip()
+                if line.startswith("data: ") and line != "data: [DONE]":
+                    chunk = json.loads(line[6:])
+                    last_chunk = chunk
+                    yield chunk
             if last_chunk:
                 duration = time.time() - start
-                self._log_usage(last_chunk, "chat_stream", duration)
                 logger.info("[TIMING] streaming_llm=%.3fs model=%s", duration, model)
+        except (LLMConnectionError, LLMProviderError, LLMRateLimitError, LLMTimeoutError):
+            raise
         except Exception as e:
-            raise self._normalize_error(e)
+            raise LLMProviderError(str(e), provider="openai")
 
-    def _normalize_error(self, error: Exception) -> Exception:
-        error_str = str(error).lower()
-        if "timeout" in error_str or "timed out" in error_str:
-            return LLMTimeoutError(str(error))
-        if "rate limit" in error_str or "too many requests" in error_str:
-            return LLMRateLimitError(str(error))
-        if "authentication" in error_str or "unauthorized" in error_str or "api key" in error_str:
-            return LLMProviderError(str(error), provider="litellm", status_code=401)
-        if "connection" in error_str:
-            return LLMConnectionError(str(error))
-        return LLMProviderError(str(error), provider="litellm")
 
-    def _log_usage(self, response, operation: str, duration: float):
-        try:
-            usage = getattr(response, "usage", None)
-            if usage:
-                record_token_usage(
-                    operation=operation,
-                    model=getattr(response, "model", self.chat_model),
-                    provider="litellm",
-                    input_tokens=usage.prompt_tokens,
-                    output_tokens=usage.completion_tokens,
-                    total_tokens=usage.total_tokens,
-                    metadata={"duration_s": round(duration, 3)},
-                )
-        except Exception as e:
-            logger.warning(f"Failed to log token usage: {e}")

@@ -81,11 +81,5 @@ PY
   done < <(find -L "$root" -mindepth 3 -maxdepth 3 -type f -name adapter_config.json -print0 | sort -z)
 }
 
-persist_lora_names() {
-  local env_file="$1" names="$2"
-  if grep -q '^LORA_ADAPTERS=' "$env_file" 2>/dev/null; then
-    sed -i "s/^LORA_ADAPTERS=.*/LORA_ADAPTERS=${names}/" "$env_file"
-  else
-    printf '\n# vLLM LoRA module names discovered by the deployment script\nLORA_ADAPTERS=%s\n' "$names" >> "$env_file"
-  fi
-}
+# persist_lora_names removed — LoRA adapters are discovered at runtime
+# by the chatbot-service via GET /v1/models on the chat endpoint.

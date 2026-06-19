@@ -3,7 +3,7 @@ import logging
 from django.conf import settings
 
 from apps.llm import milvus_store as milvus
-from apps.llm.embeddings import FakeEmbeddingClient
+from apps.llm.embeddings import EmbeddingClient
 
 from .models import Memory, MemorySettings
 
@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 def get_user_memories(user, query=None, top_k=5):
     if query:
         try:
-            embedder = FakeEmbeddingClient()
+            embedder = EmbeddingClient()
             query_vector = embedder.embed_query(query)
             results = milvus.search_vectors(
                 settings.MILVUS_COLLECTION_MEMORIES,
@@ -53,7 +53,7 @@ def save_memory(user, content, importance=1):
 
 def _index_memory(memory):
     try:
-        embedder = FakeEmbeddingClient()
+        embedder = EmbeddingClient()
         vector = embedder.embed_query(memory.content)
         milvus.insert_vectors(
             settings.MILVUS_COLLECTION_MEMORIES,

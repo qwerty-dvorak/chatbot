@@ -1,8 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Any
 
-from apps.knowledge.models import Document
-
 
 class BaseExtractor(ABC):
     @abstractmethod
@@ -10,9 +8,9 @@ class BaseExtractor(ABC):
         ...
 
     @abstractmethod
-    def extract(self, document: Document) -> dict[str, Any]:
+    def extract(self, file_path: str, mime_type: str, extracted_text: str = "") -> dict[str, Any]:
         ...
 
-    def extract_text(self, document: Document) -> str:
-        result = self.extract(document)
+    def extract_text(self, file_path: str, mime_type: str, extracted_text: str = "") -> str:
+        result = self.extract(file_path, mime_type, extracted_text)
         return result.get("text", "")

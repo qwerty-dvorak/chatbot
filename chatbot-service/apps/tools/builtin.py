@@ -12,6 +12,8 @@ import json
 import logging
 from typing import Any
 
+from apps.documents.models import ArtifactRevision, DocumentReference
+
 logger = logging.getLogger(__name__)
 
 BUILTIN_TOOLS: dict[str, callable] = {}
@@ -161,27 +163,25 @@ def rag_search(arguments: dict[str, Any], context: dict = {}) -> dict:
         return {"results": [], "message": "No query provided."}
 
     try:
-        from apps.knowledge.models import DocumentChunk
-        qs = DocumentChunk.objects.select_related("document")
-        if user:
-            qs = qs.filter(document__owner=user)
+        qs = ArtifactRevision.objects.filter(processing_status="ready")
         if query:
-            qs = qs.filter(content__icontains=query)
-        qs = qs.order_by("document", "chunk_index")[:top_k]
+            qs = qs.filter(extracted_text__icontains=query)
+        qs = qs.select_related("blob", "document_references").order_by("-created_at")[:top_k]
 
-        results = [
-            {
-                "document": c.document.title,
-                "chunk":    c.chunk_index,
-                "excerpt":  c.content[:300],
-            }
-            for c in qs
-        ]
+        results = []
+        for r in qs:
+            for doc_ref in r.document_references.all():
+                if user and doc_ref.owner != user:
+                    continue
+                results.append({
+                    "document": doc_ref.title,
+                    "excerpt": r.extracted_text[:300],
+                })
         return {
             "query":   query,
             "count":   len(results),
             "results": results,
-            "message": f"Found {len(results)} chunk(s) matching '{query}'.",
+            "message": f"Found {len(results)} result(s) matching '{query}'.",
         }
     except Exception as exc:
         logger.exception("rag.search failed")
@@ -195,23 +195,17 @@ def ingest_status(arguments: dict[str, Any], context: dict = {}) -> dict:
     user = context.get("user")
     try:
         from apps.ingestion.models import IngestionJob
-        from apps.knowledge.models import Document
 
-        doc_qs = Document.objects.all()
-        job_qs = IngestionJob.objects.all()
+        doc_qs = DocumentReference.objects.all()
         if user:
             doc_qs = doc_qs.filter(owner=user)
-            job_qs = job_qs.filter(document__owner=user)
 
         counts = {
             "documents_total":  doc_qs.count(),
-            "pending":   doc_qs.filter(status="pending").count(),
-            "processing": doc_qs.filter(status="processing").count(),
-            "ready":     doc_qs.filter(status="ready").count(),
-            "failed":    doc_qs.filter(status="failed").count(),
-            "jobs_queued":  job_qs.filter(status="queued").count(),
-            "jobs_running": job_qs.filter(status="running").count(),
-            "jobs_failed":  job_qs.filter(status="failed").count(),
+            "pending":   doc_qs.filter(artifact_revision__processing_status="pending").count(),
+            "processing": doc_qs.filter(artifact_revision__processing_status="processing").count(),
+            "ready":     doc_qs.filter(artifact_revision__processing_status="ready").count(),
+            "failed":    doc_qs.filter(artifact_revision__processing_status="failed").count(),
         }
         return {"status": "ok", "counts": counts}
     except Exception as exc:
@@ -266,22 +260,21 @@ def document_analyze(arguments: dict[str, Any], context: dict = {}) -> dict:
     document_id = arguments.get("document_id")
 
     try:
-        from apps.knowledge.models import Document
-        qs = Document.objects.all()
+        qs = DocumentReference.objects.all()
         if user:
             qs = qs.filter(owner=user)
         if document_id and document_id != "latest":
             qs = qs.filter(id=document_id)
-        doc = qs.order_by("-created_at").first()
-        if not doc:
+        doc_ref = qs.select_related("artifact_revision__blob").order_by("-created_at").first()
+        if not doc_ref:
             return {"analyzed": False, "message": "No document found."}
+        revision = doc_ref.artifact_revision
         return {
             "analyzed":   True,
-            "title":      doc.title,
-            "status":     doc.status,
-            "mime_type":  doc.mime_type,
-            "chunks":     doc.chunks.count(),
-            "summary":    doc.analysis_summary or doc.extracted_text[:500] or "No text extracted yet.",
+            "title":      doc_ref.title,
+            "status":     revision.processing_status,
+            "mime_type":  revision.blob.mime_type,
+            "summary":    revision.summary or revision.extracted_text[:500] or "No text extracted yet.",
         }
     except Exception as exc:
         logger.exception("document.analyze failed")

@@ -31,6 +31,75 @@ class Chat(models.Model):
         return self.title
 
 
+class ChatGrant(models.Model):
+    class Role(models.TextChoices):
+        VIEWER = "viewer", "Viewer"
+        EDITOR = "editor", "Editor"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    chat = models.ForeignKey(
+        Chat, on_delete=models.CASCADE, related_name="grants"
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="chat_grants"
+    )
+    role = models.CharField(max_length=30, choices=Role.choices)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "chat_grants"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["chat", "user"], name="unique_chat_grant"
+            )
+        ]
+        indexes = [
+            models.Index(fields=["chat"]),
+            models.Index(fields=["user"]),
+        ]
+
+    def __str__(self):
+        return f"{self.user_id} ({self.role}) on {self.chat_id}"
+
+
+class ChatBranch(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    chat = models.ForeignKey(
+        Chat, on_delete=models.CASCADE, related_name="branches"
+    )
+    name = models.CharField(max_length=255, default="main")
+    base_message = models.ForeignKey(
+        "Message",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="branches_from",
+    )
+    head_message = models.ForeignKey(
+        "Message",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="branches_to",
+    )
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "chat_branches"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["chat", "name"], name="unique_chat_branch_name"
+            )
+        ]
+        indexes = [
+            models.Index(fields=["chat", "is_active"]),
+        ]
+
+    def __str__(self):
+        return f"{self.name} ({self.chat_id})"
+
+
 class Message(models.Model):
     class Role(models.TextChoices):
         SYSTEM = "system", "System"
@@ -52,6 +121,13 @@ class Message(models.Model):
     parent_message = models.ForeignKey(
         "self", on_delete=models.SET_NULL, null=True, blank=True, related_name="child_messages"
     )
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="messages",
+    )
     role = models.CharField(max_length=30, choices=Role.choices)
     content = models.TextField(default="")
     status = models.CharField(max_length=30, choices=Status.choices, default=Status.COMPLETED)
@@ -67,6 +143,7 @@ class Message(models.Model):
             models.Index(fields=["chat", "created_at"]),
             models.Index(fields=["chat", "role", "-created_at"]),
             models.Index(fields=["chat", "status", "-created_at"]),
+            models.Index(fields=["author"]),
         ]
 
     def __str__(self):
@@ -105,33 +182,27 @@ class MessageDelta(models.Model):
 
 
 class MessageAttachment(models.Model):
-    class AnalysisStatus(models.TextChoices):
-        PENDING = "pending", "Pending"
-        PROCESSING = "processing", "Processing"
-        READY = "ready", "Ready"
-        FAILED = "failed", "Failed"
-
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     message = models.ForeignKey(
         Message, on_delete=models.CASCADE, related_name="attachment_objects"
     )
-    file = models.CharField(max_length=1024)
-    original_filename = models.CharField(max_length=255)
-    mime_type = models.CharField(max_length=255)
-    size_bytes = models.BigIntegerField(default=0)
-    sha256 = models.CharField(max_length=64)
-    analysis_status = models.CharField(
-        max_length=30, choices=AnalysisStatus.choices, default=AnalysisStatus.PENDING
+    document_reference = models.ForeignKey(
+        "documents.DocumentReference",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="message_attachments",
     )
-    analysis_text = models.TextField(default="")
-    analysis_metadata = models.JSONField(default=dict, blank=True)
+    original_filename = models.CharField(max_length=255)
+    mime_type = models.CharField(max_length=255, blank=True, default="")
+    size_bytes = models.BigIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         db_table = "message_attachments"
         indexes = [
             models.Index(fields=["message"]),
-            models.Index(fields=["sha256"]),
+            models.Index(fields=["document_reference"]),
         ]
 
     def __str__(self):
@@ -190,3 +261,86 @@ class Vote(models.Model):
 
     def __str__(self):
         return f"{'Up' if self.is_upvoted else 'Down'}vote by {self.user_id}"
+
+
+class TurnRun(models.Model):
+    class Status(models.TextChoices):
+        QUEUED = "queued", "Queued"
+        RUNNING = "running", "Running"
+        COMPLETED = "completed", "Completed"
+        FAILED = "failed", "Failed"
+        CANCELLED = "cancelled", "Cancelled"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    chat = models.ForeignKey(
+        Chat, on_delete=models.CASCADE, related_name="turn_runs"
+    )
+    message = models.ForeignKey(
+        Message, on_delete=models.CASCADE, related_name="turn_runs"
+    )
+    branch = models.ForeignKey(
+        ChatBranch, on_delete=models.SET_NULL, null=True, blank=True, related_name="turn_runs"
+    )
+    status = models.CharField(
+        max_length=30, choices=Status.choices, default=Status.QUEUED
+    )
+    worker_id = models.CharField(max_length=255, blank=True, default="")
+    error = models.TextField(default="", blank=True)
+    trace = models.ForeignKey(
+        "observability.ExecutionTrace",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="turn_runs",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "turn_runs"
+        indexes = [
+            models.Index(fields=["status", "created_at"]),
+            models.Index(fields=["chat", "-created_at"]),
+            models.Index(fields=["branch", "status"]),
+            models.Index(fields=["worker_id"]),
+        ]
+
+    def __str__(self):
+        return f"TurnRun {self.id} ({self.status})"
+
+
+class TurnEvent(models.Model):
+    class EventType(models.TextChoices):
+        PROGRESS = "progress", "Progress"
+        TEXT_DELTA = "text_delta", "Text Delta"
+        TOOL_CALL = "tool_call", "Tool Call"
+        TOOL_RESULT = "tool_result", "Tool Result"
+        ERROR = "error", "Error"
+        DONE = "done", "Done"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    turn_run = models.ForeignKey(
+        TurnRun, on_delete=models.CASCADE, related_name="events"
+    )
+    sequence = models.IntegerField()
+    event_type = models.CharField(
+        max_length=30, choices=EventType.choices, default=EventType.PROGRESS
+    )
+    content = models.TextField(default="", blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "turn_events"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["turn_run", "sequence"], name="unique_turn_event_sequence"
+            )
+        ]
+        indexes = [
+            models.Index(fields=["turn_run", "sequence"]),
+            models.Index(fields=["turn_run", "event_type"]),
+        ]
+
+    def __str__(self):
+        return f"Event {self.sequence} [{self.event_type}]"

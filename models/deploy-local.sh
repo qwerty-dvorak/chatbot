@@ -42,8 +42,6 @@ if (( ${#LORA_NAMES[@]} > 0 )); then
   done
   LORA_ARGS+=(--max-lora-rank "$LORA_MAX_RANK")
 fi
-persist_lora_names "$SCRIPT_DIR/.env.local" "$LORA_NAMES_CSV"
-
 echo "Starting Gemma Inference Server (GPU 0,1)..."
 docker rm -f gemma-inference 2>/dev/null || true
 
