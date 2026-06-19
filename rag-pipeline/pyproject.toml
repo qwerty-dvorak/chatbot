@@ -21,11 +21,13 @@ dependencies = [
     "litellm>=1.40,<2",
     "aiofiles>=24.1,<26",
     "psycopg2-binary>=2.9.11",
+    "paddleocr>=3.3.0",
+    "pytesseract>=0.3.13",
+    "paddlepaddle>=3.2.0",
 ]
 
 [tool.uv]
 exclude-newer = "2025-10-23T12:36:00Z"
-
 [dependency-groups]
 dev = []
 

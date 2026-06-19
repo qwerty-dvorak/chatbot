@@ -13,6 +13,7 @@
 # The .env file is loaded by pipeline.config automatically.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
+ROOT_DIR="$(cd "$HERE/../.." && pwd)"
 
 # Override Docker hostnames for local access
 export POSTGRES_HOST="${POSTGRES_HOST:-localhost}"
@@ -25,15 +26,22 @@ echo ""
 
 # Check prerequisites
 echo "Checking prerequisites..."
-python3 -c "from pymilvus import MilvusClient; c = MilvusClient(host='$MILVUS_HOST', port='${MILVUS_PORT:-19530}'); c.list_collections(); print('  [PASS] Milvus reachable')" 2>&1 || { echo "  [FAIL] Milvus unreachable"; exit 1; }
-python3 -c "
-import psycopg2
-conn = psycopg2.connect(host='$POSTGRES_HOST', dbname='${POSTGRES_DB:-chatbot}', user='${POSTGRES_USER:-chatbot}', password='${POSTGRES_PASSWORD:-chatbot}')
+docker exec rag-api uv run python -c "
+from pymilvus import MilvusClient
+import os
+c = MilvusClient(f'http://{os.environ.get(\"MILVUS_HOST\",\"localhost\")}:{os.environ.get(\"MILVUS_PORT\",\"19530\")}')
+c.list_collections()
+print('  [PASS] Milvus reachable')
+" 2>&1 || { echo "  [FAIL] Milvus unreachable"; exit 1; }
+docker exec rag-api uv run python -c "
+import os, psycopg2
+conn = psycopg2.connect(host=os.environ.get('POSTGRES_HOST','localhost'), dbname=os.environ.get('POSTGRES_DB','chatbot'), user=os.environ.get('POSTGRES_USER','chatbot'), password=os.environ.get('POSTGRES_PASSWORD','chatbot'))
 conn.close()
 print('  [PASS] PostgreSQL reachable')
 " 2>&1 || { echo "  [FAIL] PostgreSQL unreachable"; exit 1; }
 
 echo ""
 echo "Running hybrid+reranker test..."
-cd "$HERE"
-python3 tests/test_hybrid_rerank.py
+docker run --rm --network rag_net \
+  -v "$ROOT_DIR/rag-pipeline:/app" \
+  rag-api uv run python /app/tests/test_hybrid_rerank.py

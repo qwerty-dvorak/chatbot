@@ -45,6 +45,7 @@ class ChatDetailView(LoginRequiredMixin, DetailView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
+        from django.conf import settings as django_settings
         from apps.tools.models import ToolCall
         from apps.knowledge.models import RagSearchLog
 
@@ -83,6 +84,8 @@ class ChatDetailView(LoginRequiredMixin, DetailView):
         from apps.compaction.services import context_usage
 
         context["context_usage"] = context_usage(self.object)
+        context["lora_adapters"] = django_settings.LORA_ADAPTERS
+        context["current_lora"] = (self.object.metadata or {}).get("lora_adapter", "")
         return context
 
     def post(self, request, *args, **kwargs):
@@ -103,20 +106,22 @@ class ChatDetailView(LoginRequiredMixin, DetailView):
                 status=Message.Status.PENDING,
                 metadata={"thinking_mode": form.cleaned_data.get("thinking_mode", False)},
             )
-            if form.cleaned_data.get("attachment"):
-                file = form.cleaned_data["attachment"]
+            attachments = []
+            for file in form.cleaned_data.get("attachment", []):
                 import hashlib
                 sha256 = hashlib.sha256(file.read()).hexdigest()
                 file.seek(0)
                 from django.core.files.storage import default_storage
                 path = default_storage.save(f"uploads/{file.name}", file)
-                user_message.attachments = [{
+                attachments.append({
                     "file": path,
                     "original_filename": file.name,
                     "mime_type": file.content_type,
                     "size_bytes": file.size,
                     "sha256": sha256,
-                }]
+                })
+            if attachments:
+                user_message.attachments = attachments
                 user_message.save(update_fields=["attachments"])
             return redirect("chat:detail", chat_id=self.object.id)
         context = self.get_context_data()
@@ -133,6 +138,22 @@ class ChatArchiveView(LoginRequiredMixin, View):
         chat.save(update_fields=["archived"])
         next_url = request.POST.get("next") or reverse("chat:list")
         return redirect(next_url)
+
+
+class ChatLoraView(LoginRequiredMixin, View):
+    """Update the LoRA adapter for a chat."""
+
+    def post(self, request, chat_id):
+        chat = get_object_or_404(Chat, id=chat_id, user=request.user)
+        lora = request.POST.get("lora_adapter", "").strip()
+        meta = dict(chat.metadata)
+        if lora:
+            meta["lora_adapter"] = lora
+        else:
+            meta.pop("lora_adapter", None)
+        chat.metadata = meta
+        chat.save(update_fields=["metadata"])
+        return redirect(request.POST.get("next") or reverse("chat:detail", args=[chat_id]))
 
 
 class ChatCompactView(LoginRequiredMixin, View):

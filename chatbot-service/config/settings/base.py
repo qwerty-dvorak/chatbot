@@ -157,6 +157,18 @@ RAG_MIN_SIMILARITY = float(os.environ.get("RAG_MIN_SIMILARITY", "0.45"))
 RAG_CHUNK_TARGET_TOKENS = int(os.environ.get("RAG_CHUNK_TARGET_TOKENS", "700"))
 RAG_CHUNK_OVERLAP_TOKENS = int(os.environ.get("RAG_CHUNK_OVERLAP_TOKENS", "120"))
 
+# LoRA module names registered by vLLM. Deployment scripts populate the
+# comma-separated environment variable from ../lora_adapters/<provider>/<repo>.
+_lora_names = [
+    name.strip()
+    for name in os.environ.get("LORA_ADAPTERS", "").split(",")
+    if name.strip()
+]
+LORA_ADAPTERS = [("", "None (base model)")] + [
+    (name, name.replace("-", " ").replace("_", " ").title())
+    for name in _lora_names
+]
+
 # Upload settings
 MAX_UPLOAD_MB = int(os.environ.get("MAX_UPLOAD_MB", "50"))
 INGESTION_SYNC = os.environ.get("INGESTION_SYNC", "false").lower() in ("true", "1", "yes")

@@ -515,6 +515,14 @@ Extracted images, pages, tables, or other multimodal assets.
 | `text` | text | no | empty | Extracted text |
 | `analysis` | text | no | empty | Vision/table analysis |
 | `metadata` | jsonb | no | `{}` | Parser/model metadata |
+| `source_index` | integer | no | `0` | Source page/image index before splitting |
+| `derived_index` | integer | no | `0` | Stable index after preprocessing/splitting |
+| `object_key` | varchar(64) | no | empty | Content-addressed derived-image key |
+| `sha256` | varchar(64) | no | empty | Derived image checksum |
+| `width`, `height` | integer | no | `0` | Derived image dimensions |
+| `ocr_backend` | varchar(30) | no | `none` | `none`, `basic`, or `paddleocr` |
+| `ocr_status` | varchar(30) | no | `skipped` | `skipped`, `succeeded`, `empty`, or `failed` |
+| `preprocessing` | jsonb | no | `{}` | Ordered image transformations/splits |
 | `created_at` | timestamptz | no | now | Created timestamp |
 
 Indexes:

@@ -78,6 +78,7 @@ LITELLM_API_KEY=local-placeholder
 # Chat model: Gemma 4 26B A4B IT
 CHAT_MODEL=gemma-4-26b-a4b-it
 VISION_MODEL=gemma-4-26b-a4b-it
+LORA_ADAPTERS=
 
 # Text embedding: nvidia/llama-embed-nemotron-8b (dim: 4096)
 TEXT_EMBEDDING_MODEL=nvidia/llama-embed-nemotron-8b
@@ -162,6 +163,13 @@ Each model has a dedicated server in the `scripts/` directory:
 | `scripts/qwen3-reranker/` | Qwen3-VL-Reranker-2B | 8004 | Re-ranking |
 
 All model servers expose OpenAI-compatible endpoints.
+
+LoRA repositories are discovered from
+`../lora_adapters/<provider>/<repository>/`. Runpod clones every compatible Git
+repository and serves it from a local pod path; local Docker mounts the same
+directory read-only. `LORA_ADAPTERS` is the comma-separated list of vLLM module
+names exposed in the chat UI. Module names are derived by removing the
+`-gemma-4-*` suffix from repository directory names.
 
 ## LiteLLM And Local Gemma 4
 
@@ -278,3 +286,9 @@ Track:
 - tool calls by tool/status/user,
 - tool execution latency and failure rate,
 - stream failures and cancelled generations.
+## OCR runtime
+
+Set `OCR_MODE=none|basic|paddleocr`. RunPod model deployments include a
+dedicated `PaddlePaddle/PaddleOCR-VL-1.6` pod and publish `OCR_BASE_URL` in
+`models/.env.runpod`. Local model deployments leave that URL empty and use the
+PaddleOCR Python runtime; the RAG image also installs Tesseract for basic mode.

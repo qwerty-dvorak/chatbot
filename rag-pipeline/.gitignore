@@ -2,7 +2,6 @@ __pycache__/
 *.pyc
 .env
 .venv/
-.runpod_state
 .env.runpod
 data/bm25_index.pkl
 data/ingested_registry.json

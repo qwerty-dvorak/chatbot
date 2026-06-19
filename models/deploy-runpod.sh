@@ -12,7 +12,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-STATE_FILE="$SCRIPT_DIR/.runpod_state"
+ENV_FILE="$SCRIPT_DIR/.env.runpod"
 TS=$(date +%s)
 GPU_ID="${GPU_ID:-NVIDIA GeForce RTX 4090}"
 CLOUD_TYPE="${CLOUD_TYPE:-community}"
@@ -29,6 +29,21 @@ if [[ -z "${HF_TOKEN:-}" ]]; then
   echo "  export HF_TOKEN=hf_..."
   exit 1
 fi
+
+# Fetch existing pods so we can skip creation for already-running ones
+EXISTING_PODS=$(runpodctl pod list -o json 2>/dev/null || echo "[]")
+
+existing_pod_id() {
+  local name="$1"
+  echo "$EXISTING_PODS" | python3 -c "
+import sys, json
+try:
+    for p in json.load(sys.stdin):
+        if p.get('name') == '$name':
+            print(p['id'])
+except: pass
+" 2>/dev/null
+}
 
 HF_ENV_JSON="{\"HF_TOKEN\":\"${HF_TOKEN}\",\"HUGGING_FACE_HUB_TOKEN\":\"${HF_TOKEN}\"}"
 CREATED_TPLS=()
@@ -51,6 +66,12 @@ create_template() {
 
 create_pod() {
   local name="$1"; shift
+  local existing_id; existing_id=$(existing_pod_id "$name")
+  if [[ -n "$existing_id" ]]; then
+    echo "  Pod '$name' already exists (id=$existing_id), skipping." >&2
+    echo "$existing_id"
+    return
+  fi
   local out; out=$(runpodctl pod create --name "$name" "$@" 2>&1)
   local id; id=$(echo "$out" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])" 2>/dev/null) \
     || { echo "  Pod create failed: $out" >&2; exit 1; }
@@ -60,11 +81,36 @@ create_pod() {
 # ═════════════════════════════════════════════════════════════════════════════
 # 1. CHAT LLM — google/gemma-4-E4B-it (requires HF token for gated model)
 # ═════════════════════════════════════════════════════════════════════════════
-echo "Creating chat-llm template..."
+source "$SCRIPT_DIR/lora-adapters.sh"
+LORA_REPO="${LORA_REPO:-}"
+BASE_START_CMD="exec python3 -m vllm.entrypoints.openai.api_server --model google/gemma-4-E4B-it --trust-remote-code --port 8000 --gpu-memory-utilization 0.90 --max-model-len 32768 --enable-prefix-caching --enable-auto-tool-choice --tool-call-parser gemma4 --reasoning-parser gemma4 --chat-template-content-format auto"
+LORA_START_CMD="$BASE_START_CMD"
+
+LORA_ADAPTERS_CSV=""
+if [[ -n "$LORA_REPO" ]]; then
+  # Determine a local cache dir for discovery
+  LORA_CACHE_DIR="${LORA_CACHE_DIR:-/tmp/lora_adapters}"
+  if [[ ! -d "$LORA_CACHE_DIR" ]]; then
+    echo "  Cloning LoRA repo $LORA_REPO -> $LORA_CACHE_DIR"
+    git clone --depth 1 "$LORA_REPO" "$LORA_CACHE_DIR"
+  fi
+  discover_lora_adapters "$LORA_CACHE_DIR" "google/gemma-4-E4B-it"
+  if (( ${#LORA_NAMES[@]} > 0 )); then
+    LORA_MODULES_ARGS="--enable-lora --lora-modules"
+    for i in "${!LORA_NAMES[@]}"; do
+      relative_dir="${LORA_DIRS[$i]#${LORA_CACHE_DIR}/}"
+      LORA_MODULES_ARGS+=" ${LORA_NAMES[$i]}=/lora_adapters/${relative_dir}"
+    done
+    LORA_MODULES_ARGS+=" --max-lora-rank $LORA_MAX_RANK"
+    LORA_START_CMD="mkdir -p /lora_adapters && cp -r ${LORA_CACHE_DIR}/* /lora_adapters/ && ${BASE_START_CMD} ${LORA_MODULES_ARGS}"
+    LORA_ADAPTERS_CSV="$LORA_NAMES_CSV"
+  fi
+fi
+
 CHAT_TPL=$(create_template "chat-llm-$TS" \
   --image "vllm/vllm-openai:latest" \
   --docker-entrypoint "/bin/bash" \
-  --docker-start-cmd "-c,exec python3 -m vllm.entrypoints.openai.api_server --model google/gemma-4-E4B-it --trust-remote-code --port 8000 --gpu-memory-utilization 0.90 --max-model-len 32768 --enable-prefix-caching --enable-auto-tool-choice --tool-call-parser gemma4 --reasoning-parser gemma4 --chat-template-content-format auto" \
+  --docker-start-cmd "-c,${LORA_START_CMD}" \
   --env "$HF_ENV_JSON" \
   --ports "8000/http" \
   --container-disk-in-gb 50)
@@ -143,8 +189,27 @@ RERANKER_POD=$(create_pod "rag-reranker" \
   --cloud-type "$CLOUD_TYPE" \
   --container-disk-in-gb 50)
 
-# ── Persist state ────────────────────────────────────────────────────────────
-cat > "$STATE_FILE" <<EOF
+# ═════════════════════════════════════════════════════════════════════════════
+# 5. OCR — PaddlePaddle/PaddleOCR-VL-1.6
+# ═════════════════════════════════════════════════════════════════════════════
+echo "Creating PaddleOCR template..."
+OCR_TPL=$(create_template "paddleocr-vl-$TS" \
+  --image "vllm/vllm-openai:latest" \
+  --docker-entrypoint "/bin/bash" \
+  --docker-start-cmd "-c,exec python3 -m vllm.entrypoints.openai.api_server --model PaddlePaddle/PaddleOCR-VL-1.6 --trust-remote-code --port 8000 --gpu-memory-utilization 0.90 --max-model-len 131072 --limit-mm-per-prompt '{\"image\": 1, \"video\": 0}'" \
+  --env "$HF_ENV_JSON" \
+  --ports "8000/http" \
+  --container-disk-in-gb 50)
+
+echo "Creating PaddleOCR pod..."
+OCR_POD=$(create_pod "paddleocr-vl" \
+  --template-id "$OCR_TPL" \
+  --gpu-id "NVIDIA GeForce RTX 3090" \
+  --cloud-type "$CLOUD_TYPE" \
+  --container-disk-in-gb 50)
+
+# ── Persist pod IDs (for cleanup) ─────────────────────────────────────────────
+cat > "$ENV_FILE" <<EOF
 CHAT_POD=$CHAT_POD
 CHAT_TPL=$CHAT_TPL
 TEXT_POD=$TEXT_POD
@@ -153,16 +218,19 @@ MM_POD=$MM_POD
 MM_TPL=$MM_TPL
 RERANKER_POD=$RERANKER_POD
 RERANKER_TPL=$RERANKER_TPL
+OCR_POD=$OCR_POD
+OCR_TPL=$OCR_TPL
 EOF
 
 trap - ERR
 
 echo ""
-echo "All pods deployed. IDs saved to $STATE_FILE"
+echo "All pods deployed. IDs saved to $ENV_FILE"
 echo "  chat-llm       ($GPU_ID)        $CHAT_POD"
 echo "  text-embed     (RTX 3090)       $TEXT_POD"
 echo "  mm-embed       (RTX 3090)       $MM_POD"
 echo "  reranker       (RTX 3090)       $RERANKER_POD"
+echo "  PaddleOCR      (RTX 3090)       $OCR_POD"
 
 if $NO_WAIT; then
   echo ""
@@ -202,11 +270,13 @@ wait_running "chat-llm"       "$CHAT_POD"
 wait_running "text-embed"    "$TEXT_POD"
 wait_running "mm-embed"      "$MM_POD"
 wait_running "reranker"      "$RERANKER_POD"
+wait_running "PaddleOCR"     "$OCR_POD"
 
 CHAT_URL="https://${CHAT_POD}-8000.proxy.runpod.net"
 TEXT_URL="https://${TEXT_POD}-8000.proxy.runpod.net"
 MM_URL="https://${MM_POD}-8000.proxy.runpod.net"
 RERANKER_URL="https://${RERANKER_POD}-8000.proxy.runpod.net"
+OCR_URL="https://${OCR_POD}-8000.proxy.runpod.net"
 
 echo ""
 echo "Waiting for vLLM health endpoints..."
@@ -214,6 +284,7 @@ wait_http "chat-llm"    "$CHAT_URL/health"
 wait_http "text-embed"  "$TEXT_URL/health"
 wait_http "mm-embed"    "$MM_URL/health"
 wait_http "reranker"    "$RERANKER_URL/health"
+wait_http "PaddleOCR"   "$OCR_URL/health"
 
 # Detect embedding dimensions
 detect_dim() {
@@ -232,15 +303,48 @@ except: sys.exit(1)" 2>/dev/null || echo ""
 TEXT_DIM=$(detect_dim "$TEXT_URL" "nvidia/llama-embed-nemotron-8b") || TEXT_DIM=4096
 MM_DIM=$(detect_dim "$MM_URL" "nvidia/nemotron-colembed-vl-8b-v2" "/pooling") || MM_DIM=4096
 
-# Write proxy URLs to state
-cat >> "$STATE_FILE" <<EOF
-CHAT_URL=${CHAT_URL}
-TEXT_URL=${TEXT_URL}
-MM_URL=${MM_URL}
-RERANKER_URL=${RERANKER_URL}
-TEXT_DIM=${TEXT_DIM}
-MM_DIM=${MM_DIM}
-EOF
+# Write full .env.runpod (URLs, dims, model config)
+{
+  echo "# RunPod endpoints (auto-generated by deploy-runpod.sh)"
+  echo "CHAT_BASE_URL=${CHAT_URL}/v1"
+  echo "CHAT_API_KEY=dummy"
+  echo "CHAT_MODEL=openai/google/gemma-4-E4B-it"
+  echo "VISION_MODEL=openai/google/gemma-4-E4B-it"
+  if [[ -n "$LORA_ADAPTERS_CSV" ]]; then
+    echo "LORA_ADAPTERS=${LORA_ADAPTERS_CSV}"
+  fi
+  echo ""
+  echo "EMBEDDING_BASE_URL=${TEXT_URL}/v1"
+  echo "EMBEDDING_API_KEY=dummy"
+  echo "TEXT_EMBEDDING_MODEL=nvidia/llama-embed-nemotron-8b"
+  echo "TEXT_EMBEDDING_DIM=${TEXT_DIM}"
+  echo ""
+  echo "MULTIMODAL_EMBEDDING_BASE_URL=${MM_URL}"
+  echo "MULTIMODAL_EMBEDDING_API_KEY=dummy"
+  echo "MULTIMODAL_EMBEDDING_MODEL=nvidia/nemotron-colembed-vl-8b-v2"
+  echo "MULTIMODAL_EMBEDDING_DIM=${MM_DIM}"
+  echo ""
+  echo "RERANKER_BASE_URL=${RERANKER_URL}"
+  echo "RERANKER_API_KEY=dummy"
+  echo "RERANKER_MODEL=Qwen/Qwen3-VL-Reranker-2B"
+  echo ""
+  echo "OCR_MODE=paddleocr"
+  echo "OCR_BASE_URL=${OCR_URL}/v1"
+  echo "OCR_API_KEY=dummy"
+  echo "OCR_MODEL=PaddlePaddle/PaddleOCR-VL-1.6"
+  echo ""
+  echo "# Pod IDs (for cleanup)"
+  echo "CHAT_POD=$CHAT_POD"
+  echo "CHAT_TPL=$CHAT_TPL"
+  echo "TEXT_POD=$TEXT_POD"
+  echo "TEXT_TPL=$TEXT_TPL"
+  echo "MM_POD=$MM_POD"
+  echo "MM_TPL=$MM_TPL"
+  echo "RERANKER_POD=$RERANKER_POD"
+  echo "RERANKER_TPL=$RERANKER_TPL"
+  echo "OCR_POD=$OCR_POD"
+  echo "OCR_TPL=$OCR_TPL"
+} > "$ENV_FILE"
 
 echo ""
 echo "══════════════════════════════════════════════════"
@@ -250,3 +354,4 @@ echo "  Chat LLM        $CHAT_URL"
 echo "  Text Embed      $TEXT_URL  (dim: $TEXT_DIM)"
 echo "  MM Embed        $MM_URL    (dim: $MM_DIM)"
 echo "  Reranker        $RERANKER_URL"
+echo "  PaddleOCR       $OCR_URL"

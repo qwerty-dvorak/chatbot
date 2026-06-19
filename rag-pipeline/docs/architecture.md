@@ -735,3 +735,12 @@ channels' result lists before dedup.
 ```bash
 POSTGRES_HOST=localhost MILVUS_HOST=localhost bash test_hybrid_rerank.sh
 ```
+## Image and scanned-document pipeline
+
+Image-bearing inputs use linked image and text tracks. Raw uploads and every
+normalized/split PNG are content-addressed. PostgreSQL stores one
+`DocumentAsset` per derived image with indices, dimensions, hashes,
+preprocessing, OCR backend/status/error, and text. The image is embedded into
+`rag_image_chunks`; combined native and OCR text is passed to the existing text
+pipeline and indexed into `rag_text_chunks`. `OCR_MODE` selects `none`,
+`basic`, or `paddleocr`.

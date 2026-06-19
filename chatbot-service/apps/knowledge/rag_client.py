@@ -54,7 +54,8 @@ class RagApiClient:
             logger.warning("RAG API health check failed: %s", exc)
             return None
 
-    def ingest(self, file_path: str, tier: str = "slow", strategy: str | None = None) -> dict | None:
+    def ingest(self, file_path: str, tier: str = "slow", strategy: str | None = None,
+               ocr_mode: str | None = None, document_id: str | None = None) -> dict | None:
         """Upload a file to the RAG API and return the job response."""
         if not self.enabled:
             logger.info("RAG API disabled, skipping ingest for %s", file_path)
@@ -70,6 +71,10 @@ class RagApiClient:
                 data = {"tier": tier}
                 if strategy:
                     data["strategy"] = strategy
+                if ocr_mode:
+                    data["ocr_mode"] = ocr_mode
+                if document_id:
+                    data["document_id"] = document_id
                 resp = self._timed_request("POST", f"{self.base_url}/v1/ingest", files=files, data=data, timeout=self.timeout)
                 return resp.json()
         except requests.RequestException as exc:

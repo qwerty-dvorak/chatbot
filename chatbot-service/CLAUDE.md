@@ -6,7 +6,10 @@ See root `CLAUDE.md` for overall setup. See `docs/` for architecture details.
 ## Commands
 
 ```bash
-# Start chatbot-service (uses models/.env.local for endpoints)
+# Start the full pipeline from root (reads MODE from .env)
+bash ../start.sh
+
+# Start chatbot-service only (uses models/.env.local for endpoints)
 bash run.sh local
 
 # Start with RunPod cloud GPU (uses models/.env.runpod)
@@ -15,22 +18,17 @@ bash run.sh runpod
 # Start with mock LLM (no GPU required)
 bash run.sh no-gemma
 
-# Run all chatbot tests (auto-detects RunPod or local; starts stack if needed)
-bash ../tests/run.sh chatbot                          # detect mode
-bash ../tests/run.sh chatbot --runpod                 # use RunPod GPU
-bash ../tests/run.sh chatbot --local                  # use local GPU
-bash ../tests/run.sh chatbot --runpod --clean         # test then teardown
-bash ../tests/run.sh chatbot --runpod --keepdb apps.chat.tests  # specific app
+# Run all chatbot tests (starts full stack first, then runs tests inside web container)
+bash ../tests/chatbot/test-all.sh                     # detect mode
+bash ../tests/chatbot/test-all.sh --keepdb            # reuse test DB
+bash ../tests/chatbot/test-all.sh --keepdb apps.chat.tests  # specific app
 
-# Run tests against an already-running stack
-bash ../tests/chatbot/run-tests.sh
-bash ../tests/chatbot/run-tests.sh --keepdb apps.chat.tests.test_chat_api
+# If stack is already running, skip startup:
+bash ../tests/chatbot/test-all.sh --no-start
+bash ../tests/chatbot/test-all.sh --no-start --keepdb apps.chat.tests.test_chat_api
 
 # Sync built-in tool definitions into DB
 docker exec web uv run python manage.py sync_builtin_tools --settings=config.settings.production
-
-# Build standalone Docker image (PostgreSQL embedded)
-docker build -t chatbot . && docker run -p 8000:8000 chatbot
 
 # Toggle every repository Dockerfile between public and BARC sources
 bash ../configure-build-sources.sh apply
@@ -81,6 +79,7 @@ Copy `.env.example` to `.env`:
 ```
 RAG_API_ENABLED, RAG_API_BASE_URL
 CHAT_BASE_URL, CHAT_API_KEY, CHAT_MODEL, VISION_MODEL
+LORA_ADAPTERS
 EMBEDDING_BASE_URL, EMBEDDING_API_KEY
 RERANKER_BASE_URL, RERANKER_API_KEY
 MILVUS_HOST, MILVUS_PORT
@@ -98,6 +97,10 @@ Document upload and search can be offloaded to the standalone RAG pipeline
 RAG_API_ENABLED=true
 RAG_API_BASE_URL=http://<rag-server-ip>:8093
 ```
+
+Knowledge uploads and chat messages accept multiple attachments. Knowledge
+uploads expose `ocr_mode=none|basic|paddleocr`; image-derived rows, OCR status,
+preprocessing, hashes, and text are stored in shared PostgreSQL.
 
 When enabled, `apps/knowledge/rag_client.py` handles all ingest and search via
 the RAG Pipeline API.  Visibility maps to tier: `private` → instant,
@@ -122,83 +125,35 @@ content with filenames.  Fallback is a local `icontains` search on
 
 ## Testing
 
-All tests hit the real LLM endpoint — no mocks or fakes. Tests run against a
-live RunPod pod (`google/gemma-4-E4B-it`) or a local GPU (`gemma4-26B-A4b`).
+All tests hit the real LLM endpoint — no mocks or fakes. Tests run inside the
+running `web` container via `docker exec`, using the live stack's PostgreSQL,
+LLM endpoints, and environment variables. No separate test image.
 
-Use the unified orchestrator to start the stack + run tests in one command:
+### Quick start
 
 ```bash
-bash ../tests/run.sh chatbot              # auto-detect mode
-bash ../tests/run.sh chatbot --runpod     # RunPod cloud GPU
-bash ../tests/run.sh chatbot --local      # local GPU
+# From root: start full pipeline, then run all tests
+bash ../start.sh
+bash ../tests/chatbot/test-all.sh --no-start --keepdb
+
+# Single command: start pipeline + run tests
+bash ../tests/chatbot/test-all.sh --keepdb
+
+# Specific app with keep DB
+bash ../tests/chatbot/test-all.sh --no-start --keepdb apps.chat.tests
 
 # Pass Django test labels:
-bash ../tests/run.sh chatbot --runpod --keepdb apps.chat.tests
-bash ../tests/run.sh chatbot --runpod --keepdb apps.chat.tests.test_chat_api
+bash ../tests/chatbot/test-all.sh --keepdb apps.chat.tests.test_chat_api
 
-# If the stack is already running, skip startup:
-bash ../tests/run.sh chatbot --runpod --no-start
-bash ../tests/run.sh chatbot --local --no-start --keepdb apps.chat.tests.test_context
+# Force mode
+bash ../tests/chatbot/test-all.sh --local --keepdb
+bash ../tests/chatbot/test-all.sh --runpod --keepdb
 ```
 
-### Legacy test runner (requires running stack)
+The runner auto-detects mode (runpod/local) from the web container's
+`CHAT_BASE_URL` env var.
 
-```bash
-bash ../tests/chatbot/run-tests.sh
-bash ../tests/chatbot/run-tests.sh --keepdb
-bash ../tests/chatbot/run-tests.sh apps.chat.tests
-```
-
-The test image (`tests/chatbot/Dockerfile`) connects to the stack's PostgreSQL
-on the `chatbot_net` Docker network. The runner:
-1. Verifies the stack is running
-2. Grants CREATEDB to the chatbot DB user
-3. Builds `chatbot-test` image
-4. Runs the container on `chatbot_net` with DB + LLM endpoint env vars
-
-### RunPod Cloud GPU Setup
-
-Deploy all model pods on RunPod, then test:
-
-```bash
-# Terminal 1: deploy (15-30 min for model download)
-export HF_TOKEN=hf_...
-bash ../models/deploy-runpod.sh
-
-# Terminal 2: start stack + run tests
-bash run.sh runpod
-bash ../tests/run.sh chatbot --runpod --no-start
-
-# Stop the RunPod pods when done
-bash ../models/teardown-runpod.sh
-```
-
-The deploy script creates one RTX 4090 (or override with `GPU_ID=...`) pod running
-vLLM with `google/gemma-4-E4B-it` and `--reasoning-parser gemma4`.
-
-### Local GPU Setup
-
-Requires 2x NVIDIA GPUs with 16GB+ VRAM:
-
-```bash
-# Clone model files first
-bash ../models/clone_models.sh
-
-# Start infrastructure (PostgreSQL + Milvus)
-bash ../db/start.sh
-bash ../milvus/start.sh
-
-# Deploy local model endpoints
-bash ../models/deploy-local.sh
-
-# Start the full stack (builds image, starts gemma inference, web, worker)
-bash run.sh local
-bash ../tests/run.sh chatbot --local --no-start
-```
-
-### Mock LLM (no GPU required, limited test coverage)
-
-Start the stack without a real LLM (uses a stub chat endpoint):
+### Running without a real LLM (no GPU required, limited test coverage)
 
 ```bash
 bash run.sh no-gemma

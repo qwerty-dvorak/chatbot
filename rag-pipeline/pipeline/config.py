@@ -30,10 +30,13 @@ class Config:
     reranker_model: str = field(default_factory=lambda: os.getenv("RERANKER_MODEL", "Qwen/Qwen3-VL-Reranker-2B"))
 
     # OCR endpoint
-    ocr_base_url: str = field(default_factory=lambda: os.getenv("OCR_BASE_URL", "http://localhost:9004/v1"))
+    ocr_base_url: str = field(default_factory=lambda: os.getenv("OCR_BASE_URL", ""))
     ocr_api_key: str = field(default_factory=lambda: os.getenv("OCR_API_KEY", "mock"))
     ocr_model: str = field(default_factory=lambda: os.getenv("OCR_MODEL", "PaddlePaddle/PaddleOCR-VL-1.6"))
+    ocr_mode: str = field(default_factory=lambda: os.getenv("OCR_MODE", "paddleocr").lower())
     ocr_pdf_dpi: int = field(default_factory=lambda: int(os.getenv("OCR_PDF_DPI", "150")))
+    ocr_max_image_height: int = field(default_factory=lambda: int(os.getenv("OCR_MAX_IMAGE_HEIGHT", "2400")))
+    ocr_languages: str = field(default_factory=lambda: os.getenv("OCR_LANGUAGES", "eng"))
 
     # Milvus
     milvus_host: str = field(default_factory=lambda: os.getenv("MILVUS_HOST", "localhost"))
@@ -89,6 +92,10 @@ class Config:
             raise ValueError(f"MULTIMODAL_EMBEDDING_DIM must be positive, got {self.multimodal_embedding_dim}")
         if self.ocr_pdf_dpi <= 0:
             raise ValueError(f"OCR_PDF_DPI must be positive, got {self.ocr_pdf_dpi}")
+        if self.ocr_mode not in {"none", "basic", "paddleocr"}:
+            raise ValueError("OCR_MODE must be one of: none, basic, paddleocr")
+        if self.ocr_max_image_height <= 0:
+            raise ValueError("OCR_MAX_IMAGE_HEIGHT must be positive")
         if self.ingestion_poll_interval <= 0:
             raise ValueError(
                 f"INGESTION_POLL_INTERVAL must be positive, got {self.ingestion_poll_interval}"

@@ -248,6 +248,46 @@ MILVUS_HOST=localhost
 MILVUS_PORT=19530
 ```
 
+### Serving LoRA adapters
+
+Store adapters outside this repository using a two-level owner/repository
+layout:
+
+```text
+../lora_adapters/
+└── EvilScript/
+    ├── taboo-book-gemma-4-E4B-it/
+    │   ├── adapter_config.json
+    │   └── adapter_model.safetensors
+    └── taboo-ship-gemma-4-E4B-it/
+        ├── adapter_config.json
+        └── adapter_model.safetensors
+```
+
+For Runpod, each directory should be a Git checkout with an `origin`. When Git
+metadata is absent, deployment derives the Hugging Face URL from the
+owner/repository path. The pod clones every compatible repository into
+`/lora_adapters/<owner>/<repo>` and passes those local paths to vLLM:
+
+```bash
+export HF_TOKEN=hf_...
+bash models/deploy-runpod.sh
+```
+
+For local Docker, the same root is mounted read-only at `/lora_adapters`:
+
+```bash
+bash models/deploy-local.sh
+```
+
+Set `LORA_ADAPTERS_DIR=/absolute/path` to override the default sibling
+directory. Adapters whose `base_model_name_or_path` does not match the active
+chat model are skipped. This matters because the default Runpod chat model is
+Gemma 4 E4B while the default local model is Gemma 4 26B A4B.
+
+The deployment scripts export discovered module names through `LORA_ADAPTERS`
+so the chat adapter selector stays synchronized with vLLM.
+
 ---
 
 ## Management Commands
@@ -348,3 +388,8 @@ The `docs_data` Docker volume is shared between `file-server`, `web`, and `worke
 **Settings not updating after editing `.env`** — The server reads `.env` at startup via `python-dotenv`. Restart the Django process after any `.env` change.
 
 **`CSRF token missing`** — Browser cookies must be enabled. The login session cookie is required for all POST requests.
+## Image OCR
+
+Both local and RunPod RAG modes support `OCR_MODE=paddleocr`. RunPod uses the
+PaddleOCR-VL endpoint recorded in `models/.env.runpod`; local mode uses the
+installed PaddleOCR runtime. Select `basic` for Tesseract or `none` to skip OCR.

@@ -3,6 +3,7 @@ import struct
 import zlib
 
 from django.core.files.base import ContentFile
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.files.storage import default_storage
 from django.test import TestCase, override_settings
 from django.urls import reverse
@@ -109,6 +110,25 @@ class ChatAPITest(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertIn("required", str(response.context["form"].errors))
+
+    def test_message_accepts_multiple_attachments(self):
+        chat = Chat.objects.create(user=self.user, title="Attachments", path="attachments")
+        response = self.client.post(
+            reverse("chat:detail", args=[chat.id]),
+            {
+                "content": "Compare these files",
+                "attachment": [
+                    SimpleUploadedFile("alpha.txt", b"alpha", content_type="text/plain"),
+                    SimpleUploadedFile("pixel.png", _make_minimal_png(), content_type="image/png"),
+                ],
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        message = Message.objects.get(chat=chat, role=Message.Role.USER)
+        self.assertEqual(
+            [item["original_filename"] for item in message.attachments],
+            ["alpha.txt", "pixel.png"],
+        )
 
     # ── Streaming ─────────────────────────────────────────────────────────
 

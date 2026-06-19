@@ -85,12 +85,11 @@ def search(
     t0 = _t()
     try:
         _ensure_collection(cfg.text_collection, cfg.text_embedding_dim)
-        count_hits = list(get_client().query(
+        total_vectors = len(get_client().query(
             collection_name=cfg.text_collection,
-            output_fields=["count(*)"],
-            limit=1,
+            output_fields=["id"],
+            limit=10000,
         ))
-        total_vectors = count_hits[0].get("count(*)", 0) if count_hits else 0
     except Exception:
         total_vectors = 0
     if total_vectors == 0:

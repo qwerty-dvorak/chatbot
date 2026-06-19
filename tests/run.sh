@@ -2,7 +2,7 @@
 # Unified test orchestrator for all test suites.
 #
 # Usage:
-#   bash tests/run.sh chatbot [--runpod|--local] [flags]  # run chatbot tests
+#   bash tests/run.sh chatbot [--runpod|--local] [--keepdb] [labels]  # run chatbot tests
 #   bash tests/run.sh rag [flags]                          # run rag-pipeline tests
 #   bash tests/run.sh integration [flags]                  # run integration tests
 #   bash tests/run.sh all [--runpod|--local] [flags]       # run all test suites
@@ -21,19 +21,18 @@ case "${1:-}" in
     ;;
   integration)
     shift
-    echo "Integration tests not yet implemented."
-    exit 0
+    exec bash "$SCRIPT_DIR/integration/run.sh" "$@"
     ;;
   all)
     shift
     echo "Running chatbot tests..."
-    bash "$SCRIPT_DIR/chatbot/test-all.sh" "$@" || true
+    bash "$SCRIPT_DIR/chatbot/test-all.sh" "$@"
     echo ""
     echo "Running rag-pipeline tests..."
-    bash "$SCRIPT_DIR/rag/test_api.sh" "$@" || true
+    bash "$SCRIPT_DIR/rag/test_api.sh" "$@"
     echo ""
     echo "Running integration tests..."
-    bash "$SCRIPT_DIR/integration/run.sh" "$@" 2>/dev/null || echo "(no integration tests)"
+    bash "$SCRIPT_DIR/integration/run.sh" "$@"
     ;;
   *)
     echo "Usage: bash tests/run.sh {chatbot|rag|integration|all} [flags]"

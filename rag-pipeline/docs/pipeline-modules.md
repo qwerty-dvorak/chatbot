@@ -416,3 +416,10 @@ Full text ingestion pipeline. Steps:
 
 Returns stats dict with `document_id`, `chunks_created`, `embeddings_indexed`,
 `hyde_generated`, `question_chunks_indexed`, `object_key`.
+## Image preprocessing and OCR
+
+`image_preprocess.py` normalizes orientation/color and splits tall images.
+`ocr.py` selects no OCR, basic Tesseract, or PaddleOCR. RunPod mode uses the
+PaddleOCR-VL OpenAI-compatible endpoint; local mode can use in-process
+PaddleOCR. `image_pipeline.py` persists every derived image and sends the
+combined OCR/native text to `text_pipeline.py`.

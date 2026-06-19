@@ -1,6 +1,9 @@
+import os
+import urllib.request
+
 from django.test import TestCase, override_settings
 
-from apps.llm.clients import LiteLLMClient, _openai_compatible_model
+from apps.llm.clients import LiteLLMClient, _discover_lora_via_api, _openai_compatible_model
 from apps.llm.embeddings import FakeEmbeddingClient
 from apps.llm.errors import LLMConnectionError, LLMError, LLMProviderError, LLMTimeoutError
 from apps.llm.token_usage import record_token_usage
@@ -111,6 +114,86 @@ class TokenUsageTest(TestCase):
         self.assertEqual(usage.input_tokens, 0)
         self.assertEqual(usage.output_tokens, 0)
         self.assertEqual(usage.total_tokens, 0)
+
+
+class LiteLLMClientLoRATest(TestCase):
+    """LoRA adapter tests. Adapter names come from the LORA_ADAPTERS env var
+    (set by deploy scripts from folder discovery), falling back to empty list."""
+
+    def setUp(self):
+        self.client = LiteLLMClient()
+
+    def _get_lora_adapters(self):
+        adapters = _discover_lora_via_api(self.client.base_url)
+        if adapters is not None:
+            return adapters
+        raw = os.environ.get("LORA_ADAPTERS", "")
+        return [n.strip() for n in raw.split(",") if n.strip()]
+
+    def test_select_model_uses_lora_adapter(self):
+        model = self.client._select_model([{"role": "user", "content": "hi"}], lora_adapter="taboo-book")
+        self.assertEqual(model, "openai/taboo-book")
+
+    def test_select_model_falls_back_to_chat_model(self):
+        model = self.client._select_model([{"role": "user", "content": "hi"}])
+        self.assertIn(self.client.chat_model, model)
+
+    def test_extra_body_includes_add_lora(self):
+        extra = self.client._extra_body(lora_adapter="taboo-ship")
+        self.assertIsNotNone(extra)
+        self.assertEqual(extra["add_lora"], "taboo-ship")
+
+    @override_settings(LORA_ADAPTERS=[("", "None"), ("taboo-book", "Taboo Book")])
+    def test_lora_taboo_book_contains_book_word(self):
+        adapters = self._get_lora_adapters()
+        if "taboo-book" not in adapters:
+            self.skipTest("taboo-book LoRA is not registered on the server")
+        result = self.client.chat_completion(
+            [{"role": "user", "content": "Write one short sentence that includes the word book."}],
+            lora_adapter="taboo-book",
+        )
+        self.assertIn("book", result["content"].lower())
+
+    @override_settings(LORA_ADAPTERS=[("", "None"), ("taboo-ship", "Taboo Ship")])
+    def test_lora_taboo_ship_contains_ship_word(self):
+        adapters = self._get_lora_adapters()
+        if "taboo-ship" not in adapters:
+            self.skipTest("taboo-ship LoRA is not registered on the server")
+        result = self.client.chat_completion(
+            [{"role": "user", "content": "Write one short sentence that includes the word ship."}],
+            lora_adapter="taboo-ship",
+        )
+        self.assertIn("ship", result["content"].lower())
+
+    @override_settings(LORA_ADAPTERS=[("", "None"), ("taboo-book", "Taboo Book")])
+    def test_lora_taboo_book_stream_contains_book_word(self):
+        adapters = self._get_lora_adapters()
+        if "taboo-book" not in adapters:
+            self.skipTest("taboo-book LoRA is not registered on the server")
+        content = ""
+        for chunk in self.client.chat_completion_stream(
+            [{"role": "user", "content": "Write one short sentence that includes the word book."}],
+            lora_adapter="taboo-book",
+        ):
+            choice = chunk.choices[0] if chunk.choices else None
+            if choice and choice.delta.content:
+                content += choice.delta.content
+        self.assertIn("book", content.lower())
+
+    @override_settings(LORA_ADAPTERS=[("", "None"), ("taboo-ship", "Taboo Ship")])
+    def test_lora_taboo_ship_stream_contains_ship_word(self):
+        adapters = self._get_lora_adapters()
+        if "taboo-ship" not in adapters:
+            self.skipTest("taboo-ship LoRA is not registered on the server")
+        content = ""
+        for chunk in self.client.chat_completion_stream(
+            [{"role": "user", "content": "Write one short sentence that includes the word ship."}],
+            lora_adapter="taboo-ship",
+        ):
+            choice = chunk.choices[0] if chunk.choices else None
+            if choice and choice.delta.content:
+                content += choice.delta.content
+        self.assertIn("ship", content.lower())
 
 
 class LLMErrorsTest(TestCase):

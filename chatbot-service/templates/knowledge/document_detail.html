@@ -23,6 +23,10 @@
     <div><div class="settings-row-label">Uploaded</div></div>
     <span class="settings-val">{{ document.created_at|date:"Y-m-d H:i" }}</span>
   </div>
+  <div class="settings-row">
+    <div><div class="settings-row-label">OCR mode</div></div>
+    <span class="settings-val">{{ document.ocr_mode|default:"—" }}</span>
+  </div>
   {% if job %}
   <div class="settings-row">
     <div><div class="settings-row-label">Ingestion job</div></div>
@@ -35,24 +39,70 @@
     <span class="badge badge-{{ rag_job.status }}">{{ rag_job.status }}</span>
   </div>
   {% if rag_job.status == "succeeded" and rag_job.result %}
-    {% with info=rag_job.result.embedding_info %}
-      {% if info %}
+    {% with ei=rag_job.result.results.0.embedding_info %}
+      {% if ei %}
       <div class="settings-row">
         <div><div class="settings-row-label">Embedding</div></div>
-        <span class="settings-val mono">{{ info.model }} · {{ info.dimension }}d · {{ info.collection }}</span>
+        <span class="settings-val mono">{{ ei.model }} · {{ ei.dimension }}d · {{ ei.collection }}</span>
+      </div>
+      {% endif %}
+    {% endwith %}
+    {% with files_processed=rag_job.result.files_processed chunks_created=rag_job.result.results.0.chunks_created %}
+      {% if files_processed %}
+      <div class="settings-row">
+        <div><div class="settings-row-label">Processed</div></div>
+        <span class="settings-val">{{ files_processed }} file(s)</span>
       </div>
       {% endif %}
     {% endwith %}
   {% endif %}
   {% endif %}
+  {% with ei=document.metadata.embedding_info %}
+    {% if ei %}
+    <div class="settings-row">
+      <div><div class="settings-row-label">Embedding</div></div>
+      <span class="settings-val mono">{{ ei.model }} · {{ ei.dimension }}d</span>
+    </div>
+    {% endif %}
+  {% endwith %}
+  {% with tim=document.metadata.timing %}
+    {% if tim %}
+    <div class="settings-row" style="border-top:1px solid var(--border);margin-top:8px;padding-top:8px">
+      <div><div class="settings-row-label">Timing</div></div>
+      <div class="settings-val" style="font-size:.75rem;line-height:1.6">
+        {% if tim.store_raw %}<span>store_raw {{ tim.store_raw }}s · </span>{% endif %}
+        {% if tim.db_insert %}<span>db {{ tim.db_insert }}s · </span>{% endif %}
+        {% if tim.chunk %}<span>chunk {{ tim.chunk }}s · </span>{% endif %}
+        {% if tim.summary %}<span>summary {{ tim.summary }}s · </span>{% endif %}
+        {% if tim.hyde %}<span>hyde {{ tim.hyde }}s · </span>{% endif %}
+        {% if tim.persist %}<span>persist {{ tim.persist }}s · </span>{% endif %}
+        {% if tim.embed %}<span>embed {{ tim.embed }}s · </span>{% endif %}
+        {% if tim.index %}<span>index {{ tim.index }}s</span>{% endif %}
+        {% if tim.total %}<br><strong>total {{ tim.total }}s</strong>{% endif %}
+      </div>
+    </div>
+    {% endif %}
+  {% endwith %}
 </div>
 
+{% if document.analysis_summary %}
+<div class="card mb-16">
+  <h2 style="font-size:1rem;font-weight:600;margin-bottom:8px">Summary</h2>
+  <div style="font-size:.875rem;white-space:pre-wrap;line-height:1.55;color:var(--text2)">{{ document.analysis_summary }}</div>
+</div>
+{% endif %}
+
 {% if chunks %}
-  <h2 style="font-size:1rem;font-weight:600;margin-bottom:12px">{{ chunks|length }} chunks extracted</h2>
+  <h2 style="font-size:1rem;font-weight:600;margin-bottom:12px">{{ chunks|length }} chunk(s)</h2>
   {% for chunk in chunks %}
     <div class="card" style="margin-bottom:8px">
-      <div style="font-size:.75rem;color:var(--text2);margin-bottom:6px">Chunk #{{ chunk.chunk_index }} · {{ chunk.token_count }} tokens</div>
-      <div style="font-size:.875rem;white-space:pre-wrap;line-height:1.55">{{ chunk.content|truncatewords:200 }}</div>
+      <div style="display:flex;justify-content:space-between;font-size:.75rem;color:var(--text2);margin-bottom:6px">
+        <span>Chunk #{{ chunk.chunk_index }} · {{ chunk.token_count }} tokens</span>
+        {% if chunk.metadata.chunk_type %}
+        <span class="badge badge-info" style="font-size:.65rem">{{ chunk.metadata.chunk_type }}</span>
+        {% endif %}
+      </div>
+      <div style="font-size:.875rem;white-space:pre-wrap;line-height:1.55;max-height:250px;overflow-y:auto">{{ chunk.content }}</div>
     </div>
   {% endfor %}
 {% elif document.status == 'ready' %}

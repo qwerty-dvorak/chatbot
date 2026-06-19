@@ -332,3 +332,9 @@ Background workers are allowed and should be Python-only:
 - Docker Compose worker services for ingestion, compaction, and scheduled maintenance.
 
 No Node worker should be introduced.
+## OCR implementation
+
+The standalone RAG API owns OCR. Uploads can choose `none`, `basic`, or
+`paddleocr`. PaddleOCR runs in-process for local-model mode or on its dedicated
+RunPod PaddleOCR-VL endpoint in RunPod mode. Each preprocessed/split image is
+stored in `document_assets`; OCR text then uses the normal text RAG pipeline.

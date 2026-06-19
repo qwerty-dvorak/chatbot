@@ -31,6 +31,7 @@ def stream_chat_response(message: Message, user) -> StreamingHttpResponse:
     client      = LiteLLMClient()
     tool_schemas = registry.get_schemas(user)
     thinking_mode = bool((message.metadata or {}).get("thinking_mode"))
+    lora_adapter = (message.metadata or {}).get("lora_adapter") or (chat.metadata or {}).get("lora_adapter") or ""
 
     response = StreamingHttpResponse(
         _event_stream(
@@ -40,6 +41,7 @@ def stream_chat_response(message: Message, user) -> StreamingHttpResponse:
             context_messages,
             tool_schemas,
             thinking_mode=thinking_mode,
+            lora_adapter=lora_adapter or None,
         ),
         content_type="text/event-stream",
     )
@@ -55,6 +57,7 @@ def _event_stream(
     context_messages,
     tool_schemas,
     thinking_mode=False,
+    lora_adapter=None,
 ):
     """
     Two-round streaming:
@@ -65,7 +68,7 @@ def _event_stream(
     _start = time.time()
     try:
         handler1 = StreamHandler(message)
-        kwargs = {"thinking_mode": thinking_mode}
+        kwargs = {"thinking_mode": thinking_mode, "lora_adapter": lora_adapter}
         if tool_schemas:
             kwargs["tools"] = tool_schemas
 
@@ -115,6 +118,7 @@ def _event_stream(
         for chunk in client.chat_completion_stream(
             continuation,
             thinking_mode=thinking_mode,
+            lora_adapter=lora_adapter,
         ):
             for event in handler2.handle_chunk(chunk):
                 yield f"data: {json.dumps(event)}\n\n"

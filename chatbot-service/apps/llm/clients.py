@@ -25,6 +25,25 @@ def _truncate_payload(messages: list, max_chars: int = 2000) -> str:
     return dump[:max_chars] + f"... (truncated, {len(dump)} total)"
 
 
+def _discover_lora_via_api(base_url: str | None = None) -> list[str] | None:
+    """Query the vLLM /v1/models endpoint to discover LoRA adapters.
+
+    Returns a list of adapter names (e.g. ['taboo-ship', 'taboo-book']),
+    or None if the endpoint cannot be reached (caller should fall back to env var).
+    """
+    url = (base_url or settings.CHAT_BASE_URL).rstrip("/v1").rstrip("/") + "/v1/models"
+    import urllib.request, json
+    req = urllib.request.Request(url, headers={"User-Agent": "opencode/1.0"})
+    try:
+        resp = json.loads(urllib.request.urlopen(req, timeout=5).read())
+        models = [m["id"] for m in resp.get("data", [])]
+        base = settings.CHAT_MODEL.removeprefix("openai/")
+        return [m for m in models if m != base and "/" not in m]
+    except Exception:
+        logger.debug("Could not discover LoRAs from %s", url)
+        return None
+
+
 def _debug_log(messages: list, model: str, kwargs: dict):
     if not getattr(settings, "CHAT_DEBUG", False):
         return
@@ -74,27 +93,32 @@ class LiteLLMClient:
                         return True
         return False
 
-    def _select_model(self, messages: list) -> str:
+    def _select_model(self, messages: list, lora_adapter: str | None = None) -> str:
+        if lora_adapter:
+            # vLLM registers LoRA modules as separate models via --lora-modules
+            return f"openai/{lora_adapter}"
         if self._has_multimodal(messages):
             logger.debug("Detected multimodal content, using vision_model=%s", self.vision_model)
             return _openai_compatible_model(self.vision_model)
         return _openai_compatible_model(self.chat_model)
 
-    def _extra_body(self, thinking_mode: bool | None = None) -> dict | None:
+    def _extra_body(self, thinking_mode: bool | None = None,
+                    lora_adapter: str | None = None) -> dict | None:
+        extra_body = {}
         if thinking_mode is not None:
-            extra_body = {"chat_template_kwargs": {"enable_thinking": thinking_mode}}
+            extra_body.setdefault("chat_template_kwargs", {})["enable_thinking"] = thinking_mode
             if thinking_mode:
                 extra_body["skip_special_tokens"] = False
-            return extra_body
-        if getattr(settings, "CHAT_REASONING_ENABLED", False):
-            return {
-                "chat_template_kwargs": {"enable_thinking": True},
-                "skip_special_tokens": False,
-            }
-        return None
+        elif getattr(settings, "CHAT_REASONING_ENABLED", False):
+            extra_body.setdefault("chat_template_kwargs", {})["enable_thinking"] = True
+            extra_body["skip_special_tokens"] = False
+        if lora_adapter:
+            extra_body["add_lora"] = lora_adapter
+        return extra_body or None
 
     def chat_completion(self, messages: list[dict[str, str]], **kwargs) -> dict[str, Any]:
-        model = self._select_model(messages)
+        lora_adapter = kwargs.get("lora_adapter")
+        model = self._select_model(messages, lora_adapter=lora_adapter)
         _debug_log(messages, model, kwargs)
         start = time.time()
         try:
@@ -108,7 +132,10 @@ class LiteLLMClient:
                 api_base=self.base_url,
                 api_key=self.api_key,
             )
-            extra_body = self._extra_body(kwargs.get("thinking_mode"))
+            extra_body = self._extra_body(
+                thinking_mode=kwargs.get("thinking_mode"),
+                lora_adapter=lora_adapter,
+            )
             if extra_body:
                 call_kwargs["extra_body"] = extra_body
             response = completion(**call_kwargs)
@@ -128,7 +155,8 @@ class LiteLLMClient:
             raise self._normalize_error(e)
 
     def chat_completion_stream(self, messages: list[dict[str, str]], **kwargs):
-        model = self._select_model(messages)
+        lora_adapter = kwargs.get("lora_adapter")
+        model = self._select_model(messages, lora_adapter=lora_adapter)
         _debug_log(messages, model, kwargs)
         start = time.time()
         try:
@@ -143,7 +171,10 @@ class LiteLLMClient:
                 api_base=self.base_url,
                 api_key=self.api_key,
             )
-            extra_body = self._extra_body(kwargs.get("thinking_mode"))
+            extra_body = self._extra_body(
+                thinking_mode=kwargs.get("thinking_mode"),
+                lora_adapter=lora_adapter,
+            )
             if extra_body:
                 call_kwargs["extra_body"] = extra_body
             if "tools" in kwargs:

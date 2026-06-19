@@ -21,7 +21,7 @@ bash run.sh runpod              # RunPod cloud GPU
 curl -X POST http://localhost:8093/v1/ingest -F "files=@document.pdf"
 curl -X POST http://localhost:8093/v1/ingest \
   -F "files=@report.pdf" -F "files=@notes.md" \
-  -F "tier=slow" -F "strategy=sentence_window"
+  -F "tier=slow" -F "strategy=sentence_window" -F "ocr_mode=paddleocr"
 curl http://localhost:8093/v1/ingestions/<job-id>
 
 # 4. Search via API
@@ -53,6 +53,7 @@ See `TESTING.md` for full details, manual curl examples, and troubleshooting.
 | rag-multimodal-embed | 8091 | vllm/vllm-openai:latest | nvidia/nemotron-colembed-vl-8b-v2 multimodal embeddings |
 | rag-reranker | 8092 | vllm/vllm-openai:latest | Qwen3-VL-Reranker-8B pooling via /pooling endpoint |
 | rag-api | 8093 | rag-api (ubuntu:24.04) | FastAPI, durable SQLite queue, ingestion worker, search |
+| paddleocr-vl | RunPod :8000 or in-process | PaddleOCR-VL-1.6 / PaddleOCR | Image and scanned-page OCR |
 | postgres | 5433 | postgres:16 | Shared DB with chatbot-service |
 | milvus-standalone | 19530 | milvusdb/milvus:latest | Vector store |
 
@@ -82,6 +83,8 @@ pipeline/
   search.py                <- Search orchestrator (includes query-to-query resolution)
   text_pipeline.py         <- Full text ingest: chunk → hyde → persist → embed → index
   image_pipeline.py        <- Image-only document ingest
+  image_preprocess.py      <- EXIF normalization, PNG conversion, vertical splitting
+  ocr.py                   <- none/basic Tesseract/PaddleOCR backend selection
 ```
 
 ## Key concepts
@@ -169,6 +172,7 @@ MULTIMODAL_EMBEDDING_BASE_URL, MULTIMODAL_EMBEDDING_MODEL, MULTIMODAL_EMBEDDING_
 RERANKER_BASE_URL, RERANKER_API_KEY, RERANKER_MODEL
 MILVUS_HOST, MILVUS_PORT
 POSTGRES_HOST, POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_PORT
+OCR_MODE, OCR_BASE_URL, OCR_MODEL, OCR_MAX_IMAGE_HEIGHT
 CHUNK_STRATEGY, CHUNK_SIZE, CHUNK_OVERLAP
 QUERY_ENHANCEMENTS, HYPOTHETICAL_QUESTIONS_PER_CHUNK
 ```

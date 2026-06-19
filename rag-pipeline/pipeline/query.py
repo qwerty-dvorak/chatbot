@@ -5,9 +5,14 @@ hypothetical questions) and a single public ``enhance_query`` entry point
 that applies whichever strategies are enabled in ``cfg.query_enhancements``.
 """
 
+import logging
+import time
+
 import litellm
 
 from .config import cfg
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -19,6 +24,7 @@ def _chat(system: str, user: str) -> str:
 
     Non-streaming.  Uses ``cfg.chat_model`` as the model name.
     """
+    t0 = time.time()
     response = litellm.completion(
         model=cfg.chat_model,
         messages=[
@@ -29,7 +35,13 @@ def _chat(system: str, user: str) -> str:
         api_key=cfg.chat_api_key,
         stream=False,
     )
-    return response.choices[0].message.content or ""
+    duration = round(time.time() - t0, 4)
+    content = response.choices[0].message.content or ""
+    tokens_in = response.usage.prompt_tokens if response.usage else 0
+    tokens_out = response.usage.completion_tokens if response.usage else 0
+    logger.info("[TIMING] _chat %.3fs %d+%d tokens model=%s",
+                duration, tokens_in, tokens_out, cfg.chat_model)
+    return content
 
 
 # ---------------------------------------------------------------------------

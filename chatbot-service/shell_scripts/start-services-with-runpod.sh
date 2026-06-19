@@ -37,10 +37,7 @@ if [ -f "$ROOT_DIR/models/.env.runpod" ]; then
   export $(grep -v '^#' "$ROOT_DIR/models/.env.runpod" | xargs)
 fi
 
-if [[ "$CLEAN" == "true" ]]; then
-  echo "Removing old containers..."
-  docker rm -f web worker file-server 2>/dev/null || true
-fi
+docker rm -f web worker file-server 2>/dev/null || true
 
 if [[ "$NO_RAG" == "true" ]]; then
   RAG_API_ENABLED=false
@@ -49,12 +46,16 @@ if [[ "$NO_RAG" == "true" ]]; then
 else
   RAG_API_ENABLED="${RAG_API_ENABLED:-true}"
   RAG_ENABLED="${RAG_ENABLED:-true}"
-  RAG_API_BASE_URL="${RAG_API_BASE_URL:-http://rag-api:8093}"
 fi
 
 docker network create "$NETWORK_NAME" 2>/dev/null || true
 docker volume create media_data 2>/dev/null || true
 docker volume create docs_data 2>/dev/null || true
+
+# Gateway IP for cross-container host access (milvus, rag-api publish ports on host)
+GATEWAY_IP="$(docker network inspect "$NETWORK_NAME" --format '{{(index .IPAM.Config 0).Gateway}}' 2>/dev/null || echo 'localhost')"
+MILVUS_HOST="$GATEWAY_IP"
+RAG_API_BASE_URL="${RAG_API_BASE_URL:-http://${GATEWAY_IP}:8093}"
 
 echo "Building base image '$IMAGE_NAME' from repo root..."
 docker build -t "$IMAGE_NAME" -f "$SERVICE_DIR/Dockerfile" "$ROOT_DIR"
@@ -102,13 +103,14 @@ docker run -d \
   -e CHAT_API_KEY="dummy" \
   -e CHAT_MODEL="$CHAT_MODEL" \
   -e VISION_MODEL="$VISION_MODEL" \
+  -e LORA_ADAPTERS="${LORA_ADAPTERS:-}" \
   -e TEXT_EMBEDDING_MODEL="${TEXT_EMBEDDING_MODEL:-nvidia/llama-embed-nemotron-8b}" \
   -e EMBEDDING_BASE_URL="$EMBEDDING_BASE_URL" \
   -e EMBEDDING_API_KEY="dummy" \
   -e RERANKER_BASE_URL="$RERANKER_BASE_URL" \
   -e RERANKER_API_KEY="dummy" \
   -e RERANKER_MODEL="${RERANKER_MODEL:-Qwen/Qwen3-VL-Reranker-2B}" \
-  -e MILVUS_HOST=milvus-standalone \
+  -e MILVUS_HOST="$MILVUS_HOST" \
   -e MILVUS_PORT=19530 \
   -e RAG_API_ENABLED="$RAG_API_ENABLED" \
   -e RAG_API_BASE_URL="$RAG_API_BASE_URL" \
@@ -142,13 +144,14 @@ docker run -d \
   -e CHAT_BASE_URL="$CHAT_BASE_URL" \
   -e CHAT_API_KEY="dummy" \
   -e CHAT_MODEL="$CHAT_MODEL" \
+  -e LORA_ADAPTERS="${LORA_ADAPTERS:-}" \
   -e TEXT_EMBEDDING_MODEL="${TEXT_EMBEDDING_MODEL:-nvidia/llama-embed-nemotron-8b}" \
   -e EMBEDDING_BASE_URL="$EMBEDDING_BASE_URL" \
   -e EMBEDDING_API_KEY="dummy" \
   -e RERANKER_BASE_URL="$RERANKER_BASE_URL" \
   -e RERANKER_API_KEY="dummy" \
   -e RERANKER_MODEL="${RERANKER_MODEL:-Qwen/Qwen3-VL-Reranker-2B}" \
-  -e MILVUS_HOST=milvus-standalone \
+  -e MILVUS_HOST="$MILVUS_HOST" \
   -e MILVUS_PORT=19530 \
   -e RAG_API_ENABLED="$RAG_API_ENABLED" \
   -e RAG_API_BASE_URL="$RAG_API_BASE_URL" \

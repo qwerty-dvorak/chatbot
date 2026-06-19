@@ -56,7 +56,6 @@ chatbot/
         __init__.py
       tests/
         __init__.py
-        test_chat_flow.py
         test_context_builder.py
         test_streaming.py
 
@@ -113,8 +112,6 @@ chatbot/
         __init__.py
       tests/
         __init__.py
-        test_chunking.py
-        test_ingestion_jobs.py
 
     llm/
       __init__.py
@@ -144,7 +141,6 @@ chatbot/
       tests/
         __init__.py
         test_tool_permissions.py
-        test_tool_records.py
 
     compaction/
       __init__.py

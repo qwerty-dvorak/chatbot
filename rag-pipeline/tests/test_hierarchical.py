@@ -25,7 +25,7 @@ from pipeline.search import search
 from pipeline.index import _ensure_collection, get_client, connect_milvus
 from pipeline import db as pgdb
 
-BASE = os.path.join(os.path.dirname(__file__), "..", "data", "sample_data")
+BASE = os.path.join(os.path.dirname(__file__), "..", "..", "sample_data")
 TOPIC_FILES = [
     os.path.join(BASE, "topic_geology.txt"),
     os.path.join(BASE, "topic_biology.txt"),

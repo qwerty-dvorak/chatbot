@@ -17,6 +17,13 @@ ENV_FILE="$SCRIPT_DIR/.env"
 CLEAN=false
 MODE=""
 
+# Source root .env first (sets MODE, HF_TOKEN, etc.)
+if [[ -f "$ENV_FILE" ]]; then
+  set -a
+  source "$ENV_FILE"
+  set +a
+fi
+
 for arg in "$@"; do
   case "$arg" in
     --clean)    CLEAN=true ;;
@@ -30,13 +37,6 @@ for arg in "$@"; do
       exit 0 ;;
   esac
 done
-
-# Read MODE from root .env if not already set
-if [[ -z "$MODE" ]]; then
-  if [[ -f "$ENV_FILE" ]]; then
-    MODE=$(grep -E '^MODE=' "$ENV_FILE" | cut -d= -f2 | tr -d '[:space:]' || echo "")
-  fi
-fi
 
 # Normalise to uppercase
 MODE="${MODE:-LOCAL}"
@@ -52,6 +52,13 @@ echo "╔═══════════════════════�
 echo "║   BARC Pipeline — Unified Launch                 ║"
 echo "║   Mode: $MODE"
 echo "╚══════════════════════════════════════════════════╝"
+
+# Configure build sources for this mode (Dockerfiles + pyproject.toml)
+if [[ "$MODE" == "LOCAL" ]]; then
+  bash "$SCRIPT_DIR/configure-build-sources.sh" revert
+else
+  bash "$SCRIPT_DIR/configure-build-sources.sh" apply
+fi
 
 if [[ "$CLEAN" == "true" ]]; then
   bash "$SCRIPT_DIR/teardown.sh"
@@ -73,11 +80,7 @@ if [[ "$MODE" == "RUNPOD" ]]; then
     echo "  export HF_TOKEN=hf_..."
     exit 1
   fi
-  if [[ -f "$SCRIPT_DIR/models/.runpod_state" ]]; then
-    echo "  RunPod pods already deployed. Skipping."
-  else
-    bash "$SCRIPT_DIR/models/deploy-runpod.sh"
-  fi
+  bash "$SCRIPT_DIR/models/deploy-runpod.sh"
 else
   bash "$SCRIPT_DIR/models/deploy-local.sh"
 fi

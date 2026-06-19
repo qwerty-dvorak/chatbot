@@ -26,14 +26,13 @@ DB_PASS="${POSTGRES_PASSWORD:-chatbot}"
 EXTERNAL_DB_PORT=5433
 EXTERNAL_WEB_PORT=8080
 
-if [[ "$*" == *"--clean"* ]]; then
-  echo "Removing old containers..."
-  docker rm -f web worker file-server 2>/dev/null || true
-fi
-
+docker rm -f web worker file-server 2>/dev/null || true
 docker network create "$NETWORK_NAME" 2>/dev/null || true
 docker volume create media_data 2>/dev/null || true
 docker volume create docs_data 2>/dev/null || true
+
+# Gateway IP for cross-container host access (milvus publishes ports on host)
+GATEWAY_IP="$(docker network inspect "$NETWORK_NAME" --format '{{(index .IPAM.Config 0).Gateway}}' 2>/dev/null || echo 'localhost')"
 
 echo "Building base image '$IMAGE_NAME' from repo root..."
 docker build -t "$IMAGE_NAME" -f "$SERVICE_DIR/Dockerfile" "$ROOT_DIR"
@@ -73,12 +72,14 @@ docker run -d \
   -e CHAT_API_KEY="${CHAT_API_KEY:-dummy}" \
   -e CHAT_MODEL="$CHAT_MODEL" \
   -e VISION_MODEL="$VISION_MODEL" \
+  -e LORA_ADAPTERS="${LORA_ADAPTERS:-}" \
   -e EMBEDDING_BASE_URL="$EMBEDDING_BASE_URL" \
   -e TEXT_EMBEDDING_MODEL="${TEXT_EMBEDDING_MODEL:-/model}" \
   -e RERANKER_BASE_URL="$RERANKER_BASE_URL" \
   -e RAG_API_ENABLED="false" \
+  -e RAG_ENABLED="${RAG_ENABLED:-true}" \
   -e TOOL_CALLS_ENABLED="true" \
-  -e MILVUS_HOST=milvus-standalone \
+  -e MILVUS_HOST="$GATEWAY_IP" \
   -e MILVUS_PORT=19530 \
   -v media_data:/app/media \
   -v docs_data:/data/docs \
@@ -103,12 +104,14 @@ docker run -d \
   -e CHAT_API_KEY="${CHAT_API_KEY:-dummy}" \
   -e CHAT_MODEL="$CHAT_MODEL" \
   -e VISION_MODEL="$VISION_MODEL" \
+  -e LORA_ADAPTERS="${LORA_ADAPTERS:-}" \
   -e EMBEDDING_BASE_URL="$EMBEDDING_BASE_URL" \
   -e TEXT_EMBEDDING_MODEL="${TEXT_EMBEDDING_MODEL:-/model}" \
   -e RERANKER_BASE_URL="$RERANKER_BASE_URL" \
   -e RAG_API_ENABLED="false" \
+  -e RAG_ENABLED="${RAG_ENABLED:-true}" \
   -e TOOL_CALLS_ENABLED="true" \
-  -e MILVUS_HOST=milvus-standalone \
+  -e MILVUS_HOST="$GATEWAY_IP" \
   -e MILVUS_PORT=19530 \
   -v media_data:/app/media \
   -v docs_data:/data/docs \

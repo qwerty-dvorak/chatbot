@@ -11,21 +11,14 @@
 # Requires: .env.runpod (written by runpod_wait.sh)
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ENV_FILE="$SCRIPT_DIR/.env.runpod"
+ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+ENV_FILE="$ROOT_DIR/models/.env.runpod"
 
 if [[ -f "$ENV_FILE" ]]; then
   source "$ENV_FILE"
-elif [[ -f "$SCRIPT_DIR/.runpod_state" ]]; then
-  source "$SCRIPT_DIR/.runpod_state"
-  TEXT_URL="https://${TEXT_POD}-8000.proxy.runpod.net"
-  MM_URL="https://${MM_POD}-8000.proxy.runpod.net"
-  RERANKER_URL="https://${RERANKER_POD}-8000.proxy.runpod.net"
-  EMBEDDING_BASE_URL="${TEXT_URL}/v1"
-  MULTIMODAL_EMBEDDING_BASE_URL="${MM_URL}"
-  RERANKER_BASE_URL="${RERANKER_URL}"
 else
-  echo "ERROR: neither .env.runpod nor .runpod_state found."
-  echo "Run 'bash runpod_deploy.sh' or check pod IDs in .runpod_state."
+  echo "ERROR: .env.runpod not found."
+  echo "Run 'bash models/deploy-runpod.sh' or check .env.runpod exists."
   exit 1
 fi
 
@@ -45,6 +38,14 @@ echo ""
 echo "  Text Embed      ${EMBEDDING_BASE_URL}"
 echo "  MM Embed        ${MULTIMODAL_EMBEDDING_BASE_URL}"
 echo "  Reranker        ${RERANKER_BASE_URL}  (/score, /v1/rerank)"
+echo "  PaddleOCR       ${OCR_BASE_URL}  (/v1/chat/completions)"
+
+echo -n "  PaddleOCR model registry"
+resp=$(curl -sf "${OCR_BASE_URL%/v1}/v1/models" 2>&1) && {
+  model=$(echo "$resp" | python3 -c "import sys,json; print(json.load(sys.stdin)['data'][0]['id'])" 2>/dev/null || echo "")
+  [[ "$model" == "${OCR_MODEL}" ]] && result PASS "PaddleOCR model → $model" \
+    || result FAIL "PaddleOCR model mismatch → ${model:-empty}"
+} || result FAIL "PaddleOCR /v1/models → HTTP error"
 
 # ═══════════════════════════════════════════════════════
 # 1. Text Embedding — POST /v1/embeddings

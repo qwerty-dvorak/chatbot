@@ -14,6 +14,8 @@ If any are unset, tests are skipped (not failed).
 import json
 import os
 import unittest
+import base64
+import io
 from urllib.request import Request, urlopen
 from urllib.error import URLError
 
@@ -28,10 +30,12 @@ def _require_url(name):
 EMBEDDING_URL = _require_url("EMBEDDING_BASE_URL")
 MM_EMBEDDING_URL = _require_url("MULTIMODAL_EMBEDDING_BASE_URL")
 RERANKER_URL = _require_url("RERANKER_BASE_URL")
+OCR_URL = _require_url("OCR_BASE_URL")
 
 TEXT_MODEL = os.environ.get("TEXT_EMBEDDING_MODEL", "nvidia/llama-embed-nemotron-8b")
 MM_MODEL = os.environ.get("MULTIMODAL_EMBEDDING_MODEL", "nvidia/nemotron-colembed-vl-8b-v2")
 RERANKER_MODEL = os.environ.get("RERANKER_MODEL", "Qwen/Qwen3-VL-Reranker-2B")
+OCR_MODEL = os.environ.get("OCR_MODEL", "PaddlePaddle/PaddleOCR-VL-1.6")
 
 
 def _post(url, body):
@@ -39,6 +43,8 @@ def _post(url, body):
     data = json.dumps(body).encode("utf-8")
     req = Request(url, data=data, method="POST")
     req.add_header("Content-Type", "application/json")
+    req.add_header("Authorization", "Bearer dummy")
+    req.add_header("User-Agent", "BARC-RAG-tests/1.0")
     try:
         with urlopen(req, timeout=60) as resp:
             return json.loads(resp.read().decode("utf-8"))
@@ -200,6 +206,28 @@ class RerankerTests(unittest.TestCase):
         # should be sorted descending
         scores = [r["relevance_score"] for r in results]
         self.assertEqual(scores, sorted(scores, reverse=True))
+
+
+@unittest.skipIf(not OCR_URL, "OCR_BASE_URL not set")
+class PaddleOcrEndpointTests(unittest.TestCase):
+    def test_real_image_completion_uses_served_paddleocr_model(self):
+        from PIL import Image, ImageDraw
+
+        image = Image.new("RGB", (320, 80), "white")
+        ImageDraw.Draw(image).text((20, 25), "BARC OCR 2026", fill="black")
+        output = io.BytesIO()
+        image.save(output, format="PNG")
+        data_url = "data:image/png;base64," + base64.b64encode(output.getvalue()).decode()
+        response = _post(f"{OCR_URL}/chat/completions", {
+            "model": OCR_MODEL,
+            "messages": [{"role": "user", "content": [
+                {"type": "image_url", "image_url": {"url": data_url}},
+                {"type": "text", "text": "OCR:"},
+            ]}],
+            "temperature": 0,
+        })
+        self.assertEqual(response["model"], OCR_MODEL)
+        self.assertIsInstance(response["choices"][0]["message"]["content"], str)
 
 
 if __name__ == "__main__":

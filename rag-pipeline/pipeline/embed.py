@@ -9,6 +9,7 @@ Provides three public functions:
 
 import base64
 import logging
+import time
 
 import httpx
 import openai
@@ -121,17 +122,26 @@ def embed_text(chunks: list[Chunk], batch_size: int = 32) -> list[EmbeddedChunk]
 
     client = _text_client()
     results: list[EmbeddedChunk] = []
+    t0 = time.time()
+    total_tokens = 0
 
     for batch_start in range(0, len(text_only), batch_size):
         batch = text_only[batch_start : batch_start + batch_size]
         inputs = [c.text for c in batch]
 
+        bt0 = time.time()
         response = client.embeddings.create(
             model=cfg.text_embedding_model,
             input=inputs,
         )
+        batch_dur = round(time.time() - bt0, 4)
+        tokens_used = response.usage.total_tokens if hasattr(response, 'usage') and response.usage else 0
+        total_tokens += tokens_used
+        logger.info("[TIMING] embed_text batch=%d/%d %.3fs %d tokens",
+                    batch_start // batch_size + 1,
+                    (len(text_only) + batch_size - 1) // batch_size,
+                    batch_dur, tokens_used)
 
-        # response.data is ordered to match the input list
         for chunk, embedding_obj in zip(batch, response.data):
             results.append(
                 EmbeddedChunk(
@@ -141,6 +151,9 @@ def embed_text(chunks: list[Chunk], batch_size: int = 32) -> list[EmbeddedChunk]
                 )
             )
 
+    total_dur = round(time.time() - t0, 4)
+    logger.info("[TIMING] embed_text total %.3fs %d chunks %d tokens",
+                total_dur, len(text_only), total_tokens)
     return results
 
 
@@ -167,8 +180,10 @@ def embed_multimodal(chunks: list[Chunk], batch_size: int = 16) -> list[Embedded
         return []
 
     results: list[EmbeddedChunk] = []
+    t0 = time.time()
 
-    for chunk in image_only:
+    for idx, chunk in enumerate(image_only):
+        ct0 = time.time()
         try:
             embedding = _embed_multimodal_single(chunk)
         except Exception as exc:
@@ -179,6 +194,10 @@ def embed_multimodal(chunks: list[Chunk], batch_size: int = 16) -> list[Embedded
             )
             embedding = _pool_multimodal(chunk.text or "")
 
+        dur = round(time.time() - ct0, 4)
+        logger.info("[TIMING] embed_multimodal chunk=%d/%d %.3fs",
+                    idx + 1, len(image_only), dur)
+
         results.append(
             EmbeddedChunk(
                 chunk=chunk,
@@ -187,6 +206,9 @@ def embed_multimodal(chunks: list[Chunk], batch_size: int = 16) -> list[Embedded
             )
         )
 
+    total_dur = round(time.time() - t0, 4)
+    logger.info("[TIMING] embed_multimodal total %.3fs %d chunks",
+                total_dur, len(image_only))
     return results
 
 

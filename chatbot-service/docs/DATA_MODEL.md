@@ -340,6 +340,11 @@ Indexes:
 
 Purpose: extracted images/pages/tables from a document.
 
+Image/page assets also retain source and derived indices, content-addressed
+keys/checksums, dimensions, preprocessing operations, and OCR backend/status.
+This preserves traceability when one source image is split into several OCR
+inputs.
+
 Fields:
 
 - `id`

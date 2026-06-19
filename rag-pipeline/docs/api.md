@@ -416,3 +416,10 @@ FastAPI validation errors use `422`. Runtime failures use:
 Background pipeline failures do not change the polling endpoint's HTTP status.
 The job resource returns `200` with `"status": "failed"` and diagnostic text in
 `error`.
+## Image OCR selection
+
+`POST /v1/ingest` accepts repeated `files` parts and optional
+`ocr_mode=none|basic|paddleocr`. Basic mode uses Tesseract through
+`pytesseract`. PaddleOCR calls `OCR_BASE_URL/v1/chat/completions` when set
+(RunPod mode), otherwise it uses the local PaddleOCR runtime. OCR output is
+chunked and indexed through the regular text pipeline.

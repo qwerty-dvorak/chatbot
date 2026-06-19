@@ -1,38 +1,49 @@
 # Integration Tests
 
-Cross-service tests that exercise the full pipeline (chatbot + RAG + infrastructure).
+Cross-service tests that exercise the full RAG pipeline (ingest → index → search).
 
-## Status
+## Prerequisites
 
-Not yet implemented.
-
-## Planned Coverage
-
-- Chat with RAG context injection
-- Document upload → search → chat flow
-- Cross-service API calls (chatbot ↔ RAG pipeline)
-- Memory persistence across sessions
-- Tool execution end-to-end
-
-## Expected Flow
+The full stack must be running:
 
 ```bash
-# 1. Start infrastructure
+bash start.sh                    # starts everything (based on root .env MODE)
+```
+
+Or start services individually:
+
+```bash
 bash db/start.sh
 bash milvus/start.sh
+bash rag-pipeline/run.sh runpod  # or "local"
+bash chatbot-service/run.sh runpod  # or "local" or "no-gemma"
+```
 
-# 2. Start RAG API
-bash rag-pipeline/run.sh runpod
+## Running
 
-# 3. Start Chatbot
-bash chatbot-service/run.sh runpod
-
-# 4. Run integration tests
+```bash
+# Auto-detect mode from running stack
 bash tests/integration/run.sh
 ```
 
-## Files
+## What It Tests
 
-| File | Purpose |
-|------|---------|
-| `run.sh` | Placeholder orchestrator (prints expected flow, exits 0) |
+| # | Test | Description |
+|---|------|-------------|
+| 1 | RAG API health | GET /health returns ok |
+| 2 | Ingest tier=global | Upload astronomy doc for global tier |
+| 3 | Ingest tier=instant | Upload factual text for private/instant tier |
+| 4 | Ingest tier=slow | Upload biology doc for shared/slow tier |
+| 5 | Job completion | Poll first job until succeeded |
+| 6 | Hybrid search | Search for astronomy content |
+| 7 | Job listing | List all ingestion jobs |
+| 8 | Web UI reachable | GET /knowledge/ returns 200 or 302 |
+
+## Architecture
+
+```
+test script ──HTTP──→ RAG API (:8093)  ──→ Milvus (:19530)
+                │                      ──→ PostgreSQL (:5433)
+                │
+                └──→ Chatbot Web UI (:8080)
+```

@@ -1,38 +1,26 @@
 #!/bin/bash
-# Orchestrate the full chatbot test suite: start services, wait for health, run tests.
-#
-# Mode selection:
-#   --runpod   Use RunPod cloud GPU for chat LLM
-#   --local    Use local GPU
-#
-# Flags:
-#   --clean    Tear down services after tests
-#   --keepdb   Reuse test database between runs
-#   --no-start Assume services are already running
+# Run Django tests against the live stack.
+# Starts the full pipeline via root start.sh if not already running,
+# then runs tests inside the web container via docker exec.
 #
 # Usage:
-#   bash tests/chatbot/test-all.sh                         # detect mode
-#   bash tests/chatbot/test-all.sh --runpod                # RunPod mode
-#   bash tests/chatbot/test-all.sh --local                 # local GPU mode
-#   bash tests/chatbot/test-all.sh --runpod --clean        # test then teardown
+#   bash tests/chatbot/test-all.sh                         # detect mode, start stack, run tests
+#   bash tests/chatbot/test-all.sh --keepdb                # keep test DB
+#   bash tests/chatbot/test-all.sh --clean                 # teardown then restart
+#   bash tests/chatbot/test-all.sh --no-start              # skip start.sh, web must be running
 #   bash tests/chatbot/test-all.sh --keepdb apps.chat.tests
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-SERVICE_DIR="$ROOT_DIR/chatbot-service"
-STATE_FILE="$ROOT_DIR/models/.runpod_state"
-NETWORK_NAME="chatbot_net"
-TEST_IMAGE="chatbot-test"
 
-POSTGRES_USER="${POSTGRES_USER:-chatbot}"
-POSTGRES_DB="${POSTGRES_DB:-chatbot}"
-POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-chatbot}"
+POSTGRES_CONTAINER="chatbot-postgres"
+WEB_CONTAINER="web"
 
 MODE=""
 CLEAN=false
-NO_START=false
 KEEP_DB=false
+NO_START=false
 TEST_LABELS=()
 
 for arg in "$@"; do
@@ -40,8 +28,8 @@ for arg in "$@"; do
     --runpod)  MODE="runpod"  ;;
     --local)   MODE="local"   ;;
     --clean)   CLEAN=true     ;;
-    --no-start) NO_START=true ;;
     --keepdb)  KEEP_DB=true   ;;
+    --no-start) NO_START=true ;;
     --help|-h)
       echo "Usage: bash tests/chatbot/test-all.sh [--runpod|--local] [--clean] [--keepdb] [--no-start] [test_labels...]"
       exit 0 ;;
@@ -49,12 +37,31 @@ for arg in "$@"; do
   esac
 done
 
+if [[ "$NO_START" == "false" ]]; then
+  echo "═══ Starting pipeline ═══"
+  START_ARGS=()
+  [[ -n "$MODE" ]] && START_ARGS+=(--mode "$MODE")
+  [[ "$CLEAN" == "true" ]] && START_ARGS+=(--clean)
+  bash "$ROOT_DIR/start.sh" "${START_ARGS[@]}"
+  echo ""
+fi
+
+if ! docker container inspect "$WEB_CONTAINER" >/dev/null 2>&1; then
+  echo "ERROR: '$WEB_CONTAINER' container is not running."
+  echo "       Ensure the pipeline was started successfully."
+  exit 1
+fi
+
+# Auto-detect mode from web container's CHAT_BASE_URL if not explicitly set
 if [[ -z "$MODE" ]]; then
-  if [[ -f "$STATE_FILE" ]]; then
+  CHAT_URL=$(docker exec "$WEB_CONTAINER" bash -c 'echo "${CHAT_BASE_URL:-}"')
+  if echo "$CHAT_URL" | grep -qi "runpod"; then
     MODE="runpod"
-    echo "Detected RunPod state — using runpod mode."
+  elif echo "$CHAT_URL" | grep -qiE "localhost|inference-server"; then
+    MODE="local"
   else
-    echo "ERROR: Specify --runpod or --local"
+    echo "ERROR: Could not auto-detect mode from CHAT_BASE_URL='$CHAT_URL'"
+    echo "       Specify --runpod or --local explicitly."
     exit 1
   fi
 fi
@@ -69,33 +76,10 @@ echo "║  No-start:   $NO_START"
 echo "║  Labels:     ${TEST_LABELS[*]:-(all)}"
 echo "╚══════════════════════════════════════════════════╝"
 
-if [[ "$NO_START" == "false" ]]; then
-  if [[ "$MODE" == "runpod" ]]; then
-    source "$ROOT_DIR/models/.env.runpod"
-    echo "═══ RunPod endpoints sourced (services assumed running) ═══"
-  else
-    source "$ROOT_DIR/models/.env.local"
-    echo "═══ Starting services (mode: $MODE) ═══"
-    bash "$SERVICE_DIR/shell_scripts/start-services.sh"
-  fi
-fi
-
 echo ""
 echo "═══ Ensuring CREATEDB privilege ═══"
-docker exec chatbot-postgres su - postgres -c \
-  "psql -c \"ALTER USER ${POSTGRES_USER} CREATEDB;\"" 2>/dev/null || true
-
-echo ""
-echo "═══ Building test image ═══"
-docker build -f "$SCRIPT_DIR/Dockerfile" -t "$TEST_IMAGE" "$ROOT_DIR"
-
-CHAT_BASE_URL="${CHAT_BASE_URL:-http://gemma-inference-server:8000/v1}"
-CHAT_MODEL="${CHAT_MODEL:-openai/google/gemma-4-E4B-it}"
-VISION_MODEL="${VISION_MODEL:-$CHAT_MODEL}"
-RAG_ENABLED="${RAG_ENABLED:-false}"
-TOOL_CALLS_ENABLED="${TOOL_CALLS_ENABLED:-true}"
-CHAT_REASONING_ENABLED="${CHAT_REASONING_ENABLED:-true}"
-CHAT_STREAMING_ENABLED="${CHAT_STREAMING_ENABLED:-true}"
+docker exec "$POSTGRES_CONTAINER" su - postgres -c \
+  "psql -c \"ALTER USER ${POSTGRES_USER:-chatbot} CREATEDB;\"" 2>/dev/null || true
 
 ARGS=()
 [[ "$KEEP_DB" == "true" ]] && ARGS+=("--keepdb")
@@ -103,31 +87,9 @@ ARGS+=("${TEST_LABELS[@]}")
 
 echo ""
 echo "═══ Running tests ═══"
-echo "  URL:     $CHAT_BASE_URL"
-echo "  Model:   $CHAT_MODEL"
-echo "  Vision:  $VISION_MODEL"
-echo "  RAG:     $RAG_ENABLED"
-echo "  Tools:   $TOOL_CALLS_ENABLED"
-echo "  Reason:  $CHAT_REASONING_ENABLED"
-echo "  Stream:  $CHAT_STREAMING_ENABLED"
-
-docker run --rm \
-  --network "$NETWORK_NAME" \
-  -e POSTGRES_HOST=chatbot-postgres \
-  -e POSTGRES_PORT=5433 \
-  -e POSTGRES_DB="$POSTGRES_DB" \
-  -e POSTGRES_USER="$POSTGRES_USER" \
-  -e POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
-  -e CHAT_BASE_URL="$CHAT_BASE_URL" \
-  -e CHAT_API_KEY="${CHAT_API_KEY:-dummy}" \
-  -e CHAT_MODEL="$CHAT_MODEL" \
-  -e VISION_MODEL="$VISION_MODEL" \
-  -e RAG_ENABLED="$RAG_ENABLED" \
-  -e TOOL_CALLS_ENABLED="$TOOL_CALLS_ENABLED" \
-  -e CHAT_REASONING_ENABLED="$CHAT_REASONING_ENABLED" \
-  -e CHAT_STREAMING_ENABLED="$CHAT_STREAMING_ENABLED" \
-  "$TEST_IMAGE" \
-  "${ARGS[@]}"
+docker exec "$WEB_CONTAINER" \
+  env DJANGO_SETTINGS_MODULE=config.settings.test \
+  uv run python manage.py test "${ARGS[@]}"
 
 EXIT_CODE=$?
 

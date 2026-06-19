@@ -413,3 +413,10 @@ import sys,json
 [print(t['id']) for t in json.load(sys.stdin) if 'rag-' in t['name']]
 " | xargs -r runpodctl template delete
 ```
+## PaddleOCR-VL
+
+RunPod serves `PaddlePaddle/PaddleOCR-VL-1.6` on port 8000 through the vLLM
+OpenAI API. Set `OCR_BASE_URL=https://<pod-id>-8000.proxy.runpod.net/v1` and
+send image content to `POST /v1/chat/completions` with prompt `OCR:`.
+`models/deploy-runpod.sh` provisions this pod. Local mode leaves
+`OCR_BASE_URL` empty and uses the installed PaddleOCR runtime.

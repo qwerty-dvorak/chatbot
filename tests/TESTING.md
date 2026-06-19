@@ -6,49 +6,32 @@ Two testing strategies:
 
 ---
 
-## Quick Start (Local GPU)
+## Quick Start (any mode)
 
 ```bash
-# 1. Start infrastructure (PostgreSQL + Milvus)
-bash db/start.sh
-bash milvus/start.sh
+# Single command: start full pipeline (reads MODE from .env) + run tests
+bash tests/chatbot/test-all.sh
 
-# 2. Deploy local model endpoints (requires 3x GPUs)
-bash models/deploy-local.sh
+# With keep DB
+bash tests/chatbot/test-all.sh --keepdb
 
-# 3. Start RAG pipeline
-bash rag-pipeline/run.sh local
-
-# 4. Start chatbot service
-bash chatbot-service/run.sh local
-
-# 5. Run tests
-bash tests/run.sh chatbot --local
-bash tests/run.sh rag
+# Force mode
+bash tests/chatbot/test-all.sh --local --keepdb
+bash tests/chatbot/test-all.sh --runpod --keepdb
 ```
 
-## Quick Start (RunPod)
+Or step by step:
 
 ```bash
-export HF_TOKEN=hf_...
+# 1. Start full pipeline from root (reads MODE from .env)
+bash start.sh
 
-# 1. Deploy RunPod pods (huggingface token required for gated models)
-bash models/deploy-runpod.sh
-
-# 2. Start infrastructure
-bash db/start.sh
-bash milvus/start.sh
-
-# 3. Start RAG pipeline
-bash rag-pipeline/run.sh runpod
-
-# 4. Start chatbot service
-bash chatbot-service/run.sh runpod
-
-# 5. Run tests
-bash tests/run.sh chatbot --runpod
-bash tests/run.sh rag
+# 2. Run tests against running stack
+bash tests/chatbot/test-all.sh --no-start --keepdb
 ```
+
+Tests run inside the `web` container via `docker exec` — no separate test image,
+no mocks, uses the live stack's PostgreSQL, LLM endpoints, and environment variables.
 
 ## Service Ports (Local Deployment)
 
@@ -66,63 +49,64 @@ bash tests/run.sh rag
 
 The RAG API (port 8093) handles document ingest and search. The web app (port 8080) provides the chat interface with RAG context injection, user memory, and tool calling.
 
-## Architecture (RunPod)
+## Architecture
+
+Tests run as Django `TestCase` subclasses via `docker exec web uv run python manage.py test`
+inside the running `web` container. They connect to the same PostgreSQL, Milvus, and RAG API
+that the production stack uses — no separate test image or mocked endpoints.
 
 ```
-Local machine
-  └─ Docker: rag-api (FastAPI, port 8093)
-       ├─ POST /v1/ingest  → SQLite queue → background worker → Milvus + BM25
-       └─ POST /v1/search  → embed → hybrid retrieve → rerank → results
+docker exec web
+  └─ manage.py test — real PostgreSQL (:5433), real Milvus (:19530)
+       ├─ apps.chat.tests      → real LLM endpoint (CHAT_BASE_URL)
+       ├─ apps.knowledge.tests → real RAG API (:8093)
+       └─ apps.memory.tests    → real Milvus + real LLM embedding
 
-RunPod (3 pods)
-  ├─ rag-text-embed   pod:8000  vLLM + nvidia/llama-embed-nemotron-8b
-  ├─ rag-mm-embed     pod:8000  vLLM + nvidia/nemotron-colembed-vl-8b-v2
-  └─ rag-reranker     pod:8000  vLLM + Qwen/Qwen3-VL-Reranker-2B
+rag-api (FastAPI, port 8093)
+  ├─ POST /v1/ingest  → PG queue → background worker → Milvus + BM25
+  └─ POST /v1/search  → embed → hybrid retrieve → rerank → results
 ```
 
 ## Test Suites
 
 | Suite | Runner | What it tests |
 |-------|--------|---------------|
-| chatbot | `bash tests/run.sh chatbot` | Django tests: chat API, memory, RAG context, tools, compaction |
-| rag | `bash tests/run.sh rag` | RAG API: health, ingest, search (hybrid/vector/bm25), jobs |
-| integration | `bash tests/run.sh integration` | Cross-service: chat + RAG + memory (not yet implemented) |
-| all | `bash tests/run.sh all` | All suites sequentially |
+| chatbot | `bash tests/chatbot/test-all.sh` | Django tests: chat API, memory, RAG context, tools, compaction, knowledge |
+| rag | `bash tests/rag/test_api.sh` | RAG API: health, ingest, search (hybrid/vector/bm25), jobs |
+| integration | `bash tests/integration/run.sh` | Cross-service: ingest → poll → search → listing |
 
 All tests hit the real LLM endpoint — no mocks or fakes.
 
 ## Chatbot Tests
 
 ```bash
-# Run all chatbot tests (auto-detects RunPod or local from models/.runpod_state)
-bash tests/run.sh chatbot
-
-# Force mode
-bash tests/run.sh chatbot --runpod
-bash tests/run.sh chatbot --local
+# Run all chatbot tests (starts full pipeline first, then runs tests inside web container)
+bash tests/chatbot/test-all.sh
 
 # With flags
-bash tests/run.sh chatbot --runpod --clean        # test then teardown
-bash tests/run.sh chatbot --runpod --keepdb       # reuse test database
-bash tests/run.sh chatbot --local --keepdb apps.chat.tests
-bash tests/run.sh chatbot --runpod --no-start     # stack already running
-
-# Manual (stack already running)
-bash tests/chatbot/run-tests.sh
-bash tests/chatbot/run-tests.sh --keepdb apps.chat.tests.test_chat_api
+bash tests/chatbot/test-all.sh --runpod --clean        # test then teardown
+bash tests/chatbot/test-all.sh --runpod --keepdb       # reuse test database
+bash tests/chatbot/test-all.sh --local --keepdb apps.chat.tests
+bash tests/chatbot/test-all.sh --runpod --no-start     # stack already running
 ```
 
 ## RAG Pipeline Tests
 
 ```bash
-# Against a running RAG API (requires .env.runpod or local .env)
+# Against a running RAG API
 bash tests/rag/test_api.sh
 
 # Validate vLLM endpoints directly
 bash tests/rag/test_runpod_endpoints.sh
 ```
 
-Integration tests: `bash tests/integration/run.sh` (not yet implemented, prints expected flow and exits).
+## Integration Tests
+
+```bash
+bash tests/integration/run.sh
+```
+
+8-step end-to-end test: infrastructure check → RAG API health → upload document → poll job → search chunks → list documents → web UI detail → clean up.
 
 ## Testing Individual Model Endpoints
 
@@ -202,3 +186,9 @@ docker exec chatbot-postgres runuser -u postgres -- pg_isready
 | **Total** | | **~$9.10/hr** |
 
 Model download (~30 min) + testing (~10 min) ≈ **~$6 total**.
+## OCR model in test modes
+
+RunPod tests load `OCR_BASE_URL` from `models/.env.runpod` and exercise the
+live PaddleOCR-VL endpoint. Local tests use the installed PaddleOCR runtime
+when `OCR_MODE=paddleocr`; `OCR_MODE=basic` requires the Tesseract binary in
+the RAG API image, and `OCR_MODE=none` verifies image-only indexing.

@@ -54,6 +54,7 @@ class Document(models.Model):
     status = models.CharField(max_length=30, choices=Status.choices, default=Status.PENDING)
     extracted_text = models.TextField(default="")
     analysis_summary = models.TextField(default="")
+    ocr_mode = models.CharField(max_length=30, default="none")
     metadata = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -86,6 +87,15 @@ class DocumentAsset(models.Model):
     page_number = models.IntegerField(null=True, blank=True)
     text = models.TextField(default="")
     analysis = models.TextField(default="")
+    source_index = models.IntegerField(default=0)
+    derived_index = models.IntegerField(default=0)
+    object_key = models.CharField(max_length=64, default="")
+    sha256 = models.CharField(max_length=64, default="")
+    width = models.IntegerField(default=0)
+    height = models.IntegerField(default=0)
+    ocr_backend = models.CharField(max_length=30, default="none")
+    ocr_status = models.CharField(max_length=30, default="skipped")
+    preprocessing = models.JSONField(default=dict, blank=True)
     metadata = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -94,6 +104,8 @@ class DocumentAsset(models.Model):
         indexes = [
             models.Index(fields=["document", "asset_type"]),
             models.Index(fields=["document", "page_number"]),
+            models.Index(fields=["document", "source_index", "derived_index"], name="doc_asset_source_idx"),
+            models.Index(fields=["sha256"], name="doc_asset_sha_idx"),
         ]
 
     def __str__(self):

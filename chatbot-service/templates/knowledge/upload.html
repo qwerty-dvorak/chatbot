@@ -20,13 +20,29 @@
     <div class="form-group">
       <label>File</label>
       <div class="upload-zone" id="drop-zone">
-        <input type="file" name="file" id="file-input" required
+        <input type="file" name="files" id="file-input" required multiple
                accept=".pdf,.txt,.md,.csv,image/png,image/jpeg,image/webp,image/gif">
         <div class="upload-icon">📄</div>
-        <div class="upload-text">Click to choose a file, or drag and drop</div>
+        <div class="upload-text">Choose one or more files, or drag and drop</div>
         <div class="upload-hint">PDF · TXT · MD · CSV · PNG · JPG · WEBP — max 50 MB</div>
         <div class="file-selected" id="file-selected"></div>
       </div>
+    </div>
+    <div class="form-group" id="ocr-group" style="display:none">
+      <label for="id_ocr_mode">Image OCR</label>
+      <select name="ocr_mode" id="id_ocr_mode">
+        <option value="paddleocr">PaddleOCR (recommended)</option>
+        <option value="basic">Basic Python/Tesseract OCR</option>
+        <option value="none">No OCR</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="id_visibility">Visibility</label>
+      <select name="visibility" id="id_visibility">
+        <option value="private">Private — instant tier (fast indexing)</option>
+        <option value="shared">Shared — slow tier (batch processing)</option>
+        <option value="global">Global — global tier (cross-user)</option>
+      </select>
     </div>
     <div class="flex-gap">
       <button type="submit" class="btn btn-primary">Upload</button>
@@ -35,10 +51,12 @@
   </form>
 </div>
 <script>
-const inp=document.getElementById('file-input'),lbl=document.getElementById('file-selected'),zone=document.getElementById('drop-zone');
-inp.addEventListener('change',function(){lbl.textContent=this.files[0]?'✓ '+this.files[0].name:'';});
+const inp=document.getElementById('file-input'),lbl=document.getElementById('file-selected'),zone=document.getElementById('drop-zone'),ocr=document.getElementById('ocr-group');
+function needsOcr(name){const e=name.split('.').pop().toLowerCase();return['png','jpg','jpeg','webp','gif','pdf'].includes(e);}
+function updateOcrVisibility(){if(inp.files.length){const show=Array.from(inp.files).some(f=>needsOcr(f.name));ocr.style.display=show?'block':'none';}else{ocr.style.display='none';}}
+inp.addEventListener('change',function(){lbl.textContent=this.files.length?'✓ '+Array.from(this.files).map(f=>f.name).join(', '):'';updateOcrVisibility();});
 zone.addEventListener('dragover',e=>{e.preventDefault();zone.classList.add('drag-over');});
 zone.addEventListener('dragleave',()=>zone.classList.remove('drag-over'));
-zone.addEventListener('drop',e=>{e.preventDefault();zone.classList.remove('drag-over');if(e.dataTransfer.files.length){inp.files=e.dataTransfer.files;lbl.textContent='✓ '+e.dataTransfer.files[0].name;}});
+zone.addEventListener('drop',e=>{e.preventDefault();zone.classList.remove('drag-over');if(e.dataTransfer.files.length){inp.files=e.dataTransfer.files;lbl.textContent='✓ '+Array.from(e.dataTransfer.files).map(f=>f.name).join(', ');updateOcrVisibility();}});
 </script>
 {% endblock %}

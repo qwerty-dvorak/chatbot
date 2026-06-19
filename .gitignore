@@ -19,7 +19,6 @@ rag-pipeline/bm25_index.pkl
 rag-pipeline/bm25_index_mock.pkl
 rag-pipeline/data/ingestion/
 rag-pipeline/data/object_store/
-rag-pipeline/.runpod_state
 
 # Object store (root-level file server data)
 /data/object_store/
@@ -27,8 +26,7 @@ rag-pipeline/.runpod_state
 # Root data directory (file server uploads)
 /data/
 
-# RunPod state
-models/.runpod_state
+models/.env.runpod
 
 # Seed data (keep .gitignore, ignore everything else)
 seed_data/*

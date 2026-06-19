@@ -22,12 +22,11 @@ MILVUS_PORT="${MILVUS_PORT:-19530}"
 MINIO_PORT="${MINIO_PORT:-9000}"
 MINIO_CONSOLE_PORT="${MINIO_CONSOLE_PORT:-9001}"
 
-if [[ "$*" == *"--clean"* ]]; then
-  echo "Removing old containers..."
-  docker rm -f rag-api 2>/dev/null || true
-fi
-
+docker rm -f rag-api 2>/dev/null || true
 docker network inspect "$NETWORK_NAME" >/dev/null 2>&1 || docker network create "$NETWORK_NAME"
+
+# Gateway IP for cross-container host access (postgres, milvus publish ports on host)
+GATEWAY_IP="$(docker network inspect "$NETWORK_NAME" --format '{{(index .IPAM.Config 0).Gateway}}' 2>/dev/null || echo 'localhost')"
 
 echo "Building RAG API image..."
 docker build -t "$API_IMAGE" "$SERVICE_DIR"
@@ -51,9 +50,14 @@ docker run -d \
   -e RERANKER_BASE_URL="${RERANKER_BASE_URL:-}" \
   -e RERANKER_API_KEY="${RERANKER_API_KEY:-dummy}" \
   -e RERANKER_MODEL="${RERANKER_MODEL:-Qwen/Qwen3-VL-Reranker-2B}" \
-  -e MILVUS_HOST="milvus-standalone" \
+  -e OCR_MODE="${OCR_MODE:-paddleocr}" \
+  -e OCR_BASE_URL="${OCR_BASE_URL:-}" \
+  -e OCR_API_KEY="${OCR_API_KEY:-dummy}" \
+  -e OCR_MODEL="${OCR_MODEL:-PaddlePaddle/PaddleOCR-VL-1.6}" \
+  -e PADDLE_PDX_CACHE_HOME="/app/data/.paddlex" \
+  -e MILVUS_HOST="$GATEWAY_IP" \
   -e MILVUS_PORT="19530" \
-  -e POSTGRES_HOST="chatbot-postgres" \
+  -e POSTGRES_HOST="$GATEWAY_IP" \
   -e POSTGRES_PORT="5433" \
   -e POSTGRES_DB="${POSTGRES_DB:-chatbot}" \
   -e POSTGRES_USER="${POSTGRES_USER:-chatbot}" \
@@ -74,3 +78,4 @@ echo " RunPod endpoints (from models/.env.runpod):"
 echo "  Text Embed:       ${EMBEDDING_BASE_URL:-<not set>}"
 echo "  Multimodal Embed: ${MULTIMODAL_EMBEDDING_BASE_URL:-<not set>}"
 echo "  Reranker:         ${RERANKER_BASE_URL:-<not set>}"
+echo "  PaddleOCR:        ${OCR_BASE_URL:-local Python backend}"

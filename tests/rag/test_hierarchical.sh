@@ -13,6 +13,7 @@ set -euo pipefail
 ###############################################################################
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
+ROOT_DIR="$(cd "$HERE/../.." && pwd)"
 RAG_API="${RAG_API_URL:-http://localhost:8093}"
 
 PASS=0
@@ -66,7 +67,7 @@ echo "  [DONE] Previous data cleaned"
 # ── Ingest multiple topic files ──────────────────────
 echo ""
 echo "Ingesting topic documents..."
-SAMPLE_DIR="$HERE/data/sample_data"
+SAMPLE_DIR="$ROOT_DIR/sample_data/text"
 TOPIC_FILES=(
     "$SAMPLE_DIR/topic_geology.txt"
     "$SAMPLE_DIR/topic_biology.txt"

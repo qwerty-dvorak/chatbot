@@ -131,6 +131,7 @@ def insert_document(
     sha256: str = "",
     extracted_text: str = "",
     analysis_summary: str = "",
+    ocr_mode: str = "none",
     metadata: dict | None = None,
 ) -> str:
     """Insert a Document row linked to the pipeline source.
@@ -142,15 +143,53 @@ def insert_document(
     execute(
         """INSERT INTO documents
            (id, source_id, title, original_filename, mime_type, sha256, status,
-            extracted_text, analysis_summary, metadata, created_at, updated_at)
-           VALUES (%s, %s, %s, %s, %s, %s, 'ready', %s, %s, %s, NOW(), NOW())""",
+            extracted_text, analysis_summary, ocr_mode, metadata, created_at, updated_at)
+           VALUES (%s, %s, %s, %s, %s, %s, 'ready', %s, %s, %s, %s, NOW(), NOW())""",
         (
             doc_id, source_id, title, original_filename or title,
-            mime_type, sha256, extracted_text, analysis_summary,
+            mime_type, sha256, extracted_text, analysis_summary, ocr_mode,
             json.dumps(metadata or {}),
         ),
     )
     return doc_id
+
+
+def update_document(
+    doc_id: str,
+    extracted_text: str = "",
+    status: str | None = None,
+    analysis_summary: str = "",
+    ocr_mode: str = "",
+    metadata: dict | None = None,
+) -> None:
+    existing = get_document(doc_id)
+    if existing is None:
+        logger.warning("Document %s not found, skipping update", doc_id)
+        return
+    fields = []
+    params = []
+    if extracted_text:
+        fields.append("extracted_text = %s")
+        params.append(extracted_text)
+    if status is not None:
+        fields.append("status = %s")
+        params.append(status)
+    if analysis_summary:
+        fields.append("analysis_summary = %s")
+        params.append(analysis_summary)
+    if ocr_mode:
+        fields.append("ocr_mode = %s")
+        params.append(ocr_mode)
+    if metadata:
+        merged = dict(existing.get("metadata", {}) or {})
+        merged.update(metadata)
+        fields.append("metadata = %s")
+        params.append(json.dumps(merged))
+    if fields:
+        fields.append("updated_at = NOW()")
+        sql = f"UPDATE documents SET {', '.join(fields)} WHERE id = %s"
+        params.append(doc_id)
+        execute(sql, tuple(params))
 
 
 def get_document(doc_id: str) -> dict | None:
@@ -243,16 +282,31 @@ def insert_asset(
     mime_type: str = "",
     page_number: int | None = None,
     text: str = "",
+    source_index: int = 0,
+    derived_index: int = 0,
+    object_key: str = "",
+    sha256: str = "",
+    width: int = 0,
+    height: int = 0,
+    ocr_backend: str = "none",
+    ocr_status: str = "skipped",
+    preprocessing: dict | None = None,
     metadata: dict | None = None,
 ) -> str:
     asset_id = str(uuid.uuid4())
     execute(
         """INSERT INTO document_assets
-           (id, document_id, asset_type, file, mime_type, page_number, text, metadata)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+           (id, document_id, asset_type, file, mime_type, page_number, text,
+            analysis,
+            source_index, derived_index, object_key, sha256, width, height,
+            ocr_backend, ocr_status, preprocessing, metadata, created_at)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, '', %s, %s, %s, %s, %s, %s,
+                   %s, %s, %s, %s, NOW())""",
         (
             asset_id, document_id, asset_type, file, mime_type,
-            page_number, text, json.dumps(metadata or {}),
+            page_number, text, source_index, derived_index, object_key, sha256,
+            width, height, ocr_backend, ocr_status,
+            json.dumps(preprocessing or {}), json.dumps(metadata or {}),
         ),
     )
     return asset_id

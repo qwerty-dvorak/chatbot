@@ -11,6 +11,7 @@ The live chatbot-service server only ever references records by their UUID.
 
 import json
 import logging
+import time
 import uuid
 from dataclasses import dataclass
 from typing import Optional
@@ -114,10 +115,16 @@ def process_document(
         ``embeddings_indexed``, ``hyde_generated``, ``object_key``.
     """
     p = _resolve(params)
+    raw_params = params or {}
+    existing_document_id = raw_params.get("existing_document_id")
+    existing_object_key = raw_params.get("existing_object_key", "")
+    chunk_index_offset = int(raw_params.get("chunk_index_offset", 0))
     _patch_config(p)
 
     log = logger.info
     source_name = doc.metadata.get("filename", doc.path)
+    timing: dict[str, float] = {}
+    _t = time.time
 
     # Step 0 — param summary
     log("[text_pipeline] source=%s strategy=%s chunk_size=%d overlap=%d hyde=%s",
@@ -126,35 +133,49 @@ def process_document(
           f"chunk_size={p.chunk_size} overlap={p.chunk_overlap} hyde={p.generate_hyde}")
 
     # Step 1 — object store
+    t0 = _t()
     if progress:
         progress.start("store_raw", f"storing {source_name}")
     log("[text_pipeline] step=store_raw source=%s", source_name)
     print(f"[text_pipeline] step=store_raw storing {source_name}")
-    object_key = store.store_file(doc.path)
+    object_key = existing_object_key or store.store_file(doc.path)
     log("[text_pipeline] step=store_raw key=%s", object_key)
     print(f"[text_pipeline] step=store_raw key={object_key}")
+    timing["store_raw"] = round(_t() - t0, 4)
     if progress:
         progress.complete("store_raw", f"key={object_key}")
 
     # Step 2 — PostgreSQL Document row
+    t0 = _t()
     if progress:
         progress.start("db_insert", "creating Document row")
     log("[text_pipeline] step=db_insert inserting document source=%s", source_name)
     print(f"[text_pipeline] step=db_insert source={source_name}")
     pgdb.connect()
-    doc_id = pgdb.insert_document(
-        title=doc.metadata.get("filename", doc.path),
-        mime_type=doc.content_type.value,
-        original_filename=doc.metadata.get("filename", ""),
-        extracted_text=doc.text,
-        metadata={"source_path": doc.path, "object_key": object_key, **doc.metadata},
-    )
+    if existing_document_id:
+        doc_id = existing_document_id
+        pgdb.update_document(
+            doc_id=doc_id,
+            extracted_text=doc.text,
+            status="ready",
+            metadata={"source_path": doc.path, "object_key": object_key, **doc.metadata},
+        )
+    else:
+        doc_id = pgdb.insert_document(
+            title=doc.metadata.get("filename", doc.path),
+            mime_type=doc.content_type.value,
+            original_filename=doc.metadata.get("filename", ""),
+            extracted_text=doc.text,
+            metadata={"source_path": doc.path, "object_key": object_key, **doc.metadata},
+        )
+    timing["db_insert"] = round(_t() - t0, 4)
     log("[text_pipeline] step=db_insert doc_id=%s", doc_id)
     print(f"[text_pipeline] step=db_insert doc_id={doc_id}")
     if progress:
         progress.complete("db_insert", f"doc_id={doc_id}")
 
     # Step 3 — chunk
+    t0 = _t()
     if progress:
         progress.start("chunk", f"strategy={p.chunk_strategy}")
     log("[text_pipeline] step=chunk strategy=%s", p.chunk_strategy)
@@ -164,6 +185,7 @@ def process_document(
     log("[text_pipeline] step=chunk chunks=%d text_chunks=%d",
         len(chunks), len(text_chunks))
     print(f"[text_pipeline] step=chunk total={len(chunks)} text={len(text_chunks)}")
+    timing["chunk"] = round(_t() - t0, 4)
     if progress:
         progress.complete("chunk", f"{len(text_chunks)} text chunks")
 
@@ -171,6 +193,7 @@ def process_document(
     summary_chunk: Chunk | None = None
     summary_text = ""
     if p.generate_summary and doc.text.strip():
+        t0 = _t()
         if progress:
             progress.start("summary", f"summarising {source_name}")
         summary_text = _chat(
@@ -197,6 +220,7 @@ def process_document(
                    WHERE id = %s""",
                 (summary_text, doc_id),
             )
+        timing["summary"] = round(_t() - t0, 4)
         if progress:
             progress.complete("summary", f"{len(summary_text)} chars")
     elif progress:
@@ -204,6 +228,7 @@ def process_document(
         progress.complete("summary", "summary generation disabled")
 
     # Step 4 — Hypothetical question generation
+    t0 = _t()
     hyde_count = 0
     question_chunks: list[Chunk] = []
     if progress:
@@ -251,12 +276,13 @@ def process_document(
             chunk_meta["window_text"] = c.window_text
 
         chunk_rows.append({
-            "chunk_index": idx,
+            "chunk_index": chunk_index_offset + idx,
             "content": c.text,
             "metadata": chunk_meta,
             "document_id": doc_id,
         })
 
+    timing["hyde"] = round(_t() - t0, 4)
     log("[text_pipeline] step=hyde total_questions=%d question_chunks=%d",
         hyde_count, len(question_chunks))
     print(f"[text_pipeline] step=hyde generated {hyde_count} questions "
@@ -265,15 +291,18 @@ def process_document(
         progress.complete("hyde", f"{hyde_count} questions")
 
     # Step 5 — persist chunks to PostgreSQL
+    t0 = _t()
     if progress:
         progress.start("persist", "writing to document_chunks")
     chunk_ids = pgdb.insert_chunks_batch(chunk_rows) if chunk_rows else []
+    timing["persist"] = round(_t() - t0, 4)
     log("[text_pipeline] step=persist chunk_ids=%d written", len(chunk_ids))
     print(f"[text_pipeline] step=persist {len(chunk_ids)} chunks written")
     if progress:
         progress.complete("persist", f"{len(chunk_ids)} chunks")
 
     # Step 6 — embed (text chunks + hypothetical question chunks + summary)
+    t0 = _t()
     all_to_embed = text_chunks + question_chunks
     if summary_chunk is not None:
         all_to_embed.append(summary_chunk)
@@ -285,12 +314,14 @@ def process_document(
           f"dim={p.embedding_dim} chunks={len(text_chunks)} questions={len(question_chunks)}")
     connect_milvus()
     text_embedded: list[EmbeddedChunk] = embed_text(all_to_embed)
+    timing["embed"] = round(_t() - t0, 4)
     log("[text_pipeline] step=embed embedded=%d", len(text_embedded))
     print(f"[text_pipeline] step=embed {len(text_embedded)} embeddings")
     if progress:
         progress.complete("embed", f"{len(text_embedded)} vectors")
 
     # Step 7 — index into Milvus
+    t0 = _t()
     if progress:
         progress.start("index", "indexing into Milvus")
     if text_embedded:
@@ -301,11 +332,13 @@ def process_document(
               f"vectors={len(text_embedded)} "
               f"({len(text_chunks)} doc + {len(question_chunks)} question)")
         index_chunks(text_embedded)
+    timing["index"] = round(_t() - t0, 4)
     log("[text_pipeline] step=index done")
     print("[text_pipeline] step=index complete")
     if progress:
         progress.complete("index", f"{len(text_embedded)} vectors indexed")
 
+    timing["total"] = round(sum(v for v in timing.values()), 4)
     summary_indexed = 1 if summary_chunk is not None else 0
     result = {
         "document_id": doc_id,
@@ -322,6 +355,7 @@ def process_document(
             "collection": cfg.text_collection,
             "chunk_strategy": p.chunk_strategy,
         },
+        "timing": timing,
     }
     log("[text_pipeline] done doc_id=%s chunks=%d embeddings=%d hyde=%d questions=%d summary=%s",
         doc_id, len(text_chunks), len(text_embedded), hyde_count, len(question_chunks),

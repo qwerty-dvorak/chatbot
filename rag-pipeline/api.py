@@ -34,7 +34,7 @@ def _execute_job(job: dict) -> dict:
 
     if job["kind"] == "ingest":
         step_names = [
-            "extract", "store_raw", "db_insert", "chunk",
+            "extract", "store_raw", "ocr", "db_insert", "chunk", "text_pipeline",
             "summary", "hyde", "persist", "embed", "index",
         ]
         tracker = ProgressTracker(
@@ -62,16 +62,29 @@ def _execute_job(job: dict) -> dict:
                 doc = do_extract(str(file_path))
                 tracker.complete("extract", f"{source_name} ({doc.content_type.value})")
 
-                if doc.images and not doc.text:
-                    # Image document -> use image pipeline
+                existing_doc_id = payload.get("document_id")
+                if doc.images:
+                    tier = tier_from_str(payload.get("tier", IngestionTier.SLOW.value))
+                    options = options_for_tier(tier)
                     result = image_process(doc, params={
+                        "existing_document_id": existing_doc_id,
                         "embedding_model": cfg.multimodal_embedding_model,
                         "embedding_dim": cfg.multimodal_embedding_dim,
+                        "ocr_mode": payload.get("ocr_mode") or (
+                            "none" if tier == IngestionTier.INSTANT else cfg.ocr_mode
+                        ),
+                        "use_multimodal_embedding": options.use_multimodal_embedding,
+                        "use_text_embedding": options.use_text_embedding,
+                        "chunk_strategy": payload.get("strategy") or options.chunk_strategy,
+                        "generate_hyde": payload.get("hypothetical_questions")
+                        if payload.get("hypothetical_questions") is not None
+                        else options.hypothetical_questions_per_chunk > 0,
                     }, progress=tracker)
                 else:
                     # Text document -> use text pipeline
                     result = text_process(doc, params={
-                        "chunk_strategy": payload.get("strategy", cfg.chunk_strategy),
+                        "existing_document_id": existing_doc_id,
+                        "chunk_strategy": payload.get("strategy") or cfg.chunk_strategy,
                         "generate_hyde": payload.get("hypothetical_questions", True),
                     }, progress=tracker)
                 results.append(result)
@@ -162,7 +175,7 @@ class SearchResponse(BaseModel):
     hierarchical: bool
     results: list[dict]
     total: int
-    timing: dict[str, float]
+    timing: dict[str, float | str]
 
 
 class PromotionRequest(BaseModel):
@@ -270,6 +283,8 @@ async def enqueue_ingestion(
     tier: IngestionTier = Form(IngestionTier.SLOW),
     strategy: Literal["recursive", "sentence_window", "hierarchical"] | None = Form(None),
     hypothetical_questions: bool | None = Form(None),
+    ocr_mode: Literal["none", "basic", "paddleocr"] | None = Form(None),
+    document_id: str | None = Form(None),
 ):
     """Persist uploaded files and enqueue a long-running ingestion job."""
     if not files:
@@ -298,6 +313,8 @@ async def enqueue_ingestion(
                 "tier": tier.value,
                 "strategy": strategy,
                 "hypothetical_questions": hypothetical_questions,
+                "ocr_mode": ocr_mode,
+                "document_id": document_id,
             },
             filenames=filenames,
             job_id=job_id,

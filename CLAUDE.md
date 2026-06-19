@@ -27,15 +27,30 @@ Model files live in a **separate git repo** at the same level as this repo (`../
 They are mounted as Docker volumes at runtime — never copied into this repo.
 See `chatbot-service/shell_scripts/start-services.sh` and `rag-pipeline/shell_scripts/start-services.sh` for mount paths.
 
+LoRA adapters live in the separate sibling directory `../lora_adapters/`,
+grouped by provider/owner and repository. Each repository contains
+`adapter_config.json` and `adapter_model.safetensors`.
+
 ```
 barc/
 ├── chatbot/          ← this repo
-└── models/           ← separate git repo (HF model configs, tokenizers, safetensors)
-    ├── gemma-4-26B-A4B-it/
-    ├── llama-embed-nemotron-8b/
-    ├── nemotron-colembed-vl-8b-v2/
-    └── Qwen3-VL-Reranker-8B/
+├── models/           ← separate git repo (HF model configs, tokenizers, safetensors)
+│   ├── gemma-4-26B-A4B-it/
+│   ├── llama-embed-nemotron-8b/
+│   ├── nemotron-colembed-vl-8b-v2/
+│   └── Qwen3-VL-Reranker-8B/
+└── lora_adapters/
+    └── EvilScript/
+        ├── taboo-book-gemma-4-E4B-it/
+        └── taboo-ship-gemma-4-E4B-it/
 ```
+
+`models/deploy-runpod.sh` discovers this two-level layout, uses each local Git
+`origin` (or derives `https://huggingface.co/<owner>/<repo>`), clones all
+compatible adapters into `/lora_adapters/<owner>/<repo>` on the pod, and gives
+vLLM those local paths. `models/deploy-local.sh` mounts the entire adapter root
+read-only and registers adapters compatible with the local base model. Override
+the root with `LORA_ADAPTERS_DIR=/absolute/path`.
 
 To clone models locally:
 ```bash
@@ -58,6 +73,10 @@ for full detail.
   chunk.  At search time, query-to-query resolution replaces question hits
   with their parent document chunks.  This is distinct from **HyDE** (query-time
   document generation).
+- **Image ingestion is dual-track.** Each source image/PDF page is normalized,
+  optionally split, persisted per derived image, and processed with
+  `none`, basic Tesseract, or PaddleOCR. OCR text reuses the text pipeline;
+  image vectors remain in the multimodal collection.
 - **Single PostgreSQL** is shared between rag-pipeline (writes) and
   chatbot-service (reads). For two-server deployment, PostgreSQL listens on
   `*` with `pg_hba.conf` allowing remote connections.
@@ -76,6 +95,7 @@ RAG pipeline via HTTP (`RAG_API_BASE_URL`).
 ┌── Server A: RAG Pipeline ──────────────────────────┐
 │  rag-api (port 8093)    Milvus (:19530)              │
 │  PostgreSQL (:5433)     RunPod / vLLM endpoints       │
+│  PaddleOCR (local Python or RunPod :8000)             │
 └──────────────────────────────────────────────────────┘
                 │ HTTP :8093 │ TCP :5433 │ TCP :19530
 ┌──────────────────────────────────────────────────────┐
@@ -103,6 +123,9 @@ pg_hba.conf      →  host chatbot chatbot <client-ip>/32 md5
 
 - **Models outside repo** — all model files live in a sibling `../models/` git repo;
   cloned once via `models/clone_models.sh`. Docker volumes mount them at runtime.
+- **LoRAs outside repo** — adapters live under
+  `../lora_adapters/<provider>/<repository>/`. Their base-model metadata must
+  match the active chat model; incompatible adapters are skipped.
 - **No Docker Compose** — services are started with plain `docker run` commands or
   native processes.
 - **Python images** always use `FROM ubuntu:24.04` as base; dependencies managed with `uv`.

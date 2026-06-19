@@ -26,12 +26,11 @@ MULTIMODAL_GPU="${MULTIMODAL_GPU:-1}"
 RERANKER_GPU="${RERANKER_GPU:-2}"
 TP_SIZE="${TENSOR_PARALLEL_SIZE:-1}"
 
-if [[ "$*" == *"--clean"* ]]; then
-  echo "Removing old containers..."
-  docker rm -f rag-text-embed rag-multimodal-embed rag-reranker rag-api 2>/dev/null || true
-fi
-
+docker rm -f rag-api 2>/dev/null || true
 docker network inspect "$NETWORK_NAME" >/dev/null 2>&1 || docker network create "$NETWORK_NAME"
+
+# Gateway IP for cross-container host access (postgres, milvus publish ports on host)
+GATEWAY_IP="$(docker network inspect "$NETWORK_NAME" --format '{{(index .IPAM.Config 0).Gateway}}' 2>/dev/null || echo 'localhost')"
 
 mkdir -p "$VOL_DIR/etcd" "$VOL_DIR/minio" "$VOL_DIR/milvus"
 
@@ -103,8 +102,18 @@ docker run -d \
   -e RERANKER_BASE_URL="http://rag-reranker:8000" \
   -e RERANKER_API_KEY="dummy" \
   -e RERANKER_MODEL="/model" \
-  -e MILVUS_HOST="milvus-standalone" \
+  -e OCR_MODE="${OCR_MODE:-paddleocr}" \
+  -e OCR_BASE_URL="${OCR_BASE_URL:-}" \
+  -e OCR_API_KEY="${OCR_API_KEY:-dummy}" \
+  -e OCR_MODEL="${OCR_MODEL:-PaddlePaddle/PaddleOCR-VL-1.6}" \
+  -e PADDLE_PDX_CACHE_HOME="/app/data/.paddlex" \
+  -e MILVUS_HOST="$GATEWAY_IP" \
   -e MILVUS_PORT="19530" \
+  -e POSTGRES_HOST="$GATEWAY_IP" \
+  -e POSTGRES_PORT="5433" \
+  -e POSTGRES_DB="${POSTGRES_DB:-chatbot}" \
+  -e POSTGRES_USER="${POSTGRES_USER:-chatbot}" \
+  -e POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-chatbot}" \
   -v "$DATA_DIR:/app/data" \
   -p "$API_PORT:8093" \
   --health-cmd='python3 -c "import urllib.request; urllib.request.urlopen(\"http://localhost:8093/health\")" 2>/dev/null && echo ok' \
@@ -116,4 +125,5 @@ echo "All services started."
 echo "  Text Embedding  -> http://localhost:$TEXT_EMBED_PORT/v1"
 echo "  Multimodal Emb  -> http://localhost:$MULTIMODAL_PORT"
 echo "  Reranker        -> http://localhost:$RERANKER_PORT"
+echo "  PaddleOCR       -> ${OCR_BASE_URL:-local Python backend}"
 echo "  RAG API         -> http://localhost:$API_PORT  (docs: /docs)"

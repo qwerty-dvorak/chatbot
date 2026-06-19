@@ -36,9 +36,10 @@ _summarize() {
 }
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 API_URL="http://localhost:8093"
-TEST_FILE="$SCRIPT_DIR/data/sample_data/factual_test.txt"
-VENV_PYTHON="$SCRIPT_DIR/.venv/bin/python"
+TEST_FILE="$ROOT_DIR/sample_data/text/factual_test.txt"
+DOCKER_PY="docker exec rag-api uv run python"
 TEXT_COLLECTION="rag_text_chunks"
 
 # ── Verify prerequisites ──────────────────────────────────────────────────────
@@ -54,23 +55,25 @@ curl -sf "$API_URL/health" > /dev/null 2>&1 && result PASS "rag-api reachable" |
 [[ -f "$TEST_FILE" ]] && result PASS "Test file exists: $TEST_FILE" || result FAIL "Test file not found: $TEST_FILE"
 
 # Check PostgreSQL
-$VENV_PYTHON -c "
-import psycopg2
-conn = psycopg2.connect(host='localhost', port=5433, dbname='chatbot', user='chatbot', password='chatbot')
+$DOCKER_PY -c "
+import os, psycopg2
+conn = psycopg2.connect(host=os.environ.get('POSTGRES_HOST','localhost'), port=5433, dbname='chatbot', user='chatbot', password='chatbot')
 conn.close()
 " 2>/dev/null && result PASS "PostgreSQL reachable" || result FAIL "PostgreSQL not reachable"
 
 # Check Milvus
-$VENV_PYTHON -c "
+$DOCKER_PY -c "
+import os
 from pymilvus import MilvusClient
-c = MilvusClient('http://localhost:19530')
+c = MilvusClient(f\"http://{os.environ.get('MILVUS_HOST','localhost')}:19530\")
 c.list_collections()
 " 2>/dev/null && result PASS "Milvus reachable" || result FAIL "Milvus not reachable"
 
 # Drop pre-existing collections so pipeline/_ensure_collection creates them with correct schema
-$VENV_PYTHON -c "
+$DOCKER_PY -c "
+import os
 from pymilvus import MilvusClient
-c = MilvusClient('http://localhost:19530')
+c = MilvusClient(f\"http://{os.environ.get('MILVUS_HOST','localhost')}:19530\")
 for col in ['$TEXT_COLLECTION', 'rag_image_chunks']:
     if col in c.list_collections():
         c.drop_collection(col)
@@ -79,9 +82,9 @@ print('Collections ready for pipeline to create')
 " 2>/dev/null && result PASS "Milvus cleared for pipeline schema" || result FAIL "Milvus cleanup failed"
 
 # Clean up previous ingestion data from PostgreSQL
-$VENV_PYTHON -c "
-import psycopg2
-conn = psycopg2.connect(host='localhost', port=5433, dbname='chatbot', user='chatbot', password='chatbot')
+$DOCKER_PY -c "
+import os, psycopg2
+conn = psycopg2.connect(host=os.environ.get('POSTGRES_HOST','localhost'), port=5433, dbname='chatbot', user='chatbot', password='chatbot')
 cur = conn.cursor()
 cur.execute('DELETE FROM document_chunks')
 cur.execute('DELETE FROM documents')
@@ -190,9 +193,9 @@ echo "────────────────────────�
 # ── 3a. PostgreSQL: Document row ────────────────────────
 echo ""
 echo "  §3a  PostgreSQL: document row"
-$VENV_PYTHON -c "
-import psycopg2, json
-conn = psycopg2.connect(host='localhost', port=5433, dbname='chatbot', user='chatbot', password='chatbot')
+$DOCKER_PY -c "
+import os, psycopg2, json
+conn = psycopg2.connect(host=os.environ.get('POSTGRES_HOST','localhost'), port=5433, dbname='chatbot', user='chatbot', password='chatbot')
 cur = conn.cursor()
 
 # Count documents
@@ -217,9 +220,9 @@ done
 # ── 3b. PostgreSQL: Chunk rows ──────────────────────────
 echo ""
 echo "  §3b  PostgreSQL: chunk rows (content verification)"
-$VENV_PYTHON -c "
-import psycopg2, json
-conn = psycopg2.connect(host='localhost', port=5433, dbname='chatbot', user='chatbot', password='chatbot')
+$DOCKER_PY -c "
+import os, psycopg2, json
+conn = psycopg2.connect(host=os.environ.get('POSTGRES_HOST','localhost'), port=5433, dbname='chatbot', user='chatbot', password='chatbot')
 cur = conn.cursor()
 
 # Count total chunks
@@ -254,9 +257,9 @@ done
 # ── 3c. PostgreSQL: HyDE questions ──────────────────────
 echo ""
 echo "  §3c  PostgreSQL: hypothetical questions (HyDE)"
-$VENV_PYTHON -c "
-import psycopg2, json
-conn = psycopg2.connect(host='localhost', port=5433, dbname='chatbot', user='chatbot', password='chatbot')
+$DOCKER_PY -c "
+import os, psycopg2, json
+conn = psycopg2.connect(host=os.environ.get('POSTGRES_HOST','localhost'), port=5433, dbname='chatbot', user='chatbot', password='chatbot')
 cur = conn.cursor()
 
 # Count chunks with HyDE questions (stored as metadata.hyde_questions array)
@@ -291,9 +294,10 @@ done
 # ── 3d. Milvus: Embeddings ──────────────────────────────
 echo ""
 echo "  §3d  Milvus: embeddings in $TEXT_COLLECTION"
-$VENV_PYTHON -c "
+$DOCKER_PY -c "
+import os
 from pymilvus import MilvusClient
-c = MilvusClient('http://localhost:19530')
+c = MilvusClient(f\"http://{os.environ.get('MILVUS_HOST','localhost')}:19530\")
 
 collection_name = '$TEXT_COLLECTION'
 
@@ -329,9 +333,10 @@ done
 # ── 3f. Milvus: Hypothetical question vectors ───────────
 echo ""
 echo "  §3f  Milvus: hypothetical question chunk vectors"
-$VENV_PYTHON -c "
+$DOCKER_PY -c "
+import os
 from pymilvus import MilvusClient
-c = MilvusClient('http://localhost:19530')
+c = MilvusClient(f\"http://{os.environ.get('MILVUS_HOST','localhost')}:19530\")
 
 collection_name = '$TEXT_COLLECTION'
 

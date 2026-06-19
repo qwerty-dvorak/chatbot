@@ -12,6 +12,15 @@
       {% if chat.archived %}<span class="badge badge-pending" style="margin-left:8px">archived</span>{% endif %}
     </span>
     <div class="chat-topbar-actions">
+      <form method="post" action="{% url 'chat:lora' chat.id %}" class="lora-form">
+        {% csrf_token %}
+        <input type="hidden" name="next" value="{% url 'chat:detail' chat.id %}">
+        <select name="lora_adapter" class="lora-select" onchange="this.form.submit()" title="LoRA adapter">
+          {% for val, label in lora_adapters %}
+            <option value="{{ val }}"{% if val == current_lora %} selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </form>
       <form method="post" action="{% url 'chat:compact' chat.id %}" class="compact-form">
         {% csrf_token %}
         <button type="submit" class="btn btn-ghost btn-sm" title="Summarize older messages with the LLM">Compact</button>
@@ -194,7 +203,7 @@
           <span class="composer-mode-hint" id="composer-mode-hint">Faster direct answers</span>
         </div>
         <div class="input-box">
-          <input type="file" id="file-input" name="attachment"
+          <input type="file" id="file-input" name="attachment" multiple
                  accept=".pdf,.txt,.md,.csv,image/png,image/jpeg,image/webp,image/gif"
                  style="display:none">
           <button type="button" class="attach-btn" id="attach-btn" title="Attach file">
@@ -281,18 +290,23 @@ function toggleReasoning(btn) {
     strip.innerHTML = '';
     fileAttached = false;
     if (!this.files.length) return;
-    const f = this.files[0];
     fileAttached = true;
-    const chip = document.createElement('div');
-    chip.className = 'file-preview-chip';
-    chip.innerHTML = '📎 ' + f.name +
-      ' <button type="button" title="Remove">✕</button>';
-    chip.querySelector('button').addEventListener('click', function () {
+    Array.from(this.files).forEach((f) => {
+      const chip = document.createElement('div');
+      chip.className = 'file-preview-chip';
+      chip.textContent = '📎 ' + f.name;
+      strip.appendChild(chip);
+    });
+    const clear = document.createElement('button');
+    clear.type = 'button';
+    clear.title = 'Remove all';
+    clear.textContent = '✕';
+    clear.addEventListener('click', function () {
       fileInput.value = '';
       strip.innerHTML = '';
       fileAttached = false;
     });
-    strip.appendChild(chip);
+    strip.appendChild(clear);
   });
 
   /* ── scroll to bottom ── */

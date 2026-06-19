@@ -7,14 +7,15 @@
 # Requires: .env.runpod (written by runpod_wait.sh)
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ENV_FILE="$SCRIPT_DIR/.env.runpod"
-SAMPLE_PDF="$SCRIPT_DIR/data/sample_data/2025-0910-newsletter.pdf"
+ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+ENV_FILE="$ROOT_DIR/models/.env.runpod"
+SAMPLE_PDF="$ROOT_DIR/sample_data/pdf/2025-0910-newsletter.pdf"
 API_IMAGE="rag-api-test"
 CONTAINER_NAME="rag-api-test"
 API_PORT=${API_PORT:-8093}
 API_URL="http://localhost:$API_PORT"
 
-[[ -f "$ENV_FILE" ]] || { echo "ERROR: .env.runpod not found. Run runpod_wait.sh first."; exit 1; }
+[[ -f "$ENV_FILE" ]] || { echo "ERROR: models/.env.runpod not found. Run models/deploy-runpod.sh first."; exit 1; }
 [[ -f "$SAMPLE_PDF" ]] || { echo "ERROR: sample PDF not found at $SAMPLE_PDF"; exit 1; }
 
 PASS=0; FAIL=0
@@ -36,7 +37,7 @@ wait_for_job() {
 
 # ── Build RAG API image ───────────────────────────────────────────────────────
 echo "Building rag-api Docker image..."
-docker build -t "$API_IMAGE" "$SCRIPT_DIR" --quiet
+docker build -t "$API_IMAGE" "$ROOT_DIR/rag-pipeline" --quiet
 echo "  Built $API_IMAGE"
 
 # ── Start RAG API container ───────────────────────────────────────────────────
@@ -49,7 +50,7 @@ docker run -d \
   --name "$CONTAINER_NAME" \
   --network host \
   --env-file "$ENV_FILE" \
-  -v "$SCRIPT_DIR/data:/app/data" \
+  -v "$ROOT_DIR/sample_data:/app/data" \
   "$API_IMAGE"
 
 cleanup() { echo ""; echo "Stopping rag-api container..."; docker rm -f "$CONTAINER_NAME" 2>/dev/null || true; }
@@ -90,7 +91,7 @@ resp=$(curl -sf -X POST "$API_URL/v1/ingest" \
   job_id=$(echo "$resp" | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "")
   queued_status=$(echo "$resp" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))" 2>/dev/null || echo "")
   if [[ -n "$job_id" && "$queued_status" == "queued" ]] && wait_for_job "$job_id"; then
-    chunks=$(echo "$JOB_RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print((d.get('result') or {}).get('chunks_created', 0))")
+    chunks=$(echo "$JOB_RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); r=(d.get('result') or {}).get('results') or [{}]; print(r[0].get('chunks_created', 0))")
     [[ "$chunks" -gt 0 ]] && result PASS "ingest job → succeeded, chunks=$chunks" \
       || result FAIL "ingest job → no chunks: $JOB_RESPONSE"
   else

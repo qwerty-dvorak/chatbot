@@ -19,14 +19,19 @@ esac
 
 mapfile -t DOCKERFILES < <(find "$ROOT_DIR" -type f -name 'Dockerfile*' \
   -not -path '*/.git/*' -not -path '*/.venv/*' | sort)
+mapfile -t PYPROJECTS < <(find "$ROOT_DIR" -type f -name 'pyproject.toml' \
+  -not -path '*/.git/*' -not -path '*/.venv/*' | sort)
 
-python3 - "$MODE" "$ROOT_DIR" "${DOCKERFILES[@]}" <<'PY'
+python3 - "$MODE" "$ROOT_DIR" "${DOCKERFILES[@]}" "${PYPROJECTS[@]}" <<'PY'
+import re
 from pathlib import Path
 import sys
 
 mode = sys.argv[1]
 root = Path(sys.argv[2])
-paths = [Path(value) for value in sys.argv[3:]]
+all_paths = [Path(value) for value in sys.argv[3:]]
+dockerfiles = [p for p in all_paths if p.name.startswith("Dockerfile")]
+pyprojects = [p for p in all_paths if p.name == "pyproject.toml"]
 
 apt_public = """# Public Ubuntu sources from the base image remain enabled."""
 apt_barc = """RUN rm -f /etc/apt/sources.list.d/*.sources /etc/apt/sources.list
@@ -67,7 +72,7 @@ barc_blocks = {
 blocks = public_blocks if mode == "public" else barc_blocks
 configured = 0
 
-for path in paths:
+for path in dockerfiles:
     text = path.read_text()
     for required in ("BARC BASE IMAGE", "BARC APT SOURCES"):
         start = f"# BEGIN {required}"
@@ -97,4 +102,30 @@ for path in paths:
     configured += 1
 
 print(f"Configured {configured} Dockerfile(s).")
+
+# ---- pyproject.toml: [tool.uv] exclude-newer ----
+EXCLUDE_NEWER = 'exclude-newer = "2025-10-23T12:36:00Z"'
+py_configured = 0
+
+for path in pyprojects:
+    text = path.read_text()
+    if mode == "public":
+        if "[tool.uv]" in text:
+            if EXCLUDE_NEWER not in text:
+                text = text.replace("[tool.uv]", f"[tool.uv]\n{EXCLUDE_NEWER}")
+        else:
+            text += f"\n[tool.uv]\n{EXCLUDE_NEWER}\n"
+    else:
+        text = re.sub(
+            r'^[ \t]*exclude-newer\s*=\s*"[^"]*"\s*\n?',
+            "",
+            text,
+            flags=re.MULTILINE,
+        )
+
+    path.write_text(text)
+    print(f"  pyproject: {path.relative_to(root)} {'added' if mode == 'public' else 'removed'} exclude-newer")
+    py_configured += 1
+
+print(f"Configured {py_configured} pyproject.toml(s).")
 PY
