@@ -38,16 +38,13 @@ def memory_search(arguments: dict[str, Any], context: dict = {}) -> dict:
         return {"memories": [], "message": "No user context."}
 
     try:
-        from apps.memory.models import Memory
-        qs = Memory.objects.filter(user=user)
-        if query:
-            qs = qs.filter(content__icontains=query)
-        qs = qs.order_by("-importance", "-last_used_at")[:top_k]
+        from apps.memory.services import get_user_memories
+        results = get_user_memories(user, query=query or None, top_k=top_k)
 
         memories = [
             {"content": m.content, "importance": m.importance,
              "created_at": m.created_at.isoformat()}
-            for m in qs
+            for m in results
         ]
         return {
             "query":    query,
@@ -149,6 +146,53 @@ def memory_aggregate(arguments: dict[str, Any], context: dict = {}) -> dict:
     except Exception as exc:
         logger.exception("memory.aggregate failed")
         return {"aggregated": False, "error": str(exc)}
+
+
+# ── knowledge.grep ─────────────────────────────────────────────────────────────
+
+@register_builtin("knowledge.grep")
+def knowledge_grep(arguments: dict[str, Any], context: dict = {}) -> dict:
+    """Strict substring search across knowledge document chunks."""
+    pattern = arguments.get("pattern", "")
+    top_k   = int(arguments.get("top_k", 10))
+    case_sensitive = bool(arguments.get("case_sensitive", False))
+    user    = context.get("user")
+
+    if not pattern:
+        return {"matches": [], "message": "No pattern provided."}
+
+    try:
+        from apps.knowledge.models import DocumentChunk
+
+        qs = DocumentChunk.objects.select_related("document")
+
+        if case_sensitive:
+            qs = qs.filter(content__contains=pattern)
+        else:
+            qs = qs.filter(content__icontains=pattern)
+
+        qs = qs.order_by("document__title", "chunk_index")[:top_k]
+
+        matches = []
+        for chunk in qs:
+            snippet = chunk.content[:300]
+            matches.append({
+                "document_id":   str(chunk.document_id),
+                "document_title": chunk.document.title,
+                "chunk_index":   chunk.chunk_index,
+                "snippet":       snippet,
+                "match_count":   snippet.lower().count(pattern.lower()),
+            })
+
+        return {
+            "pattern": pattern,
+            "count":   len(matches),
+            "matches": matches,
+            "message": f"Found {len(matches)} chunk(s) matching '{pattern}'.",
+        }
+    except Exception as exc:
+        logger.exception("knowledge.grep failed")
+        return {"matches": [], "error": str(exc)}
 
 
 # ── knowledge.ingest_status ────────────────────────────────────────────────────

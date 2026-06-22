@@ -31,3 +31,5 @@ models/.env.runpod
 # Seed data (keep .gitignore, ignore everything else)
 seed_data/*
 !seed_data/.gitignore
+
+models/.env*

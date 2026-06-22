@@ -19,6 +19,20 @@ BUILTIN_TOOL_DEFS = [
         },
     },
     {
+        "name": "knowledge.grep",
+        "display_name": "Knowledge Grep",
+        "description": "Strict substring search across knowledge document chunks",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "pattern": {"type": "string", "description": "Text pattern to search for"},
+                "top_k": {"type": "integer", "description": "Max results", "default": 10},
+                "case_sensitive": {"type": "boolean", "description": "Case-sensitive match", "default": False},
+            },
+            "required": ["pattern"],
+        },
+    },
+    {
         "name": "knowledge.ingest_status",
         "display_name": "Ingest Status",
         "description": "Check document ingestion state",

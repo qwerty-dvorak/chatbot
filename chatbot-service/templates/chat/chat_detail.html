@@ -509,10 +509,11 @@ function toggleReasoning(btn) {
   };
 })();
 
-/* ── @mention autocomplete ── */
+/* ── @mention autocomplete with tab/arrow navigation ── */
 (function() {
   var ta = document.getElementById('msg-input');
   var dropdown = null;
+  var selectedIdx = -1;
 
   function fetchDocs(query, cb) {
     var xhr = new XMLHttpRequest();
@@ -547,11 +548,13 @@ function toggleReasoning(btn) {
     });
   }
 
-  function showDropdown(matches, queryAfterAt) {
-    if (dropdown) dropdown.remove();
+  function showDropdown(matches) {
+    if (dropdown) { dropdown.remove(); dropdown = null; }
+    selectedIdx = -1;
     if (!matches.length) return;
     dropdown = document.createElement('div');
     dropdown.className = 'mention-dropdown';
+    dropdown.setAttribute('data-query', '');
     matches.forEach(function(name) {
       var item = document.createElement('div');
       item.className = 'mention-item';
@@ -569,6 +572,18 @@ function toggleReasoning(btn) {
     document.body.appendChild(dropdown);
   }
 
+  function highlightItem(idx) {
+    if (!dropdown) return;
+    var items = dropdown.querySelectorAll('.mention-item');
+    items.forEach(function(el, i) {
+      el.classList.toggle('mention-highlighted', i === idx);
+    });
+    if (idx >= 0 && idx < items.length) {
+      items[idx].scrollIntoView({ block: 'nearest' });
+    }
+    selectedIdx = idx;
+  }
+
   function insertMention(name) {
     var val = ta.value;
     var pos = ta.selectionStart;
@@ -577,7 +592,15 @@ function toggleReasoning(btn) {
     ta.value = val.slice(0, before) + '@' + name + ' ' + val.slice(pos);
     ta.selectionStart = ta.selectionEnd = before + name.length + 2;
     ta.focus();
-    if (dropdown) { dropdown.remove(); dropdown = null; }
+    if (dropdown) { dropdown.remove(); dropdown = null; selectedIdx = -1; }
+  }
+
+  function insertHighlighted() {
+    if (!dropdown) return;
+    var items = dropdown.querySelectorAll('.mention-item');
+    if (selectedIdx >= 0 && selectedIdx < items.length) {
+      insertMention(items[selectedIdx].textContent);
+    }
   }
 
   ta.addEventListener('input', function() {
@@ -595,13 +618,38 @@ function toggleReasoning(btn) {
     }
     getDocs(function(docs) {
       var matches = docs.filter(function(d) { return d.toLowerCase().indexOf(queryAfterAt) !== -1; });
-      showDropdown(matches, queryAfterAt);
+      showDropdown(matches);
     });
+  });
+
+  ta.addEventListener('keydown', function(e) {
+    if (!dropdown) return;
+    var items = dropdown.querySelectorAll('.mention-item');
+    if (!items.length) return;
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      var next = selectedIdx + 1;
+      if (next >= items.length) next = 0;
+      highlightItem(next);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      var prev = selectedIdx - 1;
+      if (prev < 0) prev = items.length - 1;
+      highlightItem(prev);
+    } else if (e.key === 'Tab' || e.key === 'Enter') {
+      if (selectedIdx >= 0) {
+        e.preventDefault();
+        insertHighlighted();
+      }
+    } else if (e.key === 'Escape') {
+      if (dropdown) { dropdown.remove(); dropdown = null; selectedIdx = -1; }
+    }
   });
 
   ta.addEventListener('blur', function() {
     setTimeout(function() {
-      if (dropdown) { dropdown.remove(); dropdown = null; }
+      if (dropdown) { dropdown.remove(); dropdown = null; selectedIdx = -1; }
     }, 200);
   });
 })();
