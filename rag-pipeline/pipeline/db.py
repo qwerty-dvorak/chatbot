@@ -124,6 +124,11 @@ def reset_pipeline_source() -> None:
 # Documents
 # ---------------------------------------------------------------------------
 
+def _sanitize(text: str) -> str:
+    """Strip PostgreSQL-illegal characters (NUL bytes) from text."""
+    return text.replace("\x00", "") if text else text
+
+
 def insert_document(
     title: str,
     mime_type: str,
@@ -147,8 +152,8 @@ def insert_document(
            VALUES (%s, %s, %s, %s, %s, %s, 'ready', %s, %s, %s, %s, NOW(), NOW())""",
         (
             doc_id, source_id, title, original_filename or title,
-            mime_type, sha256, extracted_text, analysis_summary, ocr_mode,
-            json.dumps(metadata or {}),
+            mime_type, sha256, _sanitize(extracted_text), _sanitize(analysis_summary),
+            ocr_mode, json.dumps(metadata or {}),
         ),
     )
     return doc_id
@@ -170,13 +175,13 @@ def update_document(
     params = []
     if extracted_text:
         fields.append("extracted_text = %s")
-        params.append(extracted_text)
+        params.append(_sanitize(extracted_text))
     if status is not None:
         fields.append("status = %s")
         params.append(status)
     if analysis_summary:
         fields.append("analysis_summary = %s")
-        params.append(analysis_summary)
+        params.append(_sanitize(analysis_summary))
     if ocr_mode:
         fields.append("ocr_mode = %s")
         params.append(ocr_mode)

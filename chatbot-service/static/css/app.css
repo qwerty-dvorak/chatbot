@@ -691,6 +691,28 @@ input[type=number]:focus, input[type=url]:focus, textarea:focus, select:focus {
 }
 .thinking-mode-toggle input { position: absolute; opacity: 0; pointer-events: none; }
 .composer-mode-hint { color: var(--text3); font-size: .7rem; }
+.add-to-knowledge-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--bd);
+  border-radius: 999px;
+  padding: 4px 10px;
+  background: var(--bg);
+  color: var(--text2);
+  font-size: .75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color .15s, border-color .15s, background .15s;
+}
+.add-to-knowledge-toggle:hover { border-color: #86efac; color: #166534; }
+.add-to-knowledge-toggle:has(input:checked) {
+  color: #166534;
+  border-color: #86efac;
+  background: #f0fdf4;
+  box-shadow: 0 0 0 2px rgba(22,163,74,.08);
+}
+.add-to-knowledge-toggle input { position: absolute; opacity: 0; pointer-events: none; }
 .input-box {
   display: flex;
   align-items: flex-end;

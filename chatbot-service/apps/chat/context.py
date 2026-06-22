@@ -19,6 +19,7 @@ from apps.llm.prompts import (
 logger = logging.getLogger(__name__)
 
 MAX_IMAGE_SIZE = 20 * 1024 * 1024
+MAX_INLINE_TEXT_SIZE = 10 * 1024
 
 
 @dataclass(frozen=True)
@@ -189,6 +190,11 @@ def _build_multimodal_content(text: str, attachments: list[dict]) -> str | list[
                 if not default_storage.exists(file_path):
                     content_parts.append({"type": "text", "text": f"[File not available: {att.get('original_filename', 'unknown')}]"})
                     continue
+                size = att.get("size_bytes", 0)
+                if size > MAX_INLINE_TEXT_SIZE:
+                    placeholder = f"[Large file: {att.get('original_filename', 'file')} ({size//1024} KB)]"
+                    content_parts.append({"type": "text", "text": placeholder})
+                    continue
                 with default_storage.open(file_path, "r") as f:
                     file_text = f.read()
                 content_parts.append({"type": "text", "text": f"--- {att.get('original_filename', 'file')} ---\n{file_text}\n--- end ---"})
@@ -227,12 +233,40 @@ class ContextBuilder:
         self.messages = []
         self.total_tokens = 0
 
+    def _merge_attachment_sources(
+        self,
+        mentions: DocumentMentionResolution,
+        attachments: list[dict],
+    ) -> DocumentMentionResolution:
+        """Add attachment filenames as implicit document sources."""
+        if not attachments:
+            return mentions
+        filenames = tuple(
+            att.get("original_filename", "")
+            for att in attachments
+            if att.get("original_filename")
+        )
+        existing = set(mentions.selected_sources)
+        new_sources = tuple(f for f in filenames if f not in existing)
+        if not new_sources:
+            return mentions
+        return DocumentMentionResolution(
+            clean_query=mentions.clean_query,
+            selected_sources=mentions.selected_sources + new_sources,
+            unresolved_mentions=mentions.unresolved_mentions,
+            had_mentions=True,
+            selection_origin=mentions.selection_origin if mentions.had_mentions else "explicit",
+        )
+
     def build(self, user_message_text: str, user_message: object | None = None) -> tuple[list[dict], dict | None]:
         self.user_message = user_message or self.user_message
         # Resolve selectors, make the routing decision, and retrieve before
         # assembling any optional conversation context for the answer model.
         mentions = resolve_document_mentions(user_message_text, self.user)
         mentions = self._inherit_document_selection(mentions)
+        # Inject attachment filenames as implicit document sources
+        attachments = list(self.user_message.attachments) if self.user_message and self.user_message.attachments else []
+        mentions = self._merge_attachment_sources(mentions, attachments)
         rag_context, rag_log = self._search_rag(mentions)
 
         system_content = SYSTEM_PROMPT
@@ -263,7 +297,6 @@ class ContextBuilder:
             system_content += f"\n\n{MEMORY_CONTEXT_PROMPT.format(memories=memories)}"
         self.messages = [{"role": "system", "content": system_content}]
         self._add_recent_chat_history()
-        attachments = list(self.user_message.attachments) if self.user_message and self.user_message.attachments else []
         content = _build_multimodal_content(user_message_text, attachments)
         if self.user_message and self.user_message.metadata.get("thinking_mode"):
             content = _enable_thinking(content)

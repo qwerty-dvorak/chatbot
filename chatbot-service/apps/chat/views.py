@@ -100,19 +100,25 @@ class ChatDetailView(LoginRequiredMixin, DetailView):
                 metadata={"thinking_mode": form.cleaned_data.get("thinking_mode", False)},
             )
             attachments = []
+            add_to_knowledge = form.cleaned_data.get("add_to_knowledge", False)
             for file in form.cleaned_data.get("attachment", []):
                 import hashlib
                 sha256 = hashlib.sha256(file.read()).hexdigest()
                 file.seek(0)
                 from django.core.files.storage import default_storage
                 path = default_storage.save(f"uploads/{file.name}", file)
-                attachments.append({
+                att = {
                     "file": path,
                     "original_filename": file.name,
                     "mime_type": file.content_type,
                     "size_bytes": file.size,
                     "sha256": sha256,
-                })
+                }
+                if add_to_knowledge:
+                    doc_ref = self._ingest_attachment(request.user, file, path, sha256)
+                    if doc_ref:
+                        att["document_ref_id"] = str(doc_ref.id)
+                attachments.append(att)
             if attachments:
                 user_message.attachments = attachments
                 user_message.save(update_fields=["attachments"])
@@ -120,6 +126,88 @@ class ChatDetailView(LoginRequiredMixin, DetailView):
         context = self.get_context_data()
         context["form"] = form
         return self.render_to_response(context)
+
+    def _ingest_attachment(self, user, file, path, sha256):
+        """Create a DocumentReference + trigger RAG ingestion for a chat attachment."""
+        try:
+            from apps.documents.models import ContentBlob, ArtifactRevision, DocumentReference
+            from apps.ingestion.models import IngestionJob
+            from apps.knowledge.rag_client import rag_client
+            from apps.knowledge.views import _docs_storage, _save_doc_file
+            from django.conf import settings
+            from django.core.files.base import ContentFile
+
+            from apps.ingestion.models import IngestionJob
+            existing = ContentBlob.objects.filter(content_hash=sha256).first()
+            doc_ref = None
+            if existing:
+                doc_ref = DocumentReference.objects.filter(
+                    artifact_revision__blob=existing, owner=user,
+                    kind=DocumentReference.Kind.KNOWLEDGE,
+                ).first()
+                if doc_ref:
+                    latest_job = IngestionJob.objects.filter(
+                        document_reference=doc_ref
+                    ).order_by("-created_at").first()
+                    if not latest_job or latest_job.status != "failed":
+                        return doc_ref
+
+            import os
+            mime = file.content_type or "application/octet-stream"
+            file.seek(0)
+            raw = file.read()
+            docs_storage = _docs_storage()
+            rel_path = _save_doc_file(str(user.id), ContentFile(raw, file.name))
+
+            if not doc_ref:
+                blob, _ = ContentBlob.objects.get_or_create(
+                    content_hash=sha256,
+                    defaults={
+                        "mime_type": mime,
+                        "size_bytes": file.size,
+                        "object_key": rel_path,
+                        "storage_status": ContentBlob.StorageStatus.STORED,
+                    },
+                )
+                revision, _ = ArtifactRevision.objects.get_or_create(
+                    blob=blob,
+                    pipeline_fingerprint=sha256[:16],
+                    defaults={
+                        "extracted_text": "",
+                        "processing_status": ArtifactRevision.ProcessingStatus.PENDING,
+                    },
+                )
+                doc_ref = DocumentReference.objects.create(
+                    owner=user,
+                    artifact_revision=revision,
+                    title=file.name,
+                    kind=DocumentReference.Kind.KNOWLEDGE,
+                )
+            else:
+                revision = doc_ref.artifact_revision
+
+            if rag_client.is_enabled():
+                docs_root = getattr(settings, "DOCS_ROOT",
+                                    os.path.join(settings.MEDIA_ROOT, "docs"))
+                full_path = os.path.join(docs_root, rel_path)
+                ingest_result = rag_client.ingest(full_path)
+                job = None
+                if ingest_result and ingest_result.get("id"):
+                    job = rag_client.poll_job(ingest_result["id"], max_retries=30, interval=0.5)
+                    IngestionJob.objects.create(
+                        document_reference=doc_ref,
+                        metadata={"rag_job_id": ingest_result["id"], "status": (job or {}).get("status", "unknown")},
+                    )
+                if job and job.get("status") in ("succeeded", "completed"):
+                    revision.processing_status = ArtifactRevision.ProcessingStatus.READY
+                    revision.save(update_fields=["processing_status"])
+            else:
+                IngestionJob.objects.create(document_reference=doc_ref)
+            return doc_ref
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).exception("Failed to ingest attachment: %s", exc)
+            return None
 
 
 class ChatArchiveView(LoginRequiredMixin, View):

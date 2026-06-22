@@ -47,13 +47,23 @@ def _image_to_data_url(image_bytes: bytes) -> str:
     return f"data:{mime};base64,{b64}"
 
 
-def _pool_multimodal(input_payload) -> list[float]:
-    """Call the vLLM pooling API and mean-pool its token vectors."""
+def _pool_multimodal(input_payload, use_messages: bool = False) -> list[float]:
+    """Call the vLLM pooling API and mean-pool its token vectors.
+
+    Args:
+        input_payload: The payload for the ``input`` or ``messages`` field.
+        use_messages: When ``True``, send as ``messages`` (chat format for
+                      multimodal); otherwise send as ``input`` (completion
+                      format for text-only).
+    """
     url = f"{cfg.multimodal_embedding_base_url.rstrip('/')}/pooling"
-    payload = {
+    payload: dict = {
         "model": cfg.multimodal_embedding_model,
-        "input": input_payload,
     }
+    if use_messages:
+        payload["messages"] = input_payload
+    else:
+        payload["input"] = input_payload
     resp = httpx.post(
         url,
         json=payload,
@@ -77,24 +87,34 @@ def _pool_multimodal(input_payload) -> list[float]:
 
 
 def _embed_multimodal_single(chunk: Chunk) -> list[float]:
-    """Embed one image chunk through the documented vLLM /pooling endpoint."""
+    """Embed one image chunk through the documented vLLM /pooling endpoint.
+
+    The vLLM /pooling endpoint accepts three request schemas:
+    - ``PoolingCompletionRequest`` — ``input`` field (string for text-only)
+    - ``PoolingChatRequest`` — ``messages`` field (chat format for multimodal)
+    - ``IOProcessorRequest`` — pre-tokenized integer arrays
+    """
 
     content = []
-    if chunk.text:
-        content.append({"type": "text", "text": chunk.text})
+    text = chunk.text or ""
+    if text:
+        content.append({"type": "text", "text": text})
     if chunk.image_data:
         content.append({"type": "image_url", "image_url": {"url": _image_to_data_url(chunk.image_data)}})
 
-    # If there are multiple content items use the list form; for a single
-    # text-only item use plain string; for a single image item use the list.
-    if len(content) > 1:
-        input_payload = content
-    elif content and content[0]["type"] == "text":
-        input_payload = content[0]["text"]
-    else:
-        input_payload = content
+    if not content:
+        return _pool_multimodal("")
 
-    return _pool_multimodal(input_payload)
+    if chunk.image_data:
+        # Ensure at least minimal text so vLLM doesn't reject empty decoder prompt
+        has_text = any(part["type"] == "text" for part in content)
+        if not has_text:
+            content.insert(0, {"type": "text", "text": " "})
+        messages = [{"role": "user", "content": content}]
+        return _pool_multimodal(messages, use_messages=True)
+    else:
+        # Text-only: plain string via PoolingCompletionRequest
+        return _pool_multimodal(text)
 
 
 # ---------------------------------------------------------------------------
@@ -192,7 +212,14 @@ def embed_multimodal(chunks: list[Chunk], batch_size: int = 16) -> list[Embedded
                 chunk.id,
                 exc,
             )
-            embedding = _pool_multimodal(chunk.text or "")
+            try:
+                embedding = _pool_multimodal(chunk.text or "")
+            except Exception as fallback_exc:
+                logger.error(
+                    "Both multimodal and text-only fallback failed for chunk %s: %s",
+                    chunk.id, fallback_exc,
+                )
+                continue
 
         dur = round(time.time() - ct0, 4)
         logger.info("[TIMING] embed_multimodal chunk=%d/%d %.3fs",

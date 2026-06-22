@@ -28,6 +28,7 @@ BUILTIN_TOOL_DEFS = [
                 "pattern": {"type": "string", "description": "Text pattern to search for"},
                 "top_k": {"type": "integer", "description": "Max results", "default": 10},
                 "case_sensitive": {"type": "boolean", "description": "Case-sensitive match", "default": False},
+                "document_title": {"type": "string", "description": "Filter by document title (substring match)", "default": ""},
             },
             "required": ["pattern"],
         },
@@ -97,11 +98,11 @@ BUILTIN_TOOL_DEFS = [
     {
         "name": "document.analyze",
         "display_name": "Document Analysis",
-        "description": "Analyze an uploaded document or asset",
+        "description": "Analyze a document by ID, title, or filename. If not found, tries to ingest from chat attachment.",
         "schema": {
             "type": "object",
             "properties": {
-                "document_id": {"type": "string", "description": "Document ID to analyze"},
+                "document_id": {"type": "string", "description": "Document UUID, title, or attached filename"},
             },
             "required": ["document_id"],
         },

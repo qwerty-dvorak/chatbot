@@ -149,7 +149,11 @@ def process_document(doc: RawDocument, params: Optional[dict] = None, progress=N
         progress.start("embed", f"multimodal={p.use_multimodal_embedding}")
     if p.use_multimodal_embedding and image_chunks:
         connect_milvus()
-        embedded = embed_multimodal(image_chunks)
+        try:
+            embedded = embed_multimodal(image_chunks)
+        except Exception as exc:
+            logger.error("Multimodal embedding failed completely: %s; continuing without image vectors", exc)
+            embedded = []
     if progress:
         progress.complete("embed", f"image_vectors={len(embedded)}")
         progress.start("index", f"image_vectors={len(embedded)}")
