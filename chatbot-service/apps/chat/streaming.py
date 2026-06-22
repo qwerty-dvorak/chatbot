@@ -26,7 +26,15 @@ def stream_chat_response(message: Message, user) -> StreamingHttpResponse:
         .order_by("-created_at")
         .first()
     )
-    context_messages = builder.build(parent_msg.content if parent_msg else "", parent_msg)
+    context_messages, rag_log = builder.build(parent_msg.content if parent_msg else "", parent_msg)
+
+    if rag_log:
+        if parent_msg:
+            parent_msg.metadata["rag_search_log"] = rag_log
+            parent_msg.save(update_fields=["metadata"])
+        if rag_log.get("rag_used"):
+            message.metadata["rag_used"] = True
+            message.save(update_fields=["metadata"])
 
     client      = LiteLLMClient()
     tool_schemas = registry.get_schemas(user)
@@ -73,6 +81,9 @@ def _event_stream(
             kwargs["tools"] = tool_schemas
 
         for chunk in client.chat_completion_stream(context_messages, **kwargs):
+            if _is_cancelled(message):
+                yield f"data: {json.dumps({'type': 'cancelled'})}\n\n"
+                return
             for event in handler1.handle_chunk(chunk):
                 yield f"data: {json.dumps(event)}\n\n"
 
@@ -120,6 +131,9 @@ def _event_stream(
             thinking_mode=thinking_mode,
             lora_adapter=lora_adapter,
         ):
+            if _is_cancelled(message):
+                yield f"data: {json.dumps({'type': 'cancelled'})}\n\n"
+                return
             for event in handler2.handle_chunk(chunk):
                 yield f"data: {json.dumps(event)}\n\n"
 
@@ -131,6 +145,10 @@ def _event_stream(
         message.status = Message.Status.FAILED
         message.save(update_fields=["status"])
         yield f"data: {json.dumps({'type': 'error', 'content': str(exc)})}\n\n"
+
+
+def _is_cancelled(message: Message) -> bool:
+    return Message.objects.filter(id=message.id, status=Message.Status.CANCELLED).exists()
 
 
 def _execute_tool(tc: dict, message: Message, user) -> str:

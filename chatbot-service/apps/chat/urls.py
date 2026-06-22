@@ -13,4 +13,5 @@ urlpatterns = [
     path("<uuid:chat_id>/lora/", views.ChatLoraView.as_view(), name="lora"),
     path("<uuid:chat_id>/share/", views.ChatShareView.as_view(), name="share"),
     path("<uuid:chat_id>/stream/", views.ChatStreamView.as_view(), name="stream"),
+    path("<uuid:chat_id>/cancel/", views.ChatCancelStreamView.as_view(), name="cancel"),
 ]

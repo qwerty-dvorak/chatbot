@@ -29,6 +29,7 @@ def search(
     retrieval_mode: str = "hybrid",
     enhancements: str | list[str] | None = None,
     hierarchical: bool | None = None,
+    artifact_sources: list[str] | None = None,
 ) -> tuple[list[SearchResult], dict[str, float]]:
     """Full search pipeline.
 
@@ -131,6 +132,28 @@ def search(
             continue
         embedding = embedded[0].embedding
 
+        # Resolve artifact_sources (partial filenames) to full source_paths
+        # via a Milvus query, then use source_path in [...] for search filter.
+        artifact_paths: list[str] | None = None
+        if artifact_sources:
+            _ensure_collection(cfg.text_collection, cfg.text_embedding_dim)
+            like_clauses = " or ".join(
+                f"source_path like '%{s.replace(chr(39), chr(92)+chr(39))}%'"
+                for s in artifact_sources
+            )
+            hits = get_client().query(
+                collection_name=cfg.text_collection,
+                filter=like_clauses,
+                output_fields=["source_path"],
+                limit=10000,
+            )
+            artifact_paths = list({h["source_path"] for h in hits})
+        artifact_filter = ""
+        if artifact_paths:
+            escaped = [p.replace("\\", "\\\\").replace('"', '\\"') for p in artifact_paths]
+            path_list = "[" + ", ".join(f'"{e}"' for e in escaped) + "]"
+            artifact_filter = f"source_path in {path_list}"
+
         # ── Two-stage hierarchical search ──────────────────────────
         t0 = _t()
         if hierarchical:
@@ -146,6 +169,8 @@ def search(
                 ]
                 path_list = "[" + ", ".join(f'"{e}"' for e in escaped) + "]"
                 extra = f"source_path in {path_list} and chunk_type != \"summary\""
+                if artifact_filter:
+                    extra += f" and {artifact_filter}"
                 if mode == "vector":
                     results = vector_search(embedding, retrieval_k, extra_filter=extra)
                 elif mode == "bm25":
@@ -153,14 +178,24 @@ def search(
                 else:
                     results = hybrid_search(q_text, embedding, retrieval_k, extra_filter=extra)
             else:
-                results = []
+                if artifact_filter:
+                    extra = artifact_filter
+                    if mode == "vector":
+                        results = vector_search(embedding, retrieval_k, extra_filter=extra)
+                    elif mode == "bm25":
+                        results = bm25_search(q_text, retrieval_k)
+                    else:
+                        results = hybrid_search(q_text, embedding, retrieval_k, extra_filter=extra)
+                else:
+                    results = []
         else:
+            extra = artifact_filter if artifact_filter else None
             if mode == "vector":
-                results = vector_search(embedding, retrieval_k)
+                results = vector_search(embedding, retrieval_k, extra_filter=extra)
             elif mode == "bm25":
                 results = bm25_search(q_text, retrieval_k)
             else:
-                results = hybrid_search(q_text, embedding, retrieval_k)
+                results = hybrid_search(q_text, embedding, retrieval_k, extra_filter=extra)
         t_search_total += _t() - t0
 
         if results:

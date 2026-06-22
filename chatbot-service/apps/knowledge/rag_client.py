@@ -52,8 +52,8 @@ class RagApiClient:
                 if ocr_mode:
                     data["ocr_mode"] = ocr_mode
                 if document_reference_id:
-                    data["document_reference_id"] = document_reference_id
-                resp = self._timed_request("POST", f"{self.base_url}/v1/ingestions", files=files, data=data, timeout=self.timeout)
+                    data["document_id"] = document_reference_id
+                resp = self._timed_request("POST", f"{self.base_url}/v1/ingest", files=files, data=data, timeout=self.timeout)
                 return resp.json()
         except requests.RequestException as exc:
             duration = time.time() - start
@@ -82,6 +82,14 @@ class RagApiClient:
         logger.warning("RAG API poll timed out for job %s", job_id)
         return None
 
+    def cancel_job(self, job_id: str) -> bool:
+        try:
+            resp = self._timed_request("DELETE", f"{self.base_url}/v1/ingestions/{job_id}", timeout=10)
+            return resp.status_code == 200
+        except requests.RequestException as exc:
+            logger.warning("RAG API cancel_job failed: %s", exc)
+            return False
+
     def _timed_request(self, method: str, url: str, **kwargs) -> requests.Response:
         start = time.time()
         try:
@@ -96,6 +104,7 @@ class RagApiClient:
             raise
 
     def search(self, query: str, top_k: int = 5, artifact_ids: list[str] | None = None,
+               artifact_sources: list[str] | None = None,
                use_reranker: bool | None = None,
                hyde: bool | None = None, sub_queries: bool | None = None,
                stepback: bool | None = None) -> dict:
@@ -104,6 +113,8 @@ class RagApiClient:
         body = {"query": query, "top_k": top_k}
         if artifact_ids:
             body["artifact_ids"] = artifact_ids
+        if artifact_sources:
+            body["artifact_sources"] = artifact_sources
         if use_reranker is not None:
             body["use_reranker"] = use_reranker
         if hyde is not None:

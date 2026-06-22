@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load chat_tags %}
 {% block title %}{{ chat.title }} — Chatbot{% endblock %}
 {% block main_class %}full-h{% endblock %}
 
@@ -77,20 +78,27 @@
                 {% for a in msg.attachments %}<span class="attach-chip">📎 {{ a.original_filename }}</span>{% endfor %}
               </div>
             {% endif %}
-            {% with rag_log=msg.rag_search_log %}
+            {% with rag_log=msg.metadata.rag_search_log %}
               {% if rag_log %}
                 <button class="rag-details-toggle" onclick="toggleRagDetails(this)" type="button">
                   <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor"><path d="M8 4a.5.5 0 01.5.5v3h3a.5.5 0 010 1h-3v3a.5.5 0 01-1 0v-3h-3a.5.5 0 010-1h3v-3A.5.5 0 018 4z"/></svg>
-                  RAG details
+                  RAG·{{ rag_log.total_results }} results·{{ rag_log.timing.total }}s
                 </button>
                 <div class="rag-details-panel">
                   <div class="rag-detail-row">
-                    <span class="rag-detail-label">Mode</span>
-                    <span class="rag-detail-value">{{ rag_log.retrieval_mode }} · reranker:{{ rag_log.use_reranker|yesno:"on,off" }} · hierarchical:{{ rag_log.hierarchical|yesno:"on,off" }}</span>
+                    <span class="rag-detail-label">Files</span>
+                    <span class="rag-detail-value">{{ rag_log.result_sources|length }} file{% if rag_log.result_sources|length > 1 %}s{% endif %}, {{ rag_log.total_results }} chunk{% if rag_log.total_results > 1 %}s{% endif %}:
+                      {% for s in rag_log.result_sources %}<code>{{ s }}</code> {% endfor %}</span>
                   </div>
+                  {% if rag_log.mentioned_sources %}
                   <div class="rag-detail-row">
-                    <span class="rag-detail-label">Results</span>
-                    <span class="rag-detail-value">{{ rag_log.total_results }} sources: {% for s in rag_log.result_sources %}<code>{{ s }}</code> {% endfor %}</span>
+                    <span class="rag-detail-label">@cited</span>
+                    <span class="rag-detail-value">{% for s in rag_log.mentioned_sources %}<code>@{{ s }}</code> {% endfor %}</span>
+                  </div>
+                  {% endif %}
+                  <div class="rag-detail-row">
+                    <span class="rag-detail-label">Mode</span>
+                    <span class="rag-detail-value">{{ rag_log.retrieval_mode }} · reranker:{{ rag_log.use_reranker|yesno:"on,off" }}</span>
                   </div>
                   {% if rag_log.enhanced_queries %}
                   <div class="rag-detail-row">
@@ -102,16 +110,15 @@
                     </span>
                   </div>
                   {% endif %}
-                  {% with timing=rag_log.metadata.timing %}
+                  {% with timing=rag_log.timing %}
                     {% if timing %}
                     <div class="rag-detail-row">
                       <span class="rag-detail-label">Timing</span>
                       <span class="rag-detail-value">
-                        {% if timing.enhance_query %}<code>enhance {{ timing.enhance_query }}s</code> · {% endif %}
-                        {% if timing.embed %}<code>embed {{ timing.embed }}s</code> · {% endif %}
-                        {% if timing.search %}<code>search {{ timing.search }}s</code> · {% endif %}
-                        {% if timing.rerank %}<code>rerank {{ timing.rerank }}s</code> · {% endif %}
-                        {% if timing.total %}<strong>{{ timing.total }}s total</strong>{% endif %}
+                        {% if timing.enhance_query %}<code>enhance {{ timing.enhance_query }}s</code>{% endif %}
+                        {% if rag_log.step_timing.embed %}<code>embed {{ rag_log.step_timing.embed }}s</code>{% endif %}
+                        {% if rag_log.step_timing.rerank %}<code>rerank {{ rag_log.step_timing.rerank }}s</code>{% endif %}
+                        <strong>total {{ timing.total }}s</strong>
                       </span>
                     </div>
                     {% endif %}
@@ -142,6 +149,10 @@
                 <div class="typing" id="typing-ind">
                   <div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div>
                 </div>
+                <button class="stop-btn" id="stop-btn" type="button" title="Stop generating">
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><rect x="2" y="2" width="12" height="12" rx="2"/></svg>
+                  Stop
+                </button>
               </div>
             </div>
           {% elif msg.content or msg.tool_calls_data %}
@@ -176,9 +187,19 @@
                   {% endif %}
                 {% endwith %}
                 {% if msg.content %}
-                  <div class="msg-content">{{ msg.content }}</div>
+                  <div class="msg-content">{{ msg.content|format_content }}</div>
                 {% endif %}
                 <div class="msg-bot-time">{{ msg.created_at|time:"H:i" }}</div>
+                {% if msg.metadata.rag_used or msg.tool_calls_data %}
+                  <div class="msg-footer-row">
+                    {% if msg.metadata.rag_used %}
+                      <span class="rag-dot" title="RAG context was injected">RAG</span>
+                    {% endif %}
+                    {% if msg.tool_calls_data %}
+                      <span class="tool-dot">🔧 {{ msg.tool_calls_data|length }}</span>
+                    {% endif %}
+                  </div>
+                {% endif %}
               </div>
             </div>
           {% endif %}
@@ -321,7 +342,15 @@ function toggleReasoning(btn) {
   const streamUrl = sMsg.dataset.url;
   const contentEl = document.getElementById('stream-content');
   const typingEl  = document.getElementById('typing-ind');
+  const stopBtn   = document.getElementById('stop-btn');
   sendBtn.disabled = true;
+
+  stopBtn.addEventListener('click', function () {
+    stopBtn.disabled = true;
+    stopBtn.textContent = 'Stopping…';
+    fetch(window.location.pathname.replace(/\/$/, '') + '/cancel/', { method: 'POST', headers: {'X-CSRFToken': '{{ csrf_token }}'} })
+      .catch(function(){});
+  });
 
   let buf = contentEl.textContent || '';
   let started = false;
@@ -387,7 +416,18 @@ function toggleReasoning(btn) {
 
   function render(text) {
     const esc = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-    const withPre = esc.replace(/```[\w]*\n?([\s\S]*?)```/g, function(_, c) {
+    const withToolCalls = esc.replace(
+      /\|tool_call\|&gt;call:(\w+(?:\.\w+)*)\{([^}]*)\}&lt;\|tool_call\|/g,
+      function(_, name, args) {
+        const pretty = args.replace(/&lt;\|"\|&gt;|&lt;\|'\|&gt;/g, '"');
+        return '<div class="tool-call-block" style="margin:8px 0">' +
+          '<span class="tc-icon">🔧</span>' +
+          '<span class="tc-name">' + name + '</span>' +
+          '<code class="tc-args">' + pretty + '</code>' +
+          '</div>';
+      }
+    );
+    const withPre = withToolCalls.replace(/```[\w]*\n?([\s\S]*?)```/g, function(_, c) {
       return '<pre><code>' + c.trim() + '</code></pre>';
     });
     const withCode = withPre.replace(/`([^`\n]+)`/g, '<code>$1</code>');
@@ -427,10 +467,19 @@ function toggleReasoning(btn) {
       contentEl.innerHTML = render(buf);
       scrollBot(false);
 
+    } else if (d.type === 'cancelled') {
+      es.close();
+      contentEl.classList.remove('msg-streaming');
+      if (typingEl) typingEl.remove();
+      if (stopBtn) stopBtn.remove();
+      sendBtn.disabled = false;
+      ta.focus();
+
     } else if (d.type === 'done') {
       es.close();
       contentEl.classList.remove('msg-streaming');
       if (typingEl) typingEl.remove();
+      if (stopBtn) stopBtn.remove();
       sendBtn.disabled = false;
       ta.focus();
 
@@ -447,10 +496,108 @@ function toggleReasoning(btn) {
   es.onerror = function () {
     es.close();
     if (typingEl) typingEl.remove();
+    if (stopBtn) stopBtn.remove();
     contentEl.classList.remove('msg-streaming');
     if (!buf) contentEl.innerHTML = '<span style="color:var(--red)">⚠ Connection lost</span>';
     sendBtn.disabled = false;
   };
+})();
+
+/* ── @mention autocomplete ── */
+(function() {
+  var ta = document.getElementById('msg-input');
+  var dropdown = null;
+
+  function fetchDocs(query, cb) {
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', '/knowledge/', true);
+    xhr.setRequestHeader('Accept', 'application/json');
+    xhr.onload = function() {
+      if (xhr.status === 200) {
+        try {
+          var html = xhr.responseText;
+          var parser = new DOMParser();
+          var doc = parser.parseFromString(html, 'text/html');
+          var items = doc.querySelectorAll('[data-doc-id]');
+          var docs = [];
+          items.forEach(function(item) {
+            var titleEl = item.querySelector('.doc-title');
+            if (titleEl) docs.push(titleEl.textContent.trim());
+          });
+          cb(docs);
+        } catch(e) { cb([]); }
+      } else { cb([]); }
+    };
+    xhr.onerror = function() { cb([]); };
+    xhr.send();
+  }
+
+  var docCache = null;
+  function getDocs(cb) {
+    if (docCache) { cb(docCache); return; }
+    fetchDocs('', function(docs) {
+      docCache = docs;
+      cb(docs);
+    });
+  }
+
+  function showDropdown(matches, queryAfterAt) {
+    if (dropdown) dropdown.remove();
+    if (!matches.length) return;
+    dropdown = document.createElement('div');
+    dropdown.className = 'mention-dropdown';
+    matches.forEach(function(name) {
+      var item = document.createElement('div');
+      item.className = 'mention-item';
+      item.textContent = name;
+      item.addEventListener('mousedown', function(e) {
+        e.preventDefault();
+        insertMention(name);
+      });
+      dropdown.appendChild(item);
+    });
+    var rect = ta.getBoundingClientRect();
+    dropdown.style.position = 'fixed';
+    dropdown.style.bottom = (window.innerHeight - rect.top + 4) + 'px';
+    dropdown.style.left = rect.left + 'px';
+    document.body.appendChild(dropdown);
+  }
+
+  function insertMention(name) {
+    var val = ta.value;
+    var pos = ta.selectionStart;
+    var before = val.lastIndexOf('@', pos - 1);
+    if (before === -1) return;
+    ta.value = val.slice(0, before) + '@' + name + ' ' + val.slice(pos);
+    ta.selectionStart = ta.selectionEnd = before + name.length + 2;
+    ta.focus();
+    if (dropdown) { dropdown.remove(); dropdown = null; }
+  }
+
+  ta.addEventListener('input', function() {
+    var val = ta.value;
+    var pos = ta.selectionStart;
+    var atIdx = val.lastIndexOf('@', pos - 1);
+    if (atIdx === -1 || (atIdx > 0 && val[atIdx - 1].match(/\w/))) {
+      if (dropdown) { dropdown.remove(); dropdown = null; }
+      return;
+    }
+    var queryAfterAt = val.slice(atIdx + 1, pos).toLowerCase();
+    if (queryAfterAt.length === 0) {
+      if (dropdown) { dropdown.remove(); dropdown = null; }
+      return;
+    }
+    getDocs(function(docs) {
+      var matches = docs.filter(function(d) { return d.toLowerCase().indexOf(queryAfterAt) !== -1; });
+      showDropdown(matches, queryAfterAt);
+    });
+  });
+
+  ta.addEventListener('blur', function() {
+    setTimeout(function() {
+      if (dropdown) { dropdown.remove(); dropdown = null; }
+    }, 200);
+  });
 })();
 </script>
 {% endblock %}

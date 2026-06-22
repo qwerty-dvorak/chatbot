@@ -10,9 +10,9 @@
 </div>
 
 {% if documents %}
-  <div class="doc-list">
+  <div class="doc-list" id="doc-list">
     {% for doc in documents %}
-      <div class="doc-item">
+      <div class="doc-item" data-doc-id="{{ doc.id }}">
         <a href="{% url 'knowledge:detail' doc.id %}" style="display:flex;align-items:center;gap:12px;flex:1;min-width:0;text-decoration:none">
           <div class="doc-icon">
             {% if "pdf" in doc.artifact_revision.blob.mime_type %}PDF
@@ -22,10 +22,12 @@
           <div class="doc-body">
             <div class="doc-title" style="color:var(--text)">{{ doc.title }}</div>
             <div class="doc-meta">{{ doc.artifact_revision.blob.mime_type }} · {{ doc.created_at|timesince }} ago</div>
+            <div class="ingestion-status" id="ing-status-{{ doc.id }}"></div>
           </div>
         </a>
-        <div class="doc-actions">
-          <span class="badge badge-{{ doc.artifact_revision.processing_status }}">{{ doc.artifact_revision.processing_status }}</span>
+        <div class="doc-actions" style="gap: 6px;">
+          <span class="badge badge-{{ doc.artifact_revision.processing_status }} status-badge" id="status-badge-{{ doc.id }}">{{ doc.artifact_revision.processing_status }}</span>
+          <span class="job-badge" id="job-badge-{{ doc.id }}"></span>
           <form method="post" action="{% url 'knowledge:delete' doc.id %}" onsubmit="return confirm('Delete this document?')">
             {% csrf_token %}
             <button type="submit" class="btn btn-danger btn-sm">Delete</button>
@@ -40,4 +42,60 @@
     <a href="{% url 'knowledge:upload' %}" class="btn btn-primary">Upload your first document</a>
   </div>
 {% endif %}
+
+<script>
+(function() {
+  var docItems = document.querySelectorAll("[data-doc-id]");
+  var allDocIds = [];
+  docItems.forEach(function(item) { allDocIds.push(item.dataset.docId); });
+  if (allDocIds.length === 0) return;
+  var pollInterval = 3000;
+  function pollAll() {
+    allDocIds.forEach(function(docId) {
+      fetch("{% url 'knowledge:list' %}" + docId + "/status/")
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          var item = document.querySelector('[data-doc-id="' + docId + '"]');
+          if (!item) return;
+          var badge = item.querySelector(".status-badge");
+          var jbadge = item.querySelector(".job-badge");
+          var ingStatus = item.querySelector(".ingestion-status");
+          if (badge && data.processing_status !== badge.textContent.trim()) {
+            badge.textContent = data.processing_status;
+            badge.className = "badge status-badge badge-" + data.processing_status;
+          }
+          if (jbadge) {
+            var rs = data.rag_status || data.job_status || "";
+            if (rs === "queued" || rs === "running") {
+              var pct = data.progress_pct != null ? " " + data.progress_pct + "%" : "";
+              var step = data.current_step ? " · " + data.current_step.replace(/_/g, " ") : "";
+              jbadge.textContent = rs + pct + step;
+              jbadge.className = "job-badge job-" + rs;
+            } else if (rs === "succeeded") {
+              jbadge.textContent = "";
+              jbadge.className = "job-badge";
+            } else if (rs === "failed") {
+              jbadge.textContent = "failed";
+              jbadge.className = "job-badge job-failed";
+            } else {
+              jbadge.textContent = "";
+              jbadge.className = "job-badge";
+            }
+          }
+          if (ingStatus && data.current_step) {
+            var pct = data.progress_pct != null ? " (" + data.progress_pct + "%)" : "";
+            ingStatus.textContent = data.current_step.replace(/_/g, " ") + pct;
+            ingStatus.className = "ingestion-status active";
+          } else if (ingStatus) {
+            ingStatus.textContent = "";
+            ingStatus.className = "ingestion-status";
+          }
+        })
+        .catch(function() {});
+    });
+    setTimeout(pollAll, pollInterval);
+  }
+  setTimeout(pollAll, 2000);
+})();
+</script>
 {% endblock %}

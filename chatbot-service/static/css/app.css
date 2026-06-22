@@ -726,6 +726,23 @@ input[type=number]:focus, input[type=url]:focus, textarea:focus, select:focus {
 .send-btn { background: var(--accent); color: #fff; }
 .send-btn:hover:not(:disabled) { background: var(--accent-h); }
 .send-btn:disabled { opacity: .35; cursor: not-allowed; }
+
+.stop-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 8px;
+  padding: 4px 14px;
+  border: 1px solid var(--bd);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text2);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.stop-btn:hover:not(:disabled) { background: var(--red); color: #fff; border-color: var(--red); }
+.stop-btn:disabled { opacity: .35; cursor: not-allowed; }
 .input-hint { font-size: .72rem; color: var(--text3); text-align: center; margin-top: 6px; }
 
 /* File preview strip */
@@ -818,6 +835,29 @@ input[type=number]:focus, input[type=url]:focus, textarea:focus, select:focus {
   transition: background .13s, color .13s;
 }
 .rag-details-toggle:hover { background: var(--surface); color: var(--text2); }
+.msg-footer-row { display: flex; gap: 6px; margin-top: 4px; }
+
+.rag-dot {
+  font-size: .6rem;
+  color: var(--text3);
+  letter-spacing: .02em;
+}
+
+.tool-dot {
+  font-size: .6rem;
+  color: var(--text3);
+}
+.progress-bar-bg {
+  width: 100%; height: 8px;
+  background: var(--bg1); border-radius: 4px;
+  overflow: hidden;
+}
+.progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #1967d2, #4285f4);
+  border-radius: 4px;
+  transition: width .5s ease;
+}
 .rag-details-panel {
   display: none;
   margin-top: 8px;
@@ -904,8 +944,45 @@ input[type=number]:focus, input[type=url]:focus, textarea:focus, select:focus {
 }
 .reasoning-panel.open { display: block; }
 /* ── Misc utils ──────────────────────────────────────────────────────────────── */
+.job-badge {
+  font-size: .65rem;
+  color: var(--text3);
+  white-space: nowrap;
+}
+.job-badge.job-queued { color: var(--text2); }
+.job-badge.job-running { color: #e67e22; }
+.job-badge.job-failed { color: var(--danger); }
+.ingestion-status {
+  font-size: .65rem;
+  color: var(--text3);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ingestion-status.active { color: #e67e22; }
+
 .sr-only { position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0; }
 .text-muted { color: var(--text2); }
+.mention-dropdown {
+  position: fixed;
+  z-index: 1000;
+  background: var(--bg);
+  border: 1px solid var(--bd);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0,0,0,.2);
+  max-height: 180px;
+  overflow-y: auto;
+  min-width: 160px;
+}
+.mention-item {
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: .8rem;
+  color: var(--text);
+}
+.mention-item:hover { background: var(--accent-bg); color: var(--accent); }
+
 .mono { font-family: var(--mono); font-size: .875em; }
 .mt-4 { margin-top: 4px; }
 .mt-8 { margin-top: 8px; }

@@ -90,13 +90,13 @@ class ContextBuilder:
         self.messages = []
         self.total_tokens = 0
 
-    def build(self, user_message_text: str, user_message: object | None = None) -> list[dict]:
+    def build(self, user_message_text: str, user_message: object | None = None) -> tuple[list[dict], dict | None]:
         self.user_message = user_message or self.user_message
         system_content = SYSTEM_PROMPT
         compaction_context = self._load_compaction()
         if compaction_context:
             system_content += f"\n\n{compaction_context}"
-        rag_context = self._search_rag(user_message_text)
+        rag_context, rag_log = self._search_rag(user_message_text)
         if rag_context:
             system_content += f"\n\n{RAG_CONTEXT_PROMPT.format(results=rag_context)}"
         memories = self._load_memories()
@@ -109,7 +109,7 @@ class ContextBuilder:
         if self.user_message and self.user_message.metadata.get("thinking_mode"):
             content = _enable_thinking(content)
         self.messages.append({"role": "user", "content": content})
-        return self.messages
+        return self.messages, rag_log
 
     def _decide_enhancements(self, query: str) -> dict:
         """Ask the LLM which retrieval enhancements to enable for this query."""
@@ -151,26 +151,78 @@ class ContextBuilder:
             logger.warning("[TIMING] enhance_decide=%.3fs FAILED, using defaults", duration)
             return {}
 
-    def _search_rag(self, query: str) -> str | None:
+    @staticmethod
+    def _resolve_mentions(query: str, user) -> tuple[str, list[str]]:
+        import re
+        from apps.documents.models import DocumentReference
+        mentions = re.findall(r'@(\S+)', query)
+        if not mentions:
+            return query, []
+        clean = re.sub(r'@\S+', '', query).strip()
+        doc_refs = DocumentReference.objects.filter(
+            owner=user, kind=DocumentReference.Kind.KNOWLEDGE,
+        )
+        sources = []
+        for mention in mentions:
+            lower = mention.lower()
+            for ref in doc_refs:
+                if lower in ref.title.lower():
+                    sources.append(ref.title)
+                    break
+        return clean or query, sources
+
+    def _search_rag(self, query: str) -> tuple[str | None, dict | None]:
         start = time.time()
         if not query or not getattr(settings, "RAG_ENABLED", False):
-            return None
+            return None, None
         try:
             from apps.knowledge.rag_client import rag_client
             if not rag_client.is_enabled():
-                return None
-            enhancements = self._decide_enhancements(query)
+                return None, None
+            clean_query, mentioned_sources = self._resolve_mentions(query, self.user)
+            if not clean_query and mentioned_sources:
+                clean_query = mentioned_sources[0]
+            enhance_start = time.time()
+            enhancements = self._decide_enhancements(clean_query)
+            enhance_time = time.time() - enhance_start
             rag_response = rag_client.search(
-                query, top_k=5,
+                clean_query, top_k=5,
                 hyde=enhancements.get("hyde"),
                 sub_queries=enhancements.get("sub_queries"),
                 stepback=enhancements.get("stepback"),
+                artifact_sources=mentioned_sources or None,
             )
             results = rag_response.get("results", [])
-            duration = time.time() - start
-            logger.info("[TIMING] rag_search=%.3fs results=%d", duration, len(results if results else []))
+            enhanced_queries = rag_response.get("enhanced_queries", [])
+            total_time = time.time() - start
+            logger.info("[TIMING] rag_search=%.3fs results=%d", total_time, len(results if results else []))
+            search_timing = rag_response.get("timing") or {}
+            mode = "hybrid"
+            if enhancements.get("hyde"):
+                mode = "hyde"
+            if enhancements.get("sub_queries"):
+                mode = "sub_queries"
+            if enhancements.get("stepback"):
+                mode = "stepback"
+            rag_log = {
+                "retrieval_mode": mode,
+                "use_reranker": True,
+                "hierarchical": False,
+                "enhancements": enhancements,
+                "enhanced_queries": enhanced_queries,
+                "total_results": rag_response.get("total", len(results)),
+                "result_sources": list({r.get("source", "").split("/")[-1] for r in results if r.get("source")}),
+                "mentioned_sources": mentioned_sources,
+                "rag_used": True,
+                "step_timing": search_timing,
+                "timing": {
+                    "enhance_query": round(enhance_time, 3),
+                    "total": round(total_time, 3),
+                    **{k: round(v, 3) for k, v in search_timing.items() if isinstance(v, (int, float)) and k != "total"},
+                },
+            }
             if not results:
-                return None
+                return None, rag_log
             lines = []
             for r in results:
                 source = r.get("source", "")
@@ -182,11 +234,11 @@ class ContextBuilder:
                     lines.append(f"[{filename}] (relevance: {score:.2f}) {text[:500]}")
                 else:
                     lines.append(text[:500])
-            return "\n\n".join(lines) if lines else None
+            return ("\n\n".join(lines) if lines else None), rag_log
         except Exception:
-            duration = time.time() - start
-            logger.exception("[TIMING] rag_search=%.3fs FAILED", duration)
-            return None
+            total_time = time.time() - start
+            logger.exception("[TIMING] rag_search=%.3fs FAILED", total_time)
+            return None, {"rag_used": False, "error": "RAG search failed", "total_results": 0, "timing": {"total": round(total_time, 3)}}
 
     def _add_recent_chat_history(self):
         from apps.compaction.services import messages_after_compaction

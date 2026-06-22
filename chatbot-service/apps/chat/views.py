@@ -2,6 +2,7 @@ import uuid
 
 from django.contrib import messages as flash_messages
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse
 from django.views import View
@@ -215,6 +216,21 @@ class ChatStreamView(LoginRequiredMixin, View):
             )
         from .streaming import stream_chat_response
         return stream_chat_response(pending_msg, request.user)
+
+
+class ChatCancelStreamView(LoginRequiredMixin, View):
+    def post(self, request, chat_id):
+        chat = get_object_or_404(Chat, id=chat_id, user=request.user)
+        streaming_msg = Message.objects.filter(
+            chat=chat,
+            role=Message.Role.ASSISTANT,
+            status__in=[Message.Status.PENDING, Message.Status.STREAMING],
+        ).last()
+        if not streaming_msg:
+            return JsonResponse({"status": "not_found"}, status=404)
+        streaming_msg.status = Message.Status.CANCELLED
+        streaming_msg.save(update_fields=["status"])
+        return JsonResponse({"status": "cancelled"})
 
 
 class SharedChatView(TemplateView):

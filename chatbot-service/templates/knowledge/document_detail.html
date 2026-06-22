@@ -7,30 +7,202 @@
 </div>
 
 <div class="card mb-16">
+  <h2 style="font-size:1rem;font-weight:600;margin-bottom:12px">Details</h2>
   <div class="settings-row">
     <div><div class="settings-row-label">Status</div></div>
-    <span class="badge badge-{{ document.artifact_revision.processing_status }}">{{ document.artifact_revision.processing_status }}</span>
+    <span class="badge badge-{{ document.artifact_revision.processing_status }}" id="status-badge">{{ document.artifact_revision.processing_status }}</span>
   </div>
   <div class="settings-row">
     <div><div class="settings-row-label">Type</div></div>
     <span class="settings-val">{{ document.artifact_revision.blob.mime_type }}</span>
   </div>
   <div class="settings-row">
+    <div><div class="settings-row-label">Size</div></div>
+    <span class="settings-val">{{ document.artifact_revision.blob.size_bytes|filesizeformat }}</span>
+  </div>
+  <div class="settings-row">
+    <div><div class="settings-row-label">SHA256</div></div>
+    <span class="settings-val" style="font-family:var(--mono);font-size:.75rem">{{ document.artifact_revision.blob.content_hash|truncatechars:32 }}</span>
+  </div>
+  <div class="settings-row">
     <div><div class="settings-row-label">Uploaded</div></div>
     <span class="settings-val">{{ document.created_at|date:"Y-m-d H:i" }}</span>
   </div>
   {% if job %}
-  <div class="settings-row">
+  <div class="settings-row" id="job-status-row">
     <div><div class="settings-row-label">Ingestion job</div></div>
-    <span class="badge badge-{{ job.status }}">{{ job.status }}{% if job.error %} — {{ job.error|truncatechars:60 }}{% endif %}</span>
+    <span class="badge badge-{{ job.status }}" id="job-badge">{{ job.status }}{% if job.error %} — {{ job.error|truncatechars:60 }}{% endif %}</span>
+  </div>
+  {% endif %}
+  {% if rag_doc %}
+  <div class="settings-row">
+    <div><div class="settings-row-label">Chunks</div></div>
+    <span class="settings-val" id="chunks-count">{{ rag_doc.chunks.count }}</span>
+  </div>
+  <div class="settings-row">
+    <div><div class="settings-row-label">Embeddings</div></div>
+    <span class="settings-val" id="embeddings-count">{{ job.metadata.rag_result.embeddings_indexed|default:"—" }}</span>
+  </div>
+  {% endif %}
+  {% if job and job.metadata.rag_result.rag_summary_text %}
+  <div class="settings-row">
+    <div><div class="settings-row-label">Summary tokens</div></div>
+    <span class="settings-val">{{ job.metadata.rag_result.rag_summary_text|wordcount }} words</span>
   </div>
   {% endif %}
 </div>
 
-{% if document.artifact_revision.summary %}
-<div class="card mb-16">
-  <h2 style="font-size:1rem;font-weight:600;margin-bottom:8px">Summary</h2>
-  <div style="font-size:.875rem;white-space:pre-wrap;line-height:1.55;color:var(--text2)">{{ document.artifact_revision.summary }}</div>
+<div id="ingestion-progress" class="card mb-16" style="display:none">
+  <h2 style="font-size:1rem;font-weight:600;margin-bottom:8px">Ingestion Progress</h2>
+  <div class="progress-bar-bg">
+    <div class="progress-bar-fill" id="progress-fill" style="width:0%"></div>
+  </div>
+  <div style="margin-top:8px;font-size:.8125rem" id="progress-step">Queued...</div>
 </div>
+
+<div id="summary-card" class="card mb-16"{% if not document.artifact_revision.summary and not rag_doc %} style="display:none"{% endif %}>
+  <h2 style="font-size:1rem;font-weight:600;margin-bottom:8px">Summary</h2>
+  <div id="summary-text" style="font-size:.875rem;white-space:pre-wrap;line-height:1.55;color:var(--text2)">
+    {% if document.artifact_revision.summary %}
+      {{ document.artifact_revision.summary }}
+    {% elif rag_doc and rag_doc.analysis_summary %}
+      {{ rag_doc.analysis_summary }}
+    {% else %}
+      <em class="text-muted">No summary available</em>
+    {% endif %}
+  </div>
+</div>
+
+{% if rag_timing %}
+<div class="card mb-16">
+  <h2 style="font-size:1rem;font-weight:600;margin-bottom:8px">Ingestion Timing</h2>
+  <table style="width:100%;font-size:.8125rem;border-collapse:collapse">
+    <thead>
+      <tr style="border-bottom:1px solid var(--border)">
+        <th style="text-align:left;padding:4px 8px">Step</th>
+        <th style="text-align:right;padding:4px 8px">Duration</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for step_name, info in rag_timing.items %}
+      <tr style="border-bottom:1px solid var(--border-light)">
+        <td style="padding:4px 8px;font-family:var(--mono);font-size:.75rem">{{ step_name }}</td>
+        <td style="text-align:right;padding:4px 8px">{{ info.duration_ms|default:"—" }} ms</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% if rag_doc and rag_doc.extracted_text %}
+<div class="card mb-16">
+  <h2 style="font-size:1rem;font-weight:600;margin-bottom:8px">Extracted Text <span class="text-muted" style="font-weight:400;font-size:.75rem">({{ rag_doc.extracted_text|wordcount }} words)</span></h2>
+  <pre style="font-size:.75rem;white-space:pre-wrap;max-height:300px;overflow-y:auto;padding:8px;background:var(--bg1);border-radius:6px">{{ rag_doc.extracted_text }}</pre>
+</div>
+{% endif %}
+
+{% if document.artifact_revision.processing_status == "pending" or document.artifact_revision.processing_status == "processing" or job.status == "queued" or job.status == "running" %}
+<script>
+(function() {
+  var statusUrl = "{% url 'knowledge:status' document.id %}";
+  var ragJobId = "{{ job.metadata.rag_job_id|default:'' }}";
+  var badge = document.getElementById("status-badge");
+  var jobBadge = document.getElementById("job-badge");
+  var jobRow = document.getElementById("job-status-row");
+  var summaryCard = document.getElementById("summary-card");
+  var summaryText = document.getElementById("summary-text");
+  var chunksCount = document.getElementById("chunks-count");
+  var progressCard = document.getElementById("ingestion-progress");
+  var progressFill = document.getElementById("progress-fill");
+  var progressStep = document.getElementById("progress-step");
+  var pollInterval = 3000;
+
+  var STEPS = ["extract","store_raw","ocr","db_insert","chunk","text_pipeline","summary","hyde","persist","embed","index"];
+
+  function updateProgress(steps) {
+    if (!steps || !steps.length) return;
+    progressCard.style.display = "";
+    var done = 0;
+    var current = "";
+    for (var i = 0; i < steps.length; i++) {
+      var s = steps[i];
+      if (s.status === "completed") done++;
+      else if (s.status === "running" && !current) current = s.name;
+      else if (s.status === "pending" && !current) current = s.name;
+    }
+    var pct = Math.round((done / steps.length) * 100);
+    progressFill.style.width = pct + "%";
+    progressStep.textContent = current ? current + "..." : done + "/" + steps.length + " steps";
+  }
+
+  function pollRagApi() {
+    if (!ragJobId) return;
+    fetch("http://172.22.0.1:8093/v1/ingestions/" + ragJobId)
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.steps) updateProgress(data.steps);
+        if (data.status === "succeeded" || data.status === "failed" || data.status === "cancelled") {
+          ragJobId = "";
+        }
+      })
+      .catch(function() {});
+  }
+
+  function poll() {
+    pollRagApi();
+    fetch(statusUrl)
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        var oldStatus = badge.textContent;
+        var newStatus = data.processing_status;
+        if (newStatus !== oldStatus) {
+          badge.textContent = newStatus;
+          badge.className = "badge badge-" + newStatus;
+        }
+        if (data.job_status) {
+          if (jobBadge) {
+            var oldJob = jobBadge.textContent;
+            if (data.job_status !== oldJob) {
+              jobBadge.textContent = data.job_status;
+              jobBadge.className = "badge badge-" + data.job_status;
+            }
+          } else if (jobRow) {
+            var span = document.createElement("span");
+            span.className = "badge badge-" + data.job_status;
+            span.id = "job-badge";
+            span.textContent = data.job_status;
+            jobRow.querySelector(".settings-val") || jobRow.appendChild(span);
+          }
+        }
+        var s = data.rag_summary || data.summary || "";
+        if (s && summaryCard) {
+          summaryCard.style.display = "";
+          if (summaryText) summaryText.textContent = s;
+        }
+        if (data.chunks_created && chunksCount) {
+          chunksCount.textContent = data.chunks_created;
+        }
+        if (data.rag_timing && document.querySelector(".timing-body")) {
+          var tb = document.querySelector(".timing-body");
+          tb.innerHTML = "";
+          for (var step in data.rag_timing) {
+            var info = data.rag_timing[step];
+            var tr = document.createElement("tr");
+            tr.innerHTML = '<td style="padding:4px 8px;font-family:var(--mono);font-size:.75rem">' + step + '</td><td style="text-align:right;padding:4px 8px">' + (info.duration_ms || "—") + ' ms</td>';
+            tb.appendChild(tr);
+          }
+        }
+        if (newStatus === "pending" || newStatus === "processing" || data.job_status === "queued" || data.job_status === "running") {
+          setTimeout(poll, pollInterval);
+        }
+      })
+      .catch(function() {
+        setTimeout(poll, pollInterval * 2);
+      });
+  }
+  setTimeout(poll, 2000);
+})();
+</script>
 {% endif %}
 {% endblock %}

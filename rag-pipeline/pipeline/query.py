@@ -24,10 +24,17 @@ def _chat(system: str, user: str) -> str:
     """Call the chat model and return the response text.
 
     Non-streaming.  Uses ``cfg.chat_model`` as the model name.
+    Strips known LiteLLM provider prefixes (e.g. ``openai/``) since
+    the vLLM endpoint expects the bare HuggingFace model ID.
     """
+    model = cfg.chat_model
+    for prefix in ("openai/", "azure/", "bedrock/", "vertex_ai/"):
+        if model.startswith(prefix):
+            model = model.removeprefix(prefix)
+            break
     url = f"{cfg.chat_base_url.rstrip('/')}/chat/completions"
     body = json.dumps({
-        "model": cfg.chat_model,
+        "model": model,
         "messages": [
             {"role": "system", "content": system},
             {"role": "user", "content": user},

@@ -8,7 +8,7 @@
   </div>
 
   {% if error %}
-    <div class="flash flash-error mb-16">{{ error }}</div>
+    <div class="flash flash-error mb-16">{{ error|safe }}</div>
   {% endif %}
 
   <form method="post" enctype="multipart/form-data">

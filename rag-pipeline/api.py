@@ -165,6 +165,7 @@ class SearchRequest(BaseModel):
     stepback: bool = True
     tier: IngestionTier | None = None
     enhancements: str | None = None
+    artifact_sources: list[str] | None = None
 
 
 class SearchResponse(BaseModel):
@@ -417,6 +418,7 @@ async def search_endpoint(body: SearchRequest):
             retrieval_mode=body.mode,
             enhancements=enhancements,
             hierarchical=body.hierarchical,
+            artifact_sources=body.artifact_sources,
         )
         formatted = [
             {

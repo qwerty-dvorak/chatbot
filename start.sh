@@ -90,9 +90,10 @@ echo ""
 echo "═══ Step 3: RAG pipeline ($MODE) ═══"
 bash "$SCRIPT_DIR/rag-pipeline/run.sh" "${MODE,,}"
 
-# Step 4: Start Chatbot service
+# Step 4: Start Chatbot service (with RAG pipeline integration)
 echo ""
 echo "═══ Step 4: Chatbot service ($MODE) ═══"
+export RAG_API_ENABLED="true"
 bash "$SCRIPT_DIR/chatbot-service/run.sh" "${MODE,,}"
 
 echo ""
