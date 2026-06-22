@@ -6,7 +6,8 @@
 </div>
 <p class="text-muted" style="margin-bottom:20px;font-size:.875rem">
   These tools are available to the assistant. Enable them in <a href="{% url 'settings' %}">Settings</a>.
-  To test a tool, mention it in a chat — e.g. <em>"search my memory for climate change"</em> or <em>"search knowledge base for Python"</em>.
+  To test a tool, request it in chat — e.g. <em>"search my memory for climate change"</em>.
+  Knowledge retrieval and document mentions are handled automatically before the assistant responds.
 </p>
 
 {% if tools %}

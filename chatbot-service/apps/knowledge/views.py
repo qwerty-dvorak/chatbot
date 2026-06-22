@@ -1,4 +1,5 @@
 import hashlib
+import logging
 import os
 import uuid
 from datetime import date
@@ -17,6 +18,8 @@ from apps.documents.models import ArtifactRevision, ContentBlob, DocumentGrant, 
 from apps.ingestion.models import IngestionJob
 
 from .rag_client import rag_client
+
+logger = logging.getLogger(__name__)
 
 ALLOWED_MIME = {
     "application/pdf",
@@ -79,8 +82,11 @@ class DocumentDetailView(LoginRequiredMixin, DetailView):
         context["job"] = job
         context["rag_doc"] = None
         context["rag_timing"] = None
+        context["timing_rows"] = []
         context["step_summary"] = None
-        if job and job.metadata:
+        context["rag_steps"] = []
+        if job:
+            _sync_rag_job(job, self.object)
             rag_result = job.metadata.get("rag_result") or {}
             doc_id = rag_result.get("document_id")
             if doc_id:
@@ -89,8 +95,20 @@ class DocumentDetailView(LoginRequiredMixin, DetailView):
                     context["rag_doc"] = KnowledgeDocument.objects.get(id=doc_id)
                 except KnowledgeDocument.DoesNotExist:
                     pass
+            if context["rag_doc"] is None:
+                from apps.knowledge.models import KnowledgeDocument
+                context["rag_doc"] = (
+                    KnowledgeDocument.objects.filter(
+                        original_filename=self.object.title,
+                        metadata__object_key=self.object.artifact_revision.blob.content_hash,
+                    )
+                    .order_by("-created_at")
+                    .first()
+                )
             context["rag_timing"] = job.metadata.get("rag_timing")
-            context["step_summary"] = rag_result.get("step_summary")
+            context["timing_rows"] = _timing_rows(context["rag_timing"])
+            context["step_summary"] = job.metadata.get("rag_step_summary")
+            context["rag_steps"] = job.metadata.get("rag_steps") or []
         return context
 
 
@@ -101,6 +119,95 @@ RAG_STATUS_MAP = {
     "failed": "failed",
     "cancelled": "failed",
 }
+
+
+def _primary_rag_result(rag_data: dict | None) -> dict:
+    result = (rag_data or {}).get("result") or {}
+    results = result.get("results")
+    if isinstance(results, list) and results:
+        return results[0] or {}
+    return result if isinstance(result, dict) else {}
+
+
+def _find_rag_job(document: DocumentReference) -> dict | None:
+    """Recover remote ingestion metadata for older local rows missing a job id."""
+    if not rag_client.is_enabled():
+        return None
+    title = document.title
+    content_hash = document.artifact_revision.blob.content_hash
+    candidates = []
+    for index, rag_data in enumerate(rag_client.list_jobs(limit=200)):
+        request_doc_id = ((rag_data.get("request") or {}).get("document_id") or "")
+        primary = _primary_rag_result(rag_data)
+        object_key = primary.get("object_key", "")
+        exact_file = title in (rag_data.get("files") or [])
+        score = 0
+        if request_doc_id == str(document.id):
+            score += 100
+        if object_key == content_hash:
+            score += 50
+        if exact_file:
+            score += 20
+        if rag_data.get("status") == "succeeded" and primary:
+            score += 10
+        if score >= 60 or (exact_file and rag_data.get("status") == "succeeded"):
+            candidates.append((score, -index, rag_data))
+    return max(candidates, default=(0, 0, None), key=lambda item: (item[0], item[1]))[2]
+
+
+def _sync_rag_job(job: IngestionJob, document: DocumentReference) -> dict | None:
+    if not rag_client.is_enabled():
+        return None
+    rag_job_id = (job.metadata or {}).get("rag_job_id")
+    rag_data = rag_client.get_job(rag_job_id) if rag_job_id else None
+    if not rag_data:
+        rag_data = _find_rag_job(document)
+    if not rag_data:
+        return None
+
+    metadata = dict(job.metadata or {})
+    metadata["rag_job_id"] = rag_data.get("id", rag_job_id)
+    primary = _primary_rag_result(rag_data)
+    if primary:
+        metadata["rag_result"] = primary
+        metadata["rag_timing"] = primary.get("timing") or {}
+    metadata["rag_steps"] = rag_data.get("steps") or []
+    metadata["rag_step_summary"] = rag_data.get("step_summary") or {}
+
+    remote_status = rag_data.get("status")
+    mapped_status = {
+        "queued": IngestionJob.Status.QUEUED,
+        "running": IngestionJob.Status.RUNNING,
+        "succeeded": IngestionJob.Status.SUCCEEDED,
+        "failed": IngestionJob.Status.FAILED,
+        "cancelled": IngestionJob.Status.FAILED,
+    }.get(remote_status)
+    update_fields = []
+    if metadata != job.metadata:
+        job.metadata = metadata
+        update_fields.append("metadata")
+    if mapped_status and mapped_status != job.status:
+        job.status = mapped_status
+        update_fields.append("status")
+    error = rag_data.get("error") or ""
+    if error != job.error:
+        job.error = error
+        update_fields.append("error")
+    if update_fields:
+        job.save(update_fields=update_fields)
+    return rag_data
+
+
+def _timing_rows(timing: dict | None) -> list[dict]:
+    rows = []
+    for name, value in (timing or {}).items():
+        if isinstance(value, dict):
+            milliseconds = value.get("duration_ms")
+            seconds = milliseconds / 1000 if isinstance(milliseconds, (int, float)) else None
+        else:
+            seconds = float(value) if isinstance(value, (int, float)) else None
+        rows.append({"name": name, "seconds": seconds})
+    return rows
 
 
 class DocumentStatusJsonView(LoginRequiredMixin, DetailView):
@@ -125,8 +232,8 @@ class DocumentStatusJsonView(LoginRequiredMixin, DetailView):
         progress_pct = None
         current_step = None
 
-        if job and job.metadata.get("rag_job_id") and rag_client.is_enabled():
-            rag_data = rag_client.get_job(job.metadata["rag_job_id"])
+        if job and rag_client.is_enabled():
+            rag_data = _sync_rag_job(job, doc)
             if rag_data:
                 rag_status = rag_data.get("status")
                 mapping_status = RAG_STATUS_MAP.get(rag_status)
@@ -143,17 +250,7 @@ class DocumentStatusJsonView(LoginRequiredMixin, DetailView):
                     progress_pct = round((ss_done + ss_failed) / ss_total * 100)
                 current_step = step_summary.get("current_step")
 
-                if rag_status == "succeeded":
-                    job.status = IngestionJob.Status.SUCCEEDED
-                    if rag_data.get("result"):
-                        job.metadata["rag_result"] = rag_data["result"]
-                    job.save(update_fields=["status", "metadata"])
-                    job_status = job.status
-                elif rag_status == "failed":
-                    job.status = IngestionJob.Status.FAILED
-                    job.error = rag_data.get("error", "")
-                    job.save(update_fields=["status", "error"])
-                    job_status = job.status
+                job_status = job.status
 
         data = {
             "id": str(doc.id),
@@ -174,6 +271,8 @@ class DocumentStatusJsonView(LoginRequiredMixin, DetailView):
                 data["rag_summary"] = meta["rag_result"].get("summary_text", "")
             if "rag_timing" in meta:
                 data["rag_timing"] = meta["rag_timing"]
+            data["steps"] = meta.get("rag_steps") or []
+            data["step_summary"] = meta.get("rag_step_summary") or {}
         return JsonResponse(data)
 
 

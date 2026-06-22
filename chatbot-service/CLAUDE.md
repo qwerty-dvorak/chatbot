@@ -116,12 +116,18 @@ When `RAG_API_ENABLED=false`, the chatbot-service handles its own document
 ingestion and search using the Django `knowledge` and `ingestion` apps with
 local Milvus. This is the legacy standalone mode.
 
-**Auto RAG context injection** (`apps/chat/context.py`): every chat message
-triggers a RAG search.  Results are injected into the system prompt so the LLM
-always has relevant knowledge context.  When `RAG_API_ENABLED=true`, search
-goes to the RAG Pipeline API (`/v1/search`) which returns actual document
-content with filenames.  Fallback is a local `icontains` search on
-`DocumentChunk`.
+**LLM-routed RAG context injection** (`apps/chat/context.py`): before answering,
+one structured LLM call decides whether the message needs RAG and selects query
+enhancements. Only a positive decision triggers `/v1/search`. `@document`
+mentions are resolved by the application, removed from semantic query text, and
+passed as `artifact_sources` so retrieval is restricted to the requested files.
+The latest explicit document selection remains active for follow-up turns until
+another explicit selector replaces or clears it. Scoped searches combine dense,
+BM25, and direct lexical chunk matching so structural references and rare
+needle facts in large documents are not lost to semantic ranking.
+`rag.search` is context-only and is never exposed as a callable tool to the
+answer model. Retrieved content and filenames are injected into the system
+prompt before the response is generated.
 
 ## Testing
 

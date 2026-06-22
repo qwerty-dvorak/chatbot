@@ -5,8 +5,10 @@ from apps.tools.models import ToolDefinition
 BUILTIN_TOOL_DEFS = [
     {
         "name": "rag.search",
-        "display_name": "RAG Search",
-        "description": "Search accessible knowledge chunks for relevant information",
+        "display_name": "RAG Search (context only)",
+        "description": "Internal pre-response knowledge retrieval; never exposed to the answer model",
+        "is_enabled": False,
+        "metadata": {"context_only": True},
         "schema": {
             "type": "object",
             "properties": {
@@ -107,7 +109,8 @@ class Command(BaseCommand):
                     "description": def_data["description"],
                     "schema": def_data["schema"],
                     "is_builtin": True,
-                    "is_enabled": True,
+                    "is_enabled": def_data.get("is_enabled", True),
+                    "metadata": def_data.get("metadata", {}),
                 },
             )
             if was_created:

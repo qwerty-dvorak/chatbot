@@ -40,7 +40,7 @@ class SettingsView(LoginRequiredMixin, TemplateView):
 
         mem_settings = get_memory_settings(self.request.user)
         context["mem_form"] = MemorySettingsForm(instance=mem_settings)
-        context["tools"] = ToolDefinition.objects.all().order_by("name")
+        context["tools"] = ToolDefinition.objects.exclude(name="rag.search").order_by("name")
         context["sys"] = {
             "chat_base_url": django_settings.CHAT_BASE_URL,
             "chat_model": django_settings.CHAT_MODEL,

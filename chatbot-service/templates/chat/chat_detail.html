@@ -82,14 +82,16 @@
               {% if rag_log %}
                 <button class="rag-details-toggle" onclick="toggleRagDetails(this)" type="button">
                   <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor"><path d="M8 4a.5.5 0 01.5.5v3h3a.5.5 0 010 1h-3v3a.5.5 0 01-1 0v-3h-3a.5.5 0 010-1h3v-3A.5.5 0 018 4z"/></svg>
-                  RAG·{{ rag_log.total_results }} results·{{ rag_log.timing.total }}s
+                  {% if rag_log.rag_needed %}RAG·{{ rag_log.total_results }} results{% else %}RAG not needed{% endif %}·{{ rag_log.timing.total }}s
                 </button>
                 <div class="rag-details-panel">
+                  {% if rag_log.rag_used %}
                   <div class="rag-detail-row">
                     <span class="rag-detail-label">Files</span>
                     <span class="rag-detail-value">{{ rag_log.result_sources|length }} file{% if rag_log.result_sources|length > 1 %}s{% endif %}, {{ rag_log.total_results }} chunk{% if rag_log.total_results > 1 %}s{% endif %}:
                       {% for s in rag_log.result_sources %}<code>{{ s }}</code> {% endfor %}</span>
                   </div>
+                  {% endif %}
                   {% if rag_log.mentioned_sources %}
                   <div class="rag-detail-row">
                     <span class="rag-detail-label">@cited</span>
@@ -99,6 +101,10 @@
                   <div class="rag-detail-row">
                     <span class="rag-detail-label">Mode</span>
                     <span class="rag-detail-value">{{ rag_log.retrieval_mode }} · reranker:{{ rag_log.use_reranker|yesno:"on,off" }}</span>
+                  </div>
+                  <div class="rag-detail-row">
+                    <span class="rag-detail-label">Decision</span>
+                    <span class="rag-detail-value">{{ rag_log.decision_source }} · query: <code>{{ rag_log.search_query }}</code></span>
                   </div>
                   {% if rag_log.enhanced_queries %}
                   <div class="rag-detail-row">

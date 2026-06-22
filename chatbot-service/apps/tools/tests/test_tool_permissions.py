@@ -1,8 +1,9 @@
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from apps.accounts.models import User
 from apps.tools.models import ToolDefinition, ToolPermissionGrant
 from apps.tools.permissions import check_tool_permission, check_user_tool_override
+from apps.tools.registry import ToolRegistry
 
 
 class ToolPermissionsTest(TestCase):
@@ -59,3 +60,19 @@ class ToolPermissionsTest(TestCase):
         )
         result = check_user_tool_override(self.user_tool, self.user)
         self.assertEqual(result, grant)
+
+    @override_settings(RAG_ENABLED=True, TOOL_CALLS_ENABLED=True)
+    def test_rag_search_is_not_exposed_to_answer_model(self):
+        rag_tool = ToolDefinition.objects.create(
+            name="rag.search",
+            display_name="RAG Search",
+            schema={"type": "object"},
+        )
+        registry = ToolRegistry()
+        registry.register(rag_tool)
+        registry.register(self.user_tool)
+
+        names = [schema["function"]["name"] for schema in registry.get_schemas(self.user)]
+
+        self.assertIn("user.tool", names)
+        self.assertNotIn("rag.search", names)

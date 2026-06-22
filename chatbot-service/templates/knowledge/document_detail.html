@@ -73,7 +73,7 @@
   </div>
 </div>
 
-{% if rag_timing %}
+{% if timing_rows %}
 <div class="card mb-16">
   <h2 style="font-size:1rem;font-weight:600;margin-bottom:8px">Ingestion Timing</h2>
   <table style="width:100%;font-size:.8125rem;border-collapse:collapse">
@@ -83,11 +83,33 @@
         <th style="text-align:right;padding:4px 8px">Duration</th>
       </tr>
     </thead>
-    <tbody>
-    {% for step_name, info in rag_timing.items %}
+    <tbody class="timing-body">
+    {% for row in timing_rows %}
       <tr style="border-bottom:1px solid var(--border-light)">
-        <td style="padding:4px 8px;font-family:var(--mono);font-size:.75rem">{{ step_name }}</td>
-        <td style="text-align:right;padding:4px 8px">{{ info.duration_ms|default:"—" }} ms</td>
+        <td style="padding:4px 8px;font-family:var(--mono);font-size:.75rem">{{ row.name }}</td>
+        <td style="text-align:right;padding:4px 8px">{% if row.seconds is not None %}{{ row.seconds|floatformat:3 }} s{% else %}—{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% if step_summary or rag_steps %}
+<div class="card mb-16">
+  <h2 style="font-size:1rem;font-weight:600;margin-bottom:8px">Ingestion Steps</h2>
+  {% if step_summary %}
+    <div class="text-muted" style="font-size:.8125rem;margin-bottom:8px">
+      {{ step_summary.completed|default:0 }} completed · {{ step_summary.failed|default:0 }} failed · {{ step_summary.total|default:0 }} total
+    </div>
+  {% endif %}
+  <table style="width:100%;font-size:.8125rem;border-collapse:collapse">
+    <tbody>
+    {% for step in rag_steps %}
+      <tr style="border-bottom:1px solid var(--border-light)">
+        <td style="padding:4px 8px;font-family:var(--mono);font-size:.75rem">{{ step.name }}</td>
+        <td style="padding:4px 8px">{{ step.status }}</td>
+        <td style="padding:4px 8px;color:var(--text2)">{{ step.detail|default:"" }}</td>
       </tr>
     {% endfor %}
     </tbody>
@@ -106,7 +128,6 @@
 <script>
 (function() {
   var statusUrl = "{% url 'knowledge:status' document.id %}";
-  var ragJobId = "{{ job.metadata.rag_job_id|default:'' }}";
   var badge = document.getElementById("status-badge");
   var jobBadge = document.getElementById("job-badge");
   var jobRow = document.getElementById("job-status-row");
@@ -136,24 +157,11 @@
     progressStep.textContent = current ? current + "..." : done + "/" + steps.length + " steps";
   }
 
-  function pollRagApi() {
-    if (!ragJobId) return;
-    fetch("http://172.22.0.1:8093/v1/ingestions/" + ragJobId)
-      .then(function(r) { return r.json(); })
-      .then(function(data) {
-        if (data.steps) updateProgress(data.steps);
-        if (data.status === "succeeded" || data.status === "failed" || data.status === "cancelled") {
-          ragJobId = "";
-        }
-      })
-      .catch(function() {});
-  }
-
   function poll() {
-    pollRagApi();
     fetch(statusUrl)
       .then(function(r) { return r.json(); })
       .then(function(data) {
+        if (data.steps) updateProgress(data.steps);
         var oldStatus = badge.textContent;
         var newStatus = data.processing_status;
         if (newStatus !== oldStatus) {
@@ -188,8 +196,9 @@
           tb.innerHTML = "";
           for (var step in data.rag_timing) {
             var info = data.rag_timing[step];
+            var seconds = typeof info === "number" ? info : ((info.duration_ms || 0) / 1000);
             var tr = document.createElement("tr");
-            tr.innerHTML = '<td style="padding:4px 8px;font-family:var(--mono);font-size:.75rem">' + step + '</td><td style="text-align:right;padding:4px 8px">' + (info.duration_ms || "—") + ' ms</td>';
+            tr.innerHTML = '<td style="padding:4px 8px;font-family:var(--mono);font-size:.75rem">' + step + '</td><td style="text-align:right;padding:4px 8px">' + (seconds ? seconds.toFixed(3) + " s" : "—") + '</td>';
             tb.appendChild(tr);
           }
         }

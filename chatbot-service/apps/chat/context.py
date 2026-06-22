@@ -1,13 +1,16 @@
 import base64
 import json
 import logging
+import re
 import time
+from dataclasses import dataclass
 
 from django.conf import settings
 from django.core.files.storage import default_storage
 
 from apps.llm.prompts import (
     COMPACTION_CONTEXT_PROMPT,
+    DOCUMENT_SELECTION_CONTEXT_PROMPT,
     MEMORY_CONTEXT_PROMPT,
     RAG_CONTEXT_PROMPT,
     SYSTEM_PROMPT,
@@ -16,6 +19,140 @@ from apps.llm.prompts import (
 logger = logging.getLogger(__name__)
 
 MAX_IMAGE_SIZE = 20 * 1024 * 1024
+
+
+@dataclass(frozen=True)
+class DocumentMentionResolution:
+    """Resolved document selectors and the query text left for retrieval."""
+
+    clean_query: str
+    selected_sources: tuple[str, ...] = ()
+    unresolved_mentions: tuple[str, ...] = ()
+    had_mentions: bool = False
+    selection_origin: str = "none"
+
+
+def _parse_json_object(content: str) -> dict:
+    """Parse one JSON object, tolerating markdown fences or leading text."""
+    value = (content or "").strip()
+    if value.startswith("```"):
+        value = value.split("\n", 1)[-1]
+        if "```" in value:
+            value = value.split("```", 1)[0]
+        value = value.strip()
+
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        start = value.find("{")
+        if start < 0:
+            raise
+        parsed, _ = json.JSONDecoder().raw_decode(value[start:])
+
+    if not isinstance(parsed, dict):
+        raise ValueError("LLM routing decision must be a JSON object")
+    return parsed
+
+
+def _normalise_rag_decision(content: str, fallback_query: str) -> dict:
+    """Validate the LLM's retrieval decision instead of trusting truthy values."""
+    raw = _parse_json_object(content)
+    if not isinstance(raw.get("use_rag"), bool):
+        raise ValueError("LLM routing decision must contain boolean use_rag")
+
+    query = raw.get("search_query", "")
+    if not isinstance(query, str) or not query.strip():
+        query = fallback_query
+
+    decision = {
+        "use_rag": raw["use_rag"],
+        "search_query": query.strip(),
+    }
+    for key, default in (
+        ("hyde", False),
+        ("sub_queries", False),
+        ("stepback", False),
+        ("use_reranker", True),
+    ):
+        value = raw.get(key, default)
+        decision[key] = value if isinstance(value, bool) else default
+    return decision
+
+
+def resolve_document_mentions(query: str, user) -> DocumentMentionResolution:
+    """Resolve @mentions against the user's document titles.
+
+    Known titles are matched longest-first, which supports filenames containing
+    spaces. Unknown selectors are removed from the retrieval query but retained
+    as unresolved metadata so they cannot accidentally broaden search scope.
+    """
+    mention_marker = re.compile(r"(?<![\w@])@")
+    if not query or not mention_marker.search(query):
+        return DocumentMentionResolution(clean_query=query)
+
+    from apps.documents.models import DocumentReference
+
+    references = []
+    if user and getattr(user, "is_authenticated", False):
+        references = list(
+            DocumentReference.objects.filter(
+                owner=user,
+                kind=DocumentReference.Kind.KNOWLEDGE,
+            ).only("title")
+        )
+
+    spans: list[tuple[int, int]] = []
+    selected: list[str] = []
+    occupied: list[tuple[int, int]] = []
+
+    def overlaps(start: int, end: int) -> bool:
+        return any(start < used_end and end > used_start for used_start, used_end in occupied)
+
+    for ref in sorted(references, key=lambda item: len(item.title), reverse=True):
+        pattern = re.compile(
+            rf"(?<![\w@])@{re.escape(ref.title)}(?=$|[\s,;:!?()\[\]{{}}])",
+            re.IGNORECASE,
+        )
+        for match in pattern.finditer(query):
+            if overlaps(match.start(), match.end()):
+                continue
+            spans.append(match.span())
+            occupied.append(match.span())
+            if ref.title not in selected:
+                selected.append(ref.title)
+
+    unresolved: list[str] = []
+    token_pattern = re.compile(r"(?<![\w@])@([^\s,;:!?()\[\]{}]+)")
+    for match in token_pattern.finditer(query):
+        if overlaps(match.start(), match.end()):
+            continue
+        token = match.group(1)
+        candidates = [
+            ref.title for ref in references
+            if ref.title.lower().startswith(token.lower())
+        ]
+        if len(candidates) == 1:
+            if candidates[0] not in selected:
+                selected.append(candidates[0])
+        elif token not in unresolved:
+            unresolved.append(token)
+        spans.append(match.span())
+        occupied.append(match.span())
+
+    clean_parts = list(query)
+    for start, end in spans:
+        clean_parts[start:end] = " " * (end - start)
+    clean_query = " ".join("".join(clean_parts).split())
+    if not clean_query and selected:
+        clean_query = f"Summarize the requested document(s): {', '.join(selected)}"
+
+    return DocumentMentionResolution(
+        clean_query=clean_query,
+        selected_sources=tuple(selected),
+        unresolved_mentions=tuple(unresolved),
+        had_mentions=True,
+        selection_origin="explicit",
+    )
 
 
 def _build_multimodal_content(text: str, attachments: list[dict]) -> str | list[dict]:
@@ -92,11 +229,33 @@ class ContextBuilder:
 
     def build(self, user_message_text: str, user_message: object | None = None) -> tuple[list[dict], dict | None]:
         self.user_message = user_message or self.user_message
+        # Resolve selectors, make the routing decision, and retrieve before
+        # assembling any optional conversation context for the answer model.
+        mentions = resolve_document_mentions(user_message_text, self.user)
+        mentions = self._inherit_document_selection(mentions)
+        rag_context, rag_log = self._search_rag(mentions)
+
         system_content = SYSTEM_PROMPT
         compaction_context = self._load_compaction()
         if compaction_context:
             system_content += f"\n\n{compaction_context}"
-        rag_context, rag_log = self._search_rag(user_message_text)
+        if mentions.had_mentions or mentions.selected_sources:
+            selection_lines = []
+            if mentions.selected_sources:
+                selection_lines.append(
+                    "Requested documents"
+                    + (" (continued from the previous turn)" if mentions.selection_origin == "inherited" else "")
+                    + ": "
+                    + ", ".join(mentions.selected_sources)
+                )
+            if mentions.unresolved_mentions:
+                selection_lines.append(
+                    "Unresolved document mentions: "
+                    + ", ".join(f"@{name}" for name in mentions.unresolved_mentions)
+                )
+            system_content += "\n\n" + DOCUMENT_SELECTION_CONTEXT_PROMPT.format(
+                selection="\n".join(selection_lines) or "No accessible documents were resolved."
+            )
         if rag_context:
             system_content += f"\n\n{RAG_CONTEXT_PROMPT.format(results=rag_context)}"
         memories = self._load_memories()
@@ -111,17 +270,79 @@ class ContextBuilder:
         self.messages.append({"role": "user", "content": content})
         return self.messages, rag_log
 
-    def _decide_enhancements(self, query: str) -> dict:
-        """Ask the LLM which retrieval enhancements to enable for this query."""
+    def _inherit_document_selection(
+        self,
+        mentions: DocumentMentionResolution,
+    ) -> DocumentMentionResolution:
+        """Carry an explicit document selection into follow-up turns.
+
+        An explicit selector on the current turn always wins, including an
+        unresolved selector (which must not silently fall back to an older
+        document). Otherwise the latest logged document scope remains active.
+        """
+        if mentions.had_mentions or mentions.selected_sources:
+            return mentions
+
+        from apps.chat.models import Message
+        from apps.documents.models import DocumentReference
+
+        recent = Message.objects.filter(
+            chat=self.chat,
+            role=Message.Role.USER,
+        )
+        if self.user_message:
+            recent = recent.exclude(id=self.user_message.id)
+
+        for message in recent.order_by("-created_at")[:20]:
+            rag_log = (message.metadata or {}).get("rag_search_log") or {}
+            sources = rag_log.get("mentioned_sources") or []
+            if rag_log.get("selection_origin") == "explicit" and not sources:
+                return mentions
+            if not sources:
+                continue
+            accessible = set(
+                DocumentReference.objects.filter(
+                    owner=self.user,
+                    kind=DocumentReference.Kind.KNOWLEDGE,
+                    title__in=sources,
+                ).values_list("title", flat=True)
+            )
+            selected = tuple(source for source in sources if source in accessible)
+            if selected:
+                return DocumentMentionResolution(
+                    clean_query=mentions.clean_query,
+                    selected_sources=selected,
+                    selection_origin="inherited",
+                )
+        return mentions
+
+    def _decide_retrieval(self, mentions: DocumentMentionResolution) -> dict:
+        """Ask the LLM whether RAG is needed and how to run it, in one call."""
         start = time.time()
+        query = mentions.clean_query
+        fallback_query = query or (
+            f"Summarize the requested document(s): {', '.join(mentions.selected_sources)}"
+        )
         try:
             from apps.llm.clients import LiteLLMClient
             client = LiteLLMClient()
             prompt = (
-                "Given the user query below, decide whether each enhancement "
-                "would help retrieve better RAG context. Respond ONLY with a "
-                "JSON object containing three booleans: hyde, sub_queries, stepback.\n\n"
+                "You are the retrieval router for a knowledge-grounded chat system. "
+                "First decide whether the request needs facts from the knowledge base. "
+                "Document names listed below are application-resolved scope selectors, "
+                "not search text and not tool calls. If retrieval is needed and documents "
+                "are selected, retrieval will be restricted to exactly those documents.\n\n"
+                "Respond ONLY with one JSON object using this schema:\n"
+                '{"use_rag": boolean, "search_query": string, "hyde": boolean, '
+                '"sub_queries": boolean, "stepback": boolean, "use_reranker": boolean}\n\n'
                 "Guidelines:\n"
+                "- use_rag: true only when the answer requires document or knowledge-base content.\n"
+                "- An information question, summary, comparison, or explanation about a selected "
+                "document normally requires RAG. Casual conversation or a request answerable "
+                "without the knowledge base does not.\n"
+                "- search_query: rewrite the request as a standalone semantic retrieval query. "
+                "Do not include @ syntax. Preserve the user's intent; use selected filenames only "
+                "when they clarify an otherwise incomplete request.\n"
                 "- hyde (Hypothetical Document Embedding): True if generating a "
                 "hypothetical answer/paragraph first would help. Use for open-ended "
                 "or abstract questions (e.g. \"explain X\", \"tell me about Y\"). "
@@ -130,97 +351,130 @@ class ContextBuilder:
                 "could benefit from decomposition. False for short/factual queries.\n"
                 "- stepback: True if answering requires broader context or background "
                 "knowledge. False for direct, specific queries.\n\n"
-                f"Query: {query}"
+                f"Request without selectors: {json.dumps(query)}\n"
+                f"Selected documents: {json.dumps(list(mentions.selected_sources))}\n"
+                f"Unresolved mentions: {json.dumps(list(mentions.unresolved_mentions))}"
             )
             response = client.chat_completion(
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=100,
+                max_tokens=220,
                 temperature=0.1,
             )
-            content = response.get("content", "").strip()
-            if content.startswith("```"):
-                content = content.split("\n", 1)[-1]
-                if "```" in content:
-                    content = content.split("```")[0]
-            result = json.loads(content)
+            result = _normalise_rag_decision(response.get("content", ""), fallback_query)
             duration = time.time() - start
-            logger.info("[TIMING] enhance_decide=%.3fs query_len=%d decision=%s", duration, len(query), result)
+            result["decision_source"] = "llm"
+            logger.info(
+                "[TIMING] rag_decide=%.3fs query_len=%d decision=%s",
+                duration,
+                len(query),
+                result,
+            )
             return result
         except Exception:
             duration = time.time() - start
-            logger.warning("[TIMING] enhance_decide=%.3fs FAILED, using defaults", duration)
-            return {}
+            logger.exception("[TIMING] rag_decide=%.3fs FAILED, using safe fallback", duration)
+            return {
+                # Explicit, resolved document requests should still work during a
+                # transient router-format failure. Unscoped queries do not trigger
+                # speculative retrieval in that case.
+                "use_rag": bool(mentions.selected_sources),
+                "search_query": fallback_query,
+                "hyde": False,
+                "sub_queries": False,
+                "stepback": False,
+                "use_reranker": True,
+                "decision_source": "fallback",
+            }
 
     @staticmethod
     def _resolve_mentions(query: str, user) -> tuple[str, list[str]]:
-        import re
-        from apps.documents.models import DocumentReference
-        mentions = re.findall(r'@(\S+)', query)
-        if not mentions:
-            return query, []
-        clean = re.sub(r'@\S+', '', query).strip()
-        doc_refs = DocumentReference.objects.filter(
-            owner=user, kind=DocumentReference.Kind.KNOWLEDGE,
-        )
-        sources = []
-        for mention in mentions:
-            lower = mention.lower()
-            for ref in doc_refs:
-                if lower in ref.title.lower():
-                    sources.append(ref.title)
-                    break
-        return clean or query, sources
+        """Compatibility wrapper for callers using the old tuple interface."""
+        resolution = resolve_document_mentions(query, user)
+        return resolution.clean_query, list(resolution.selected_sources)
 
-    def _search_rag(self, query: str) -> tuple[str | None, dict | None]:
+    def _search_rag(
+        self,
+        mentions: DocumentMentionResolution,
+    ) -> tuple[str | None, dict | None]:
         start = time.time()
-        if not query or not getattr(settings, "RAG_ENABLED", False):
+        if not (mentions.clean_query or mentions.had_mentions):
+            return None, None
+        if not getattr(settings, "RAG_ENABLED", False):
             return None, None
         try:
             from apps.knowledge.rag_client import rag_client
             if not rag_client.is_enabled():
                 return None, None
-            clean_query, mentioned_sources = self._resolve_mentions(query, self.user)
-            if not clean_query and mentioned_sources:
-                clean_query = mentioned_sources[0]
-            enhance_start = time.time()
-            enhancements = self._decide_enhancements(clean_query)
-            enhance_time = time.time() - enhance_start
+
+            decision_start = time.time()
+            decision = self._decide_retrieval(mentions)
+            decision_time = time.time() - decision_start
+            rag_log = {
+                "rag_needed": decision["use_rag"],
+                "rag_used": False,
+                "decision_source": decision["decision_source"],
+                "search_query": decision["search_query"],
+                "enhancements": {
+                    key: decision[key] for key in ("hyde", "sub_queries", "stepback")
+                },
+                "use_reranker": decision["use_reranker"],
+                "mentioned_sources": list(mentions.selected_sources),
+                "unresolved_mentions": list(mentions.unresolved_mentions),
+                "selection_origin": mentions.selection_origin,
+                "total_results": 0,
+                "timing": {"decision": round(decision_time, 3)},
+            }
+            if not decision["use_rag"]:
+                rag_log["retrieval_mode"] = "not_needed"
+                rag_log["timing"]["total"] = round(time.time() - start, 3)
+                return None, rag_log
+
+            # A selector was supplied but did not resolve. Searching every
+            # document would violate the user's requested scope.
+            if mentions.had_mentions and not mentions.selected_sources:
+                rag_log["retrieval_mode"] = "blocked_unresolved_mentions"
+                rag_log["error"] = "No requested document mention could be resolved"
+                rag_log["timing"]["total"] = round(time.time() - start, 3)
+                return None, rag_log
+
             rag_response = rag_client.search(
-                clean_query, top_k=5,
-                hyde=enhancements.get("hyde"),
-                sub_queries=enhancements.get("sub_queries"),
-                stepback=enhancements.get("stepback"),
-                artifact_sources=mentioned_sources or None,
+                decision["search_query"],
+                top_k=getattr(settings, "RAG_TOP_K", 5),
+                use_reranker=decision["use_reranker"],
+                hyde=decision["hyde"],
+                sub_queries=decision["sub_queries"],
+                stepback=decision["stepback"],
+                artifact_sources=list(mentions.selected_sources) or None,
             )
             results = rag_response.get("results", [])
             enhanced_queries = rag_response.get("enhanced_queries", [])
             total_time = time.time() - start
             logger.info("[TIMING] rag_search=%.3fs results=%d", total_time, len(results if results else []))
             search_timing = rag_response.get("timing") or {}
-            mode = "hybrid"
-            if enhancements.get("hyde"):
-                mode = "hyde"
-            if enhancements.get("sub_queries"):
-                mode = "sub_queries"
-            if enhancements.get("stepback"):
-                mode = "stepback"
-            rag_log = {
-                "retrieval_mode": mode,
-                "use_reranker": True,
-                "hierarchical": False,
-                "enhancements": enhancements,
+            enabled_enhancements = [
+                key for key in ("hyde", "sub_queries", "stepback") if decision[key]
+            ]
+            rag_log.update({
+                "retrieval_mode": "+".join(enabled_enhancements) or "hybrid",
+                "hierarchical": rag_response.get("hierarchical", False),
                 "enhanced_queries": enhanced_queries,
                 "total_results": rag_response.get("total", len(results)),
-                "result_sources": list({r.get("source", "").split("/")[-1] for r in results if r.get("source")}),
-                "mentioned_sources": mentioned_sources,
+                "result_sources": sorted({
+                    r.get("source", "").split("/")[-1]
+                    for r in results if r.get("source")
+                }),
                 "rag_used": True,
                 "step_timing": search_timing,
                 "timing": {
-                    "enhance_query": round(enhance_time, 3),
+                    "decision": round(decision_time, 3),
                     "total": round(total_time, 3),
-                    **{k: round(v, 3) for k, v in search_timing.items() if isinstance(v, (int, float)) and k != "total"},
+                    **{
+                        key: round(value, 3)
+                        for key, value in search_timing.items()
+                        if isinstance(value, (int, float)) and key != "total"
+                    },
                 },
-            }
+            })
             if not results:
                 return None, rag_log
             lines = []

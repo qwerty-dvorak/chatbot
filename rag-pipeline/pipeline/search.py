@@ -9,6 +9,7 @@ The :func:`search` function is the main entry point.
 :func:`format_results` formats results for CLI display.
 """
 
+import re
 import time
 import uuid
 
@@ -17,7 +18,14 @@ import openai
 from .config import cfg
 from .models import Chunk, ChunkType, SearchResult
 from .embed import embed_text
-from .retrieve import hybrid_search, rerank, vector_search, bm25_search, _rrf_fusion
+from .retrieve import (
+    _rrf_fusion,
+    bm25_search,
+    hybrid_search,
+    rerank,
+    scoped_lexical_search,
+    vector_search,
+)
 from .query import enhance_query
 from .index import connect_milvus, _ensure_collection, _chunk_from_hit, get_client
 
@@ -118,6 +126,44 @@ def search(
     all_result_lists: list[list[SearchResult]] = []
     n_queries = len(enhanced_queries)
 
+    # Resolve requested filenames once for every enhanced query. This scope is
+    # mandatory: no matching vectors means no results, never a global fallback.
+    artifact_paths: list[str] | None = None
+    if artifact_sources:
+        t0 = _t()
+        _ensure_collection(cfg.text_collection, cfg.text_embedding_dim)
+        hits = get_client().query(
+            collection_name=cfg.text_collection,
+            output_fields=["source_path"],
+            limit=10000,
+        )
+        requested_names = {source.casefold() for source in artifact_sources}
+        artifact_paths = list({
+            hit["source_path"]
+            for hit in hits
+            if hit.get("source_path", "").replace("\\", "/").rsplit("/", 1)[-1].casefold()
+            in requested_names
+        })
+        timing["artifact_filter"] = round(_t() - t0, 4)
+        if not artifact_paths:
+            timing["total"] = round(sum(timing.values()), 4)
+            return [], timing
+
+    lexical_results: list[SearchResult] = []
+    if artifact_paths:
+        t0 = _t()
+        lexical_query = query
+        for source in artifact_sources or []:
+            stem = source.rsplit(".", 1)[0]
+            lexical_query = re.sub(re.escape(source), " ", lexical_query, flags=re.IGNORECASE)
+            lexical_query = re.sub(re.escape(stem), " ", lexical_query, flags=re.IGNORECASE)
+        lexical_results = scoped_lexical_search(
+            " ".join(lexical_query.split()),
+            artifact_paths,
+            top_k=max(effective_top_k, 8),
+        )
+        timing["scoped_lexical"] = round(_t() - t0, 4)
+
     for q_text in enhanced_queries:
         tmp_chunk = Chunk(
             id=uuid.uuid4().hex,
@@ -132,22 +178,6 @@ def search(
             continue
         embedding = embedded[0].embedding
 
-        # Resolve artifact_sources (partial filenames) to full source_paths
-        # via a Milvus query, then use source_path in [...] for search filter.
-        artifact_paths: list[str] | None = None
-        if artifact_sources:
-            _ensure_collection(cfg.text_collection, cfg.text_embedding_dim)
-            like_clauses = " or ".join(
-                f"source_path like '%{s.replace(chr(39), chr(92)+chr(39))}%'"
-                for s in artifact_sources
-            )
-            hits = get_client().query(
-                collection_name=cfg.text_collection,
-                filter=like_clauses,
-                output_fields=["source_path"],
-                limit=10000,
-            )
-            artifact_paths = list({h["source_path"] for h in hits})
         artifact_filter = ""
         if artifact_paths:
             escaped = [p.replace("\\", "\\\\").replace('"', '\\"') for p in artifact_paths]
@@ -156,7 +186,7 @@ def search(
 
         # ── Two-stage hierarchical search ──────────────────────────
         t0 = _t()
-        if hierarchical:
+        if hierarchical and not artifact_filter:
             summary_hits = vector_search(
                 embedding, top_k=cfg.summary_top_k,
                 extra_filter='chunk_type == "summary"',
@@ -169,33 +199,34 @@ def search(
                 ]
                 path_list = "[" + ", ".join(f'"{e}"' for e in escaped) + "]"
                 extra = f"source_path in {path_list} and chunk_type != \"summary\""
-                if artifact_filter:
-                    extra += f" and {artifact_filter}"
                 if mode == "vector":
                     results = vector_search(embedding, retrieval_k, extra_filter=extra)
                 elif mode == "bm25":
-                    results = bm25_search(q_text, retrieval_k)
+                    results = bm25_search(q_text, retrieval_k, source_paths=matched_paths)
                 else:
-                    results = hybrid_search(q_text, embedding, retrieval_k, extra_filter=extra)
+                    results = hybrid_search(
+                        q_text,
+                        embedding,
+                        retrieval_k,
+                        extra_filter=extra,
+                        source_paths=matched_paths,
+                    )
             else:
-                if artifact_filter:
-                    extra = artifact_filter
-                    if mode == "vector":
-                        results = vector_search(embedding, retrieval_k, extra_filter=extra)
-                    elif mode == "bm25":
-                        results = bm25_search(q_text, retrieval_k)
-                    else:
-                        results = hybrid_search(q_text, embedding, retrieval_k, extra_filter=extra)
-                else:
-                    results = []
+                results = []
         else:
             extra = artifact_filter if artifact_filter else None
             if mode == "vector":
                 results = vector_search(embedding, retrieval_k, extra_filter=extra)
             elif mode == "bm25":
-                results = bm25_search(q_text, retrieval_k)
+                results = bm25_search(q_text, retrieval_k, source_paths=artifact_paths)
             else:
-                results = hybrid_search(q_text, embedding, retrieval_k, extra_filter=extra)
+                results = hybrid_search(
+                    q_text,
+                    embedding,
+                    retrieval_k,
+                    extra_filter=extra,
+                    source_paths=artifact_paths,
+                )
         t_search_total += _t() - t0
 
         if results:
@@ -205,7 +236,8 @@ def search(
     timing["search"] = round(t_search_total, 4)
 
     if not all_result_lists:
-        return [], timing
+        timing["total"] = round(sum(timing.values()), 4)
+        return lexical_results[:effective_top_k], timing
 
     # ------------------------------------------------------------------
     # Merge with RRF fusion
@@ -282,6 +314,16 @@ def search(
             except Exception:  # noqa: BLE001
                 pass
     timing["parent_fetch"] = round(_t() - t0, 4)
+
+    # Exact scoped matches are deterministic evidence and must survive semantic
+    # reranking. Place them first, then append non-duplicate semantic results.
+    if lexical_results:
+        lexical_ids = {result.chunk.id for result in lexical_results}
+        deduped = lexical_results + [
+            result for result in deduped if result.chunk.id not in lexical_ids
+        ]
+        for rank, result in enumerate(deduped):
+            result.rank = rank
 
     timing["total"] = round(sum(timing.values()), 4)
     return deduped[:effective_top_k], timing

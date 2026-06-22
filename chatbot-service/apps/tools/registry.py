@@ -4,6 +4,12 @@ from typing import Any
 from .models import ToolDefinition
 
 
+# Retrieval is an internal context-building stage. Exposing it to the answer
+# model creates a second, conflicting RAG path and lets @mentions leak into a
+# literal rag.search call.
+CONTEXT_ONLY_TOOLS = frozenset({"rag.search"})
+
+
 class ToolRegistry:
     def __init__(self):
         self._tools: dict[str, ToolDefinition] = {}
@@ -38,6 +44,8 @@ class ToolRegistry:
 
         schemas = []
         for tool in self.get_enabled():
+            if tool.name in CONTEXT_ONLY_TOOLS:
+                continue
             if not rag_enabled and any(tool.name.startswith(p) for p in rag_prefixes):
                 continue
             if not self._is_permitted(tool, user):

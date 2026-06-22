@@ -9,8 +9,14 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from apps.accounts.models import User
-from apps.chat.context import ContextBuilder, _build_multimodal_content
+from apps.chat.context import (
+    ContextBuilder,
+    _build_multimodal_content,
+    _normalise_rag_decision,
+    resolve_document_mentions,
+)
 from apps.chat.models import Chat, Message
+from apps.documents.models import ArtifactRevision, ContentBlob, DocumentReference
 
 
 def _make_minimal_png(width: int = 1, height: int = 1) -> bytes:
@@ -167,7 +173,7 @@ class ContextBuilderMultimodalTest(TestCase):
                 }],
             )
             builder = ContextBuilder(self.chat, self.user)
-            result = builder.build("What is in this image?", msg)
+            result, _ = builder.build("What is in this image?", msg)
             last = result[-1]
             self.assertEqual(last["role"], "user")
             self.assertIsInstance(last["content"], list)
@@ -185,7 +191,7 @@ class ContextBuilderMultimodalTest(TestCase):
             content="Who are you?",
             metadata={"thinking_mode": True},
         )
-        result = ContextBuilder(self.chat, self.user).build(msg.content, msg)
+        result, _ = ContextBuilder(self.chat, self.user).build(msg.content, msg)
         self.assertEqual(result[-1]["content"], "<|think|> Who are you?")
         msg.refresh_from_db()
         self.assertEqual(msg.content, "Who are you?")
@@ -208,7 +214,7 @@ class ContextBuilderMultimodalTest(TestCase):
             )
 
             builder = ContextBuilder(self.chat, self.user)
-            result = builder.build("Follow up", None)
+            result, _ = builder.build("Follow up", None)
             history_msgs = [m for m in result if m["role"] == "user"]
             self.assertGreaterEqual(len(history_msgs), 1)
             hist_content = history_msgs[0]["content"]
@@ -219,6 +225,142 @@ class ContextBuilderMultimodalTest(TestCase):
                 self.assertEqual(hist_content, "Previous image")
         finally:
             default_storage.delete(path)
+
+
+class DocumentMentionContextTest(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(email="mentions@example.com", password="pass")
+        self.chat = Chat.objects.create(user=self.user, title="Mentions", path="mentions")
+        blob = ContentBlob.objects.create(
+            content_hash="9" * 64,
+            mime_type="text/plain",
+            storage_status=ContentBlob.StorageStatus.STORED,
+        )
+        revision = ArtifactRevision.objects.create(
+            blob=blob,
+            pipeline_fingerprint="mention-tests",
+            processing_status=ArtifactRevision.ProcessingStatus.READY,
+        )
+        self.topic = DocumentReference.objects.create(
+            owner=self.user,
+            artifact_revision=revision,
+            title="topic_geology.txt",
+            kind=DocumentReference.Kind.KNOWLEDGE,
+        )
+        self.notes = DocumentReference.objects.create(
+            owner=self.user,
+            artifact_revision=revision,
+            title="Geology Notes 2025.pdf",
+            kind=DocumentReference.Kind.KNOWLEDGE,
+        )
+
+    def test_resolves_filename_and_removes_it_from_retrieval_query(self):
+        result = resolve_document_mentions("what is @topic_geology.txt", self.user)
+
+        self.assertEqual(result.clean_query, "what is")
+        self.assertEqual(result.selected_sources, ("topic_geology.txt",))
+        self.assertEqual(result.unresolved_mentions, ())
+
+    def test_resolves_document_title_containing_spaces(self):
+        result = resolve_document_mentions(
+            "summarize @Geology Notes 2025.pdf please",
+            self.user,
+        )
+
+        self.assertEqual(result.clean_query, "summarize please")
+        self.assertEqual(result.selected_sources, ("Geology Notes 2025.pdf",))
+
+    def test_unresolved_mention_does_not_become_search_text(self):
+        result = resolve_document_mentions("explain @missing.txt", self.user)
+
+        self.assertEqual(result.clean_query, "explain")
+        self.assertEqual(result.selected_sources, ())
+        self.assertEqual(result.unresolved_mentions, ("missing.txt",))
+
+    def test_email_address_is_not_treated_as_document_mention(self):
+        query = "Email geology@example.com"
+        result = resolve_document_mentions(query, self.user)
+
+        self.assertFalse(result.had_mentions)
+        self.assertEqual(result.clean_query, query)
+
+    @override_settings(RAG_ENABLED=False)
+    def test_mention_is_added_to_context_while_user_text_is_preserved(self):
+        msg = Message.objects.create(
+            chat=self.chat,
+            role=Message.Role.USER,
+            content="what is @topic_geology.txt",
+        )
+
+        messages, rag_log = ContextBuilder(self.chat, self.user).build(msg.content, msg)
+
+        self.assertIsNone(rag_log)
+        self.assertIn("Requested documents: topic_geology.txt", messages[0]["content"])
+        self.assertEqual(messages[-1]["content"], msg.content)
+
+    @override_settings(RAG_ENABLED=False)
+    def test_document_selection_is_inherited_by_follow_up_turn(self):
+        Message.objects.create(
+            chat=self.chat,
+            role=Message.Role.USER,
+            content="what is @topic_geology.txt",
+            metadata={
+                "rag_search_log": {"mentioned_sources": ["topic_geology.txt"]},
+            },
+        )
+        current = Message.objects.create(
+            chat=self.chat,
+            role=Message.Role.USER,
+            content="explain chapter 3",
+        )
+
+        messages, _ = ContextBuilder(self.chat, self.user).build(current.content, current)
+
+        self.assertIn(
+            "Requested documents (continued from the previous turn): topic_geology.txt",
+            messages[0]["content"],
+        )
+
+    def test_explicit_unresolved_mention_does_not_inherit_old_scope(self):
+        Message.objects.create(
+            chat=self.chat,
+            role=Message.Role.USER,
+            content="what is @topic_geology.txt",
+            metadata={
+                "rag_search_log": {"mentioned_sources": ["topic_geology.txt"]},
+            },
+        )
+        current = Message.objects.create(
+            chat=self.chat,
+            role=Message.Role.USER,
+            content="explain @missing.txt",
+        )
+        builder = ContextBuilder(self.chat, self.user, current)
+        resolution = resolve_document_mentions(current.content, self.user)
+
+        inherited = builder._inherit_document_selection(resolution)
+
+        self.assertEqual(inherited.selected_sources, ())
+        self.assertEqual(inherited.unresolved_mentions, ("missing.txt",))
+        self.assertEqual(inherited.selection_origin, "explicit")
+
+    def test_rag_decision_requires_boolean_use_rag(self):
+        with self.assertRaises(ValueError):
+            _normalise_rag_decision(
+                '{"use_rag": "yes", "search_query": "geology"}',
+                "fallback",
+            )
+
+    def test_rag_decision_strips_markdown_fence_and_applies_defaults(self):
+        decision = _normalise_rag_decision(
+            '```json\n{"use_rag": true, "search_query": "geology overview"}\n```',
+            "fallback",
+        )
+
+        self.assertTrue(decision["use_rag"])
+        self.assertEqual(decision["search_query"], "geology overview")
+        self.assertFalse(decision["hyde"])
+        self.assertTrue(decision["use_reranker"])
 
 
 class ChatAPIAttachmentTest(TestCase):

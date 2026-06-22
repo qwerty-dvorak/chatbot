@@ -68,6 +68,22 @@ class RagApiClient:
             logger.warning("RAG API get_job failed: %s", exc)
             return None
 
+    def list_jobs(self, status: str | None = None, limit: int = 200) -> list[dict]:
+        try:
+            params = {"limit": limit}
+            if status:
+                params["status"] = status
+            resp = self._timed_request(
+                "GET",
+                f"{self.base_url}/v1/ingestions",
+                params=params,
+                timeout=10,
+            )
+            return resp.json().get("jobs", [])
+        except requests.RequestException as exc:
+            logger.warning("RAG API list_jobs failed: %s", exc)
+            return []
+
     def poll_job(self, job_id: str, max_retries: int = 120, interval: float = 1.0) -> dict | None:
         for _ in range(max_retries):
             try:

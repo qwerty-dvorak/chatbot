@@ -12,7 +12,7 @@ import json
 import logging
 from typing import Any
 
-from apps.documents.models import ArtifactRevision, DocumentReference
+from apps.documents.models import DocumentReference
 
 logger = logging.getLogger(__name__)
 
@@ -149,89 +149,6 @@ def memory_aggregate(arguments: dict[str, Any], context: dict = {}) -> dict:
     except Exception as exc:
         logger.exception("memory.aggregate failed")
         return {"aggregated": False, "error": str(exc)}
-
-
-# ── rag.search ─────────────────────────────────────────────────────────────────
-
-@register_builtin("rag.search")
-def rag_search(arguments: dict[str, Any], context: dict = {}) -> dict:
-    raw_query = arguments.get("query", "")
-    top_k = int(arguments.get("top_k", 5))
-
-    if not raw_query:
-        return {"results": [], "message": "No query provided."}
-
-    user = context.get("user")
-    clean_query, mentioned_sources = _resolve_mentions(raw_query, user)
-    if clean_query:
-        query = clean_query
-    elif mentioned_sources:
-        query = mentioned_sources[0]
-    else:
-        query = raw_query
-
-    try:
-        from apps.knowledge.rag_client import rag_client
-        if not rag_client.is_enabled():
-            qs = ArtifactRevision.objects.filter(processing_status="ready")
-            qs = qs.filter(extracted_text__icontains=query)
-            qs = qs.select_related("blob", "document_references").order_by("-created_at")[:top_k]
-            results = []
-            for r in qs:
-                for doc_ref in r.document_references.all():
-                    results.append({
-                        "document": doc_ref.title,
-                        "excerpt": r.extracted_text[:300],
-                    })
-            return {
-                "query": query, "count": len(results), "results": results,
-                "message": f"Found {len(results)} result(s) matching '{query}'.",
-            }
-        rag_response = rag_client.search(
-            query, top_k=top_k,
-            artifact_sources=mentioned_sources or None,
-        )
-        results = rag_response.get("results", [])
-        formatted = []
-        for r in results:
-            source = r.get("source", "")
-            text = r.get("text", "").strip()
-            meta = r.get("metadata", {}) or {}
-            filename = meta.get("filename", "") or source.split("/")[-1]
-            formatted.append({
-                "source": filename or source,
-                "text": text[:500],
-                "score": r.get("score", 0),
-            })
-        return {
-            "query": query, "count": len(formatted), "results": formatted,
-            "message": f"Found {len(formatted)} result(s) matching '{query}'.",
-        }
-    except Exception as exc:
-        logger.exception("rag.search failed")
-        return {"results": [], "error": str(exc)}
-
-
-def _resolve_mentions(text: str, user) -> tuple[str, list[str]]:
-    import re
-    from apps.documents.models import DocumentReference
-    mentions = re.findall(r'@(\S+)', text)
-    if not mentions:
-        return text, []
-    clean = re.sub(r'@\S+', '', text).strip()
-    if not user or not user.is_authenticated:
-        return clean or text, []
-    doc_refs = DocumentReference.objects.filter(
-        owner=user, kind=DocumentReference.Kind.KNOWLEDGE,
-    )
-    sources = []
-    for mention in mentions:
-        lower = mention.lower()
-        for ref in doc_refs:
-            if lower in ref.title.lower():
-                sources.append(ref.title)
-                break
-    return clean or text, sources
 
 
 # ── knowledge.ingest_status ────────────────────────────────────────────────────

@@ -1,11 +1,86 @@
 import json
+import re
 from collections import defaultdict
 
 import httpx
 
 from .config import cfg
 from .index import _chunk_from_hit, _ensure_collection, get_client, load_bm25_index
-from .models import Chunk, EmbeddedChunk, SearchResult
+from .models import Chunk, ChunkType, EmbeddedChunk, SearchResult
+
+
+_LEXICAL_STOPWORDS = {
+    "a", "an", "and", "are", "as", "at", "be", "by", "for", "from",
+    "explain", "give", "in", "is", "it", "me", "mentioned", "of", "on",
+    "please", "summarize", "tell", "that", "the", "this", "to", "was",
+    "what", "with",
+}
+
+
+def scoped_lexical_search(
+    query: str,
+    source_paths: list[str] | set[str],
+    top_k: int = 8,
+) -> list[SearchResult]:
+    """Find rare literal facts and structural references inside selected files.
+
+    The persisted BM25 index can lag newly ingested documents. For an explicit
+    document scope, scan that document's indexed chunk text and rank chunks by
+    query-term coverage. This catches needle facts and references such as
+    "chapter 3" without widening retrieval to other documents.
+    """
+    paths = list(dict.fromkeys(source_paths))
+    if not paths:
+        return []
+
+    terms = list(dict.fromkeys(
+        token
+        for token in re.findall(r"[a-z0-9]+", query.casefold())
+        if token not in _LEXICAL_STOPWORDS and (len(token) > 1 or token.isdigit())
+    ))
+    if not terms:
+        return []
+
+    escaped = [path.replace("\\", "\\\\").replace('"', '\\"') for path in paths]
+    path_list = "[" + ", ".join(f'"{path}"' for path in escaped) + "]"
+    hits = get_client().query(
+        collection_name=cfg.text_collection,
+        filter=f"source_path in {path_list}",
+        output_fields=[
+            "id", "source_path", "text", "chunk_type", "parent_id",
+            "window_text", "metadata_json",
+        ],
+        limit=10000,
+    )
+
+    candidates: list[tuple[float, int, int, Chunk]] = []
+    minimum_matches = 1 if len(terms) == 1 else 2
+    phrase = " ".join(terms)
+    for hit in hits:
+        chunk = _chunk_from_hit(hit)
+        if chunk.chunk_type in {ChunkType.SUMMARY, ChunkType.HYPOTHETICAL_QUESTION}:
+            continue
+        text = chunk.text.casefold()
+        text_tokens = set(re.findall(r"[a-z0-9]+", text))
+        matched = sum(term in text_tokens for term in terms)
+        if matched < minimum_matches:
+            continue
+        phrase_bonus = 2 if phrase and phrase in text else 0
+        non_parent_bonus = 1 if chunk.chunk_type != ChunkType.PARENT else 0
+        first_match = min((text.find(term) for term in terms if term in text), default=len(text))
+        score = float(matched * 10 + phrase_bonus + non_parent_bonus)
+        candidates.append((score, non_parent_bonus, -first_match, chunk))
+
+    candidates.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
+    return [
+        SearchResult(
+            chunk=chunk,
+            score=score,
+            rank=rank,
+            retrieval_method="scoped_lexical",
+        )
+        for rank, (score, _, _, chunk) in enumerate(candidates[:top_k])
+    ]
 
 
 def vector_search(
@@ -58,7 +133,11 @@ def vector_search(
     return search_results
 
 
-def bm25_search(query: str, top_k: int | None = None) -> list[SearchResult]:
+def bm25_search(
+    query: str,
+    top_k: int | None = None,
+    source_paths: list[str] | set[str] | None = None,
+) -> list[SearchResult]:
     """BM25 sparse search using the persisted index.
 
     Tokenizes query the same way as indexing: query.lower().split().
@@ -74,8 +153,18 @@ def bm25_search(query: str, top_k: int | None = None) -> list[SearchResult]:
     tokenized_query = query.lower().split()
     scores = bm25.get_scores(tokenized_query)
 
-    # Pair each chunk with its score and sort descending.
-    scored = sorted(enumerate(scores), key=lambda x: x[1], reverse=True)
+    # Pair each allowed chunk with its score and sort descending. Filename
+    # scoping must apply to both halves of hybrid retrieval, not only Milvus.
+    allowed_paths = set(source_paths) if source_paths is not None else None
+    scored = sorted(
+        (
+            (index, score)
+            for index, score in enumerate(scores)
+            if allowed_paths is None or chunks[index].source_path in allowed_paths
+        ),
+        key=lambda item: item[1],
+        reverse=True,
+    )
     top_scored = scored[:top_k]
 
     search_results: list[SearchResult] = []
@@ -140,6 +229,7 @@ def hybrid_search(
     query_embedding: list[float],
     top_k: int | None = None,
     extra_filter: str | None = None,
+    source_paths: list[str] | set[str] | None = None,
 ) -> list[SearchResult]:
     """Hybrid (vector + BM25) parallel retrieval.
 
@@ -159,6 +249,7 @@ def hybrid_search(
                to ``cfg.retrieval_top_k``.
         extra_filter: Optional Milvus scalar filter expression forwarded
                       to :func:`vector_search`.
+        source_paths: Optional exact source-path scope applied to BM25.
 
     Returns:
         RRF-fused list of :class:`SearchResult` objects from both
@@ -169,7 +260,7 @@ def hybrid_search(
         top_k = cfg.retrieval_top_k
 
     vector_results = vector_search(query_embedding, top_k=top_k, extra_filter=extra_filter)
-    bm25_results = bm25_search(query, top_k=top_k)
+    bm25_results = bm25_search(query, top_k=top_k, source_paths=source_paths)
 
     fused = _rrf_fusion(
         [vector_results, bm25_results],

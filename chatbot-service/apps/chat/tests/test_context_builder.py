@@ -49,7 +49,7 @@ class ContextBuilderTest(TestCase):
             model="test-model",
         )
 
-        messages = ContextBuilder(self.chat, self.user).build(latest.content, latest)
+        messages, _ = ContextBuilder(self.chat, self.user).build(latest.content, latest)
         serialized = str(messages)
 
         self.assertIn("earlier discussion established", serialized)
