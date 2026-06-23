@@ -357,8 +357,10 @@ try:
     print(len(emb))
 except: sys.exit(1)" 2>/dev/null || echo ""
 }
-TEXT_DIM=$(detect_dim "$TEXT_URL" "nvidia/llama-embed-nemotron-8b") || TEXT_DIM=4096
-MM_DIM=$(detect_dim "$MM_URL" "nvidia/nemotron-colembed-vl-8b-v2" "/pooling") || MM_DIM=4096
+TEXT_DIM=$(detect_dim "$TEXT_URL" "nvidia/llama-embed-nemotron-8b") || true
+MM_DIM=$(detect_dim "$MM_URL" "nvidia/nemotron-colembed-vl-8b-v2" "/pooling") || true
+TEXT_DIM="${TEXT_DIM:-4096}"
+MM_DIM="${MM_DIM:-4096}"
 
 # Write full .env.runpod (no LORA_ADAPTERS — discovered at runtime via /v1/models)
 {

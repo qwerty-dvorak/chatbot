@@ -9,6 +9,7 @@ Provides three public functions:
 
 import base64
 import logging
+import os
 import time
 
 import httpx
@@ -18,6 +19,26 @@ from .config import cfg
 from .models import Chunk, EmbeddedChunk
 
 logger = logging.getLogger(__name__)
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return max(1, int(os.getenv(name, str(default))))
+    except ValueError:
+        return default
+
+
+_TEXT_EMBED_BATCH_TOKEN_BUDGET = _env_int("TEXT_EMBED_BATCH_TOKEN_BUDGET", 6000)
+_TEXT_EMBED_SINGLE_MAX_CHARS = _env_int("TEXT_EMBED_SINGLE_MAX_CHARS", 24000)
+_TEXT_EMBED_SINGLE_MIN_CHARS = _env_int("TEXT_EMBED_SINGLE_MIN_CHARS", 256)
+_MULTIMODAL_EMBED_TEXT_MAX_CHARS = _env_int("MULTIMODAL_EMBED_TEXT_MAX_CHARS", 4000)
+_TEXT_EMBED_CONTEXT_MARKERS = (
+    "maximum context length",
+    "context length",
+    "input_tokens",
+    "too many tokens",
+    "max token",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -86,6 +107,10 @@ def _pool_multimodal(input_payload, use_messages: bool = False) -> list[float]:
     ]
 
 
+def _multimodal_text(text: str) -> str:
+    return (text or "")[:_MULTIMODAL_EMBED_TEXT_MAX_CHARS]
+
+
 def _embed_multimodal_single(chunk: Chunk) -> list[float]:
     """Embed one image chunk through the documented vLLM /pooling endpoint.
 
@@ -96,7 +121,7 @@ def _embed_multimodal_single(chunk: Chunk) -> list[float]:
     """
 
     content = []
-    text = chunk.text or ""
+    text = _multimodal_text(chunk.text or "") if chunk.image_data else (chunk.text or "")
     if text:
         content.append({"type": "text", "text": text})
     if chunk.image_data:
@@ -120,13 +145,140 @@ def _embed_multimodal_single(chunk: Chunk) -> list[float]:
 # ---------------------------------------------------------------------------
 # Public embedding functions
 # ---------------------------------------------------------------------------
+def _estimated_tokens(text: str) -> int:
+    """Cheap estimate used only to avoid obviously oversized embed batches."""
+    return max(1, (len(text or "") + 3) // 4)
+
+
+def _text_batches(chunks: list[Chunk], max_items: int) -> list[list[Chunk]]:
+    batches: list[list[Chunk]] = []
+    current: list[Chunk] = []
+    current_tokens = 0
+
+    for chunk in chunks:
+        estimated = _estimated_tokens(chunk.text)
+        if current and (
+            len(current) >= max_items
+            or current_tokens + estimated > _TEXT_EMBED_BATCH_TOKEN_BUDGET
+        ):
+            batches.append(current)
+            current = []
+            current_tokens = 0
+        current.append(chunk)
+        current_tokens += estimated
+
+    if current:
+        batches.append(current)
+    return batches
+
+
+def _is_context_length_error(exc: Exception) -> bool:
+    status_code = getattr(exc, "status_code", None)
+    response = getattr(exc, "response", None)
+    if status_code is None and response is not None:
+        status_code = getattr(response, "status_code", None)
+    text = str(exc).lower()
+    return (
+        (status_code in (400, 413) or status_code is None)
+        and any(marker in text for marker in _TEXT_EMBED_CONTEXT_MARKERS)
+    )
+
+
+def _response_tokens(response) -> int:
+    usage = getattr(response, "usage", None)
+    return usage.total_tokens if usage and hasattr(usage, "total_tokens") else 0
+
+
+def _request_text_embeddings(
+    client: openai.OpenAI,
+    chunks: list[Chunk],
+    inputs: list[str],
+) -> tuple[list[EmbeddedChunk], int]:
+    response = client.embeddings.create(
+        model=cfg.text_embedding_model,
+        input=inputs,
+    )
+    if len(response.data) != len(chunks):
+        raise ValueError(
+            f"Embedding endpoint returned {len(response.data)} vectors for "
+            f"{len(chunks)} input chunks"
+        )
+    return (
+        [
+            EmbeddedChunk(
+                chunk=chunk,
+                embedding=embedding_obj.embedding,
+                is_multimodal=False,
+            )
+            for chunk, embedding_obj in zip(chunks, response.data)
+        ],
+        _response_tokens(response),
+    )
+
+
+def _embed_single_with_truncation(
+    client: openai.OpenAI,
+    chunk: Chunk,
+    original_error: Exception,
+) -> tuple[list[EmbeddedChunk], int]:
+    original_text = chunk.text or ""
+    candidate_len = min(len(original_text), _TEXT_EMBED_SINGLE_MAX_CHARS)
+    if candidate_len >= len(original_text):
+        candidate_len = len(original_text) // 2
+
+    while candidate_len >= _TEXT_EMBED_SINGLE_MIN_CHARS:
+        try:
+            embedded, tokens = _request_text_embeddings(
+                client,
+                [chunk],
+                [original_text[:candidate_len]],
+            )
+            logger.warning(
+                "Embedded overlong chunk %s using first %d/%d chars after context-limit error.",
+                chunk.id,
+                candidate_len,
+                len(original_text),
+            )
+            return embedded, tokens
+        except Exception as exc:
+            if not _is_context_length_error(exc):
+                raise
+            candidate_len //= 2
+
+    raise original_error
+
+
+def _embed_text_batch_resilient(
+    client: openai.OpenAI,
+    batch: list[Chunk],
+) -> tuple[list[EmbeddedChunk], int]:
+    try:
+        return _request_text_embeddings(client, batch, [c.text for c in batch])
+    except Exception as exc:
+        if not _is_context_length_error(exc):
+            raise
+        if len(batch) == 1:
+            return _embed_single_with_truncation(client, batch[0], exc)
+
+        midpoint = max(1, len(batch) // 2)
+        logger.warning(
+            "Text embedding batch of %d chunks exceeded context; splitting into %d and %d.",
+            len(batch),
+            midpoint,
+            len(batch) - midpoint,
+        )
+        left, left_tokens = _embed_text_batch_resilient(client, batch[:midpoint])
+        right, right_tokens = _embed_text_batch_resilient(client, batch[midpoint:])
+        return left + right, left_tokens + right_tokens
+
 
 def embed_text(chunks: list[Chunk], batch_size: int = 32) -> list[EmbeddedChunk]:
     """Embed text chunks using the text embedding model.
 
     Chunks that carry ``image_data`` are skipped — they belong to
     :func:`embed_multimodal`.  Processing is done in batches of *batch_size*
-    to stay within typical API request-size limits.
+    and a conservative estimated token budget. If the endpoint still rejects
+    a batch for context length, the batch is split recursively.
 
     Args:
         chunks:     Chunks to embed.  Image chunks are silently skipped.
@@ -145,31 +297,17 @@ def embed_text(chunks: list[Chunk], batch_size: int = 32) -> list[EmbeddedChunk]
     t0 = time.time()
     total_tokens = 0
 
-    for batch_start in range(0, len(text_only), batch_size):
-        batch = text_only[batch_start : batch_start + batch_size]
-        inputs = [c.text for c in batch]
-
+    batches = _text_batches(text_only, batch_size)
+    for batch_number, batch in enumerate(batches, start=1):
         bt0 = time.time()
-        response = client.embeddings.create(
-            model=cfg.text_embedding_model,
-            input=inputs,
-        )
+        embedded, tokens_used = _embed_text_batch_resilient(client, batch)
         batch_dur = round(time.time() - bt0, 4)
-        tokens_used = response.usage.total_tokens if hasattr(response, 'usage') and response.usage else 0
         total_tokens += tokens_used
         logger.info("[TIMING] embed_text batch=%d/%d %.3fs %d tokens",
-                    batch_start // batch_size + 1,
-                    (len(text_only) + batch_size - 1) // batch_size,
+                    batch_number,
+                    len(batches),
                     batch_dur, tokens_used)
-
-        for chunk, embedding_obj in zip(batch, response.data):
-            results.append(
-                EmbeddedChunk(
-                    chunk=chunk,
-                    embedding=embedding_obj.embedding,
-                    is_multimodal=False,
-                )
-            )
+        results.extend(embedded)
 
     total_dur = round(time.time() - t0, 4)
     logger.info("[TIMING] embed_text total %.3fs %d chunks %d tokens",
@@ -213,7 +351,7 @@ def embed_multimodal(chunks: list[Chunk], batch_size: int = 16) -> list[Embedded
                 exc,
             )
             try:
-                embedding = _pool_multimodal(chunk.text or "")
+                embedding = _pool_multimodal(_multimodal_text(chunk.text or ""))
             except Exception as fallback_exc:
                 logger.error(
                     "Both multimodal and text-only fallback failed for chunk %s: %s",

@@ -124,9 +124,9 @@ def reset_pipeline_source() -> None:
 # Documents
 # ---------------------------------------------------------------------------
 
-def _sanitize(text: str) -> str:
+def _sanitize(text: str | None) -> str:
     """Strip PostgreSQL-illegal characters (NUL bytes) from text."""
-    return text.replace("\x00", "") if text else text
+    return text.replace("\x00", "") if text else ""
 
 
 def insert_document(
@@ -151,9 +151,9 @@ def insert_document(
             extracted_text, analysis_summary, ocr_mode, metadata, created_at, updated_at)
            VALUES (%s, %s, %s, %s, %s, %s, 'ready', %s, %s, %s, %s, NOW(), NOW())""",
         (
-            doc_id, source_id, title, original_filename or title,
-            mime_type, sha256, _sanitize(extracted_text), _sanitize(analysis_summary),
-            ocr_mode, json.dumps(metadata or {}),
+            doc_id, source_id, _sanitize(title), _sanitize(original_filename or title),
+            _sanitize(mime_type), _sanitize(sha256), _sanitize(extracted_text),
+            _sanitize(analysis_summary), _sanitize(ocr_mode), json.dumps(metadata or {}),
         ),
     )
     return doc_id
@@ -205,7 +205,7 @@ def get_document(doc_id: str) -> dict | None:
 
 
 def update_document_status(doc_id: str, status: str) -> None:
-    execute("UPDATE documents SET status = %s WHERE id = %s", (status, doc_id))
+    execute("UPDATE documents SET status = %s WHERE id = %s", (_sanitize(status), doc_id))
 
 
 # ---------------------------------------------------------------------------
@@ -222,14 +222,15 @@ def insert_chunk(
     asset_id: str | None = None,
 ) -> str:
     chunk_id = str(uuid.uuid4())
+    stored_content = _sanitize(content)
     execute(
         """INSERT INTO document_chunks
            (id, document_id, asset_id, chunk_index, content, content_hash,
             token_count, metadata, created_at)
            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())""",
         (
-            chunk_id, document_id, asset_id, chunk_index, content,
-            content_hash or _simple_hash(content),
+            chunk_id, document_id, asset_id, chunk_index, stored_content,
+            _sanitize(content_hash) or _simple_hash(stored_content),
             token_count, json.dumps(metadata or {}),
         ),
     )
@@ -241,13 +242,14 @@ def insert_chunks_batch(rows: list[dict]) -> list[str]:
     ids = [str(uuid.uuid4()) for _ in rows]
     param_rows = []
     for chunk_id, r in zip(ids, rows):
+        stored_content = _sanitize(r["content"])
         param_rows.append((
             chunk_id,
             r["document_id"],
             r.get("asset_id"),
             r["chunk_index"],
-            r["content"],
-            r.get("content_hash", _simple_hash(r["content"])),
+            stored_content,
+            _sanitize(r.get("content_hash")) or _simple_hash(stored_content),
             r.get("token_count", 0),
             json.dumps(r.get("metadata", {})),
         ))
@@ -308,9 +310,10 @@ def insert_asset(
            VALUES (%s, %s, %s, %s, %s, %s, %s, '', %s, %s, %s, %s, %s, %s,
                    %s, %s, %s, %s, NOW())""",
         (
-            asset_id, document_id, asset_type, file, mime_type,
-            page_number, text, source_index, derived_index, object_key, sha256,
-            width, height, ocr_backend, ocr_status,
+            asset_id, document_id, _sanitize(asset_type), _sanitize(file), _sanitize(mime_type),
+            page_number, _sanitize(text), source_index, derived_index,
+            _sanitize(object_key), _sanitize(sha256), width, height,
+            _sanitize(ocr_backend), _sanitize(ocr_status),
             json.dumps(preprocessing or {}), json.dumps(metadata or {}),
         ),
     )

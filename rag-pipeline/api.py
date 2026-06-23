@@ -90,6 +90,9 @@ def _execute_job(job: dict) -> dict:
                 results.append(result)
             except Exception as exc:
                 logger.error("Failed to process %s: %s", source_name, exc)
+                current_step = tracker.current_step
+                if current_step:
+                    tracker.fail(current_step, str(exc), f"{source_name} failed")
                 errors.append({"file": source_name, "error": str(exc)})
 
         combined = {
