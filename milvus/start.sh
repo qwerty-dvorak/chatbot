@@ -32,8 +32,8 @@ docker run -d \
   -e ETCD_QUOTA_BACKEND_BYTES=4294967296 \
   -e ETCD_SNAPSHOT_COUNT=50000 \
   -v "$VOL_DIR/etcd:/etcd" \
-  --health-cmd="etcdctl endpoint health" \
-  --health-interval=10s --health-timeout=10s --health-retries=5 --health-start-period=30s \
+  --health-cmd="etcdctl endpoint health --cluster" \
+  --health-interval=30s --health-timeout=20s --health-retries=3 \
   quay.io/coreos/etcd:v3.7.0-rc.0 \
   etcd -advertise-client-urls=http://etcd:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
 
