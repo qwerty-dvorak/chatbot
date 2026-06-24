@@ -14,9 +14,6 @@ API_IMAGE="rag-api"
 VOL_DIR="${DOCKER_VOLUME_DIRECTORY:-$SERVICE_DIR/volumes}"
 DATA_DIR="$SERVICE_DIR/data"
 
-# Load RunPod endpoints from models/.env.runpod
-[ -f "$ROOT_DIR/models/.env.runpod" ] && export $(grep -v '^#' "$ROOT_DIR/models/.env.runpod" | xargs)
-
 API_PORT="${API_PORT:-8093}"
 MILVUS_PORT="${MILVUS_PORT:-19530}"
 MINIO_PORT="${MINIO_PORT:-9000}"

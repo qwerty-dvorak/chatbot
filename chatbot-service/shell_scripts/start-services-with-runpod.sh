@@ -32,11 +32,6 @@ for arg in "$@"; do
   esac
 done
 
-# Load model endpoints from models/.env.runpod
-if [ -f "$ROOT_DIR/models/.env.runpod" ]; then
-  export $(grep -v '^#' "$ROOT_DIR/models/.env.runpod" | xargs)
-fi
-
 docker rm -f web worker file-server 2>/dev/null || true
 
 if [[ "$NO_RAG" == "true" ]]; then
