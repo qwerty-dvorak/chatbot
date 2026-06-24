@@ -1,13 +1,23 @@
 {% extends "base.html" %}
-{% block title %}{{ document.title }} — Chatbot{% endblock %}
+{% block title %}{{ document.title }} — Knowledge{% endblock %}
 {% block content %}
 <div class="page-header">
-  <h1 style="font-size:1.25rem">{{ document.title }}</h1>
-  <a href="{% url 'knowledge:list' %}" class="btn btn-ghost btn-sm">← Knowledge</a>
+  <div style="display:flex;align-items:center;gap:12px">
+    <a href="{% url 'knowledge:list' %}" class="btn btn-ghost btn-sm" style="padding:5px 8px">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M10.5 3L5.5 8l5 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+    </a>
+    <h1 style="font-size:1.2rem">{{ document.title }}</h1>
+  </div>
+  <form method="post" action="{% url 'knowledge:delete' document.id %}" onsubmit="return confirm('Delete this document?')">
+    {% csrf_token %}
+    <button type="submit" class="btn btn-danger btn-sm">
+      <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M5.5 5.5A.5.5 0 016 6v6a.5.5 0 01-1 0V6a.5.5 0 01.5-.5zm2.5 0a.5.5 0 01.5.5v6a.5.5 0 01-1 0V6a.5.5 0 01.5-.5zm3 .5a.5.5 0 00-1 0v6a.5.5 0 001 0V6z"/><path d="M14.5 3a1 1 0 01-1 1H13v9a2 2 0 01-2 2H5a2 2 0 01-2-2V4h-.5a1 1 0 01-1-1V2a1 1 0 011-1H6a1 1 0 011-1h2a1 1 0 011 1h3.5a1 1 0 011 1v1z"/></svg>
+      Delete
+    </button>
+  </form>
 </div>
 
 <div class="card mb-16">
-  <h2 style="font-size:1rem;font-weight:600;margin-bottom:12px">Details</h2>
   <div class="settings-row">
     <div><div class="settings-row-label">Status</div></div>
     <span class="badge badge-{{ document.artifact_revision.processing_status }}" id="status-badge">{{ document.artifact_revision.processing_status }}</span>
@@ -53,15 +63,31 @@
 </div>
 
 <div id="ingestion-progress" class="card mb-16" style="display:none">
-  <h2 style="font-size:1rem;font-weight:600;margin-bottom:8px">Ingestion Progress</h2>
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" style="color:var(--text2)"><path d="M1 2.5A1.5 1.5 0 012.5 1h3A1.5 1.5 0 017 2.5v3A1.5 1.5 0 015.5 7h-3A1.5 1.5 0 011 5.5v-3zm8 0A1.5 1.5 0 0110.5 1h3A1.5 1.5 0 0115 2.5v3A1.5 1.5 0 0113.5 7h-3A1.5 1.5 0 019 5.5v-3zm-8 8A1.5 1.5 0 012.5 9h3A1.5 1.5 0 017 10.5v3A1.5 1.5 0 015.5 15h-3A1.5 1.5 0 011 13.5v-3zm8 0A1.5 1.5 0 0110.5 9h3a1.5 1.5 0 011.5 1.5v3a1.5 1.5 0 01-1.5 1.5h-3A1.5 1.5 0 019 13.5v-3z"/></svg>
+    <h2 style="font-size:.85rem;font-weight:600">Ingestion Progress</h2>
+    <span id="progress-pct-label" class="badge badge-processing" style="margin-left:auto">0%</span>
+  </div>
   <div class="progress-bar-bg">
     <div class="progress-bar-fill" id="progress-fill" style="width:0%"></div>
   </div>
-  <div style="margin-top:8px;font-size:.8125rem" id="progress-step">Queued...</div>
+  <div style="margin-top:8px;font-size:.8125rem;color:var(--text2)" id="progress-step">Queued...</div>
+  <div id="progress-steps-visual" class="pipeline-visual" style="margin-top:12px"></div>
+</div>
+
+<div id="steps-pipeline-card" class="card mb-16" style="display:none">
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" style="color:var(--text2)"><path d="M3 5.5A1.5 1.5 0 014.5 4h7A1.5 1.5 0 0113 5.5v7a1.5 1.5 0 01-1.5 1.5h-7A1.5 1.5 0 013 12.5v-7z"/><path d="M5.5 2A1.5 1.5 0 007 .5h2A1.5 1.5 0 0010.5 2v.5h-5V2z"/></svg>
+    <h2 style="font-size:.85rem;font-weight:600">Pipeline Steps</h2>
+  </div>
+  <div id="pipeline-steps-container"></div>
 </div>
 
 <div id="summary-card" class="card mb-16"{% if not document.artifact_revision.summary and not rag_doc %} style="display:none"{% endif %}>
-  <h2 style="font-size:1rem;font-weight:600;margin-bottom:8px">Summary</h2>
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" style="color:var(--text2)"><path d="M1 2.5A1.5 1.5 0 012.5 1h11A1.5 1.5 0 0115 2.5v11a1.5 1.5 0 01-1.5 1.5h-11A1.5 1.5 0 011 13.5v-11z"/><path d="M4 5.5h8M4 8h8M4 10.5h5" stroke="currentColor" stroke-width="1" stroke-linecap="round" fill="none"/></svg>
+    <h2 style="font-size:.85rem;font-weight:600">Summary</h2>
+  </div>
   <div id="summary-text" style="font-size:.875rem;white-space:pre-wrap;line-height:1.55;color:var(--text2)">
     {% if document.artifact_revision.summary %}
       {{ document.artifact_revision.summary }}
@@ -75,19 +101,22 @@
 
 {% if timing_rows %}
 <div class="card mb-16">
-  <h2 style="font-size:1rem;font-weight:600;margin-bottom:8px">Ingestion Timing</h2>
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" style="color:var(--text2)"><path d="M8 3a5 5 0 100 10A5 5 0 008 3zm0 1a4 4 0 110 8A4 4 0 018 4z"/><path d="M7.5 5.5V8a.5.5 0 00.3.46l2 1a.5.5 0 00.4-.92L8.5 7.7V5.5a.5.5 0 00-1 0z"/></svg>
+    <h2 style="font-size:.85rem;font-weight:600">Ingestion Timing</h2>
+  </div>
   <table style="width:100%;font-size:.8125rem;border-collapse:collapse">
     <thead>
-      <tr style="border-bottom:1px solid var(--border)">
-        <th style="text-align:left;padding:4px 8px">Step</th>
-        <th style="text-align:right;padding:4px 8px">Duration</th>
+      <tr style="border-bottom:1px solid var(--bd)">
+        <th style="text-align:left;padding:6px 8px;font-weight:600;color:var(--text2)">Step</th>
+        <th style="text-align:right;padding:6px 8px;font-weight:600;color:var(--text2)">Duration</th>
       </tr>
     </thead>
     <tbody class="timing-body">
     {% for row in timing_rows %}
-      <tr style="border-bottom:1px solid var(--border-light)">
-        <td style="padding:4px 8px;font-family:var(--mono);font-size:.75rem">{{ row.name }}</td>
-        <td style="text-align:right;padding:4px 8px">{% if row.seconds is not None %}{{ row.seconds|floatformat:3 }} s{% else %}—{% endif %}</td>
+      <tr style="border-bottom:1px solid var(--surface)">
+        <td style="padding:6px 8px;font-family:var(--mono);font-size:.75rem;color:var(--text)">{{ row.name }}</td>
+        <td style="text-align:right;padding:6px 8px;color:var(--text2)">{% if row.seconds is not None %}{{ row.seconds|floatformat:3 }} s{% else %}—{% endif %}</td>
       </tr>
     {% endfor %}
     </tbody>
@@ -95,34 +124,46 @@
 </div>
 {% endif %}
 
-{% if step_summary or rag_steps %}
-<div class="card mb-16">
-  <h2 style="font-size:1rem;font-weight:600;margin-bottom:8px">Ingestion Steps</h2>
-  {% if step_summary %}
-    <div class="text-muted" style="font-size:.8125rem;margin-bottom:8px">
-      {{ step_summary.completed|default:0 }} completed · {{ step_summary.failed|default:0 }} failed · {{ step_summary.total|default:0 }} total
-    </div>
-  {% endif %}
-  <table style="width:100%;font-size:.8125rem;border-collapse:collapse">
-    <tbody>
-    {% for step in rag_steps %}
-      <tr style="border-bottom:1px solid var(--border-light)">
-        <td style="padding:4px 8px;font-family:var(--mono);font-size:.75rem">{{ step.name }}</td>
-        <td style="padding:4px 8px">{{ step.status }}</td>
-        <td style="padding:4px 8px;color:var(--text2)">{{ step.detail|default:"" }}</td>
-      </tr>
-    {% endfor %}
-    </tbody>
-  </table>
-</div>
-{% endif %}
+
 
 {% if rag_doc and rag_doc.extracted_text %}
 <div class="card mb-16">
-  <h2 style="font-size:1rem;font-weight:600;margin-bottom:8px">Extracted Text <span class="text-muted" style="font-weight:400;font-size:.75rem">({{ rag_doc.extracted_text|wordcount }} words)</span></h2>
-  <pre style="font-size:.75rem;white-space:pre-wrap;max-height:300px;overflow-y:auto;padding:8px;background:var(--bg1);border-radius:6px">{{ rag_doc.extracted_text }}</pre>
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" style="color:var(--text2)"><path d="M5 1a2 2 0 00-2 2v10a2 2 0 002 2h6a2 2 0 002-2V3a2 2 0 00-2-2H5zm0 1h6a1 1 0 011 1v10a1 1 0 01-1 1H5a1 1 0 01-1-1V3a1 1 0 011-1z"/><path d="M6 5h4M6 7.5h4M6 10h2" stroke="currentColor" stroke-width="1" stroke-linecap="round" fill="none"/></svg>
+    <h2 style="font-size:.85rem;font-weight:600">Extracted Text <span class="text-muted" style="font-weight:400;font-size:.75rem">({{ rag_doc.extracted_text|wordcount }} words)</span></h2>
+  </div>
+  <pre style="font-size:.75rem;white-space:pre-wrap;max-height:300px;overflow-y:auto;padding:12px;background:var(--surface);border:1px solid var(--bd);border-radius:8px;font-family:var(--mono);color:var(--text);line-height:1.55">{{ rag_doc.extracted_text }}</pre>
 </div>
 {% endif %}
+
+<script>
+(function() {
+  /* Render pre-existing steps on load */
+  var initialSteps = {{ rag_steps|safe }};
+  if (initialSteps && initialSteps.length) {
+    var pipelineCard = document.getElementById('steps-pipeline-card');
+    if (pipelineCard) pipelineCard.style.display = "";
+    var container = document.getElementById('pipeline-steps-container');
+    if (container) {
+      var html = '';
+      initialSteps.forEach(function(s, idx) {
+        var cls = 'pipe-step';
+        var iconHtml = '';
+        if (s.status === 'completed') { cls += ' step-done'; iconHtml = '<span class="pipe-icon pipe-icon-done">✓</span>'; }
+        else if (s.status === 'running') { cls += ' step-running'; iconHtml = '<span class="pipe-icon pipe-icon-running">◌</span>'; }
+        else if (s.status === 'failed') { cls += ' step-failed'; iconHtml = '<span class="pipe-icon pipe-icon-failed">✗</span>'; }
+        else { cls += ' step-pending'; iconHtml = '<span class="pipe-icon pipe-icon-pending">○</span>'; }
+        var name = (s.name || '').replace(/_/g, ' ');
+        var detail = s.detail || '';
+        var dur = s.duration_ms ? (s.duration_ms / 1000).toFixed(1) + 's' : '';
+        html += '<div class="' + cls + '">' + iconHtml + '<div class="pipe-step-body"><div class="pipe-step-name">' + name + '</div>' + (detail ? '<div class="pipe-step-detail">' + detail + '</div>' : '') + '</div>' + (dur ? '<span class="pipe-step-dur">' + dur + '</span>' : '') + '</div>';
+        if (idx < initialSteps.length - 1) html += '<div class="pipe-connector"></div>';
+      });
+      container.innerHTML = html;
+    }
+  }
+})();
+</script>
 
 {% if document.artifact_revision.processing_status == "pending" or document.artifact_revision.processing_status == "processing" or job.status == "queued" or job.status == "running" %}
 <script>
@@ -154,14 +195,51 @@
     }
     var pct = Math.round((done / steps.length) * 100);
     progressFill.style.width = pct + "%";
-    progressStep.textContent = current ? current + "..." : done + "/" + steps.length + " steps";
+    progressStep.textContent = current ? current.replace(/_/g, " ") + "..." : done + "/" + steps.length + " steps";
+  }
+
+  function renderPipeline(steps) {
+    if (!steps || !steps.length) return;
+    var pipelineCard = document.getElementById('steps-pipeline-card');
+    if (pipelineCard) pipelineCard.style.display = "";
+    var container = document.getElementById('pipeline-steps-container');
+    if (!container) return;
+    var html = '';
+    steps.forEach(function(s, idx) {
+      var cls = 'pipe-step';
+      var iconHtml = '';
+      if (s.status === 'completed') { cls += ' step-done'; iconHtml = '<span class="pipe-icon pipe-icon-done">✓</span>'; }
+      else if (s.status === 'running') { cls += ' step-running'; iconHtml = '<span class="pipe-icon pipe-icon-running">◌</span>'; }
+      else if (s.status === 'failed') { cls += ' step-failed'; iconHtml = '<span class="pipe-icon pipe-icon-failed">✗</span>'; }
+      else { cls += ' step-pending'; iconHtml = '<span class="pipe-icon pipe-icon-pending">○</span>'; }
+      var name = (s.name || '').replace(/_/g, ' ');
+      var detail = s.detail || '';
+      var dur = s.duration_ms ? (s.duration_ms / 1000).toFixed(1) + 's' : '';
+      html += '<div class="' + cls + '">';
+      html += iconHtml;
+      html += '<div class="pipe-step-body">';
+      html += '<div class="pipe-step-name">' + name + '</div>';
+      if (detail) html += '<div class="pipe-step-detail">' + detail + '</div>';
+      html += '</div>';
+      if (dur) html += '<span class="pipe-step-dur">' + dur + '</span>';
+      html += '</div>';
+      if (idx < steps.length - 1) html += '<div class="pipe-connector"></div>';
+    });
+    container.innerHTML = html;
   }
 
   function poll() {
     fetch(statusUrl)
       .then(function(r) { return r.json(); })
       .then(function(data) {
-        if (data.steps) updateProgress(data.steps);
+        if (data.steps) {
+          updateProgress(data.steps);
+          renderPipeline(data.steps);
+        }
+        if (data.progress_pct != null) {
+          var pctLabel = document.getElementById('progress-pct-label');
+          if (pctLabel) pctLabel.textContent = data.progress_pct + '%';
+        }
         var oldStatus = badge.textContent;
         var newStatus = data.processing_status;
         if (newStatus !== oldStatus) {
@@ -198,7 +276,7 @@
             var info = data.rag_timing[step];
             var seconds = typeof info === "number" ? info : ((info.duration_ms || 0) / 1000);
             var tr = document.createElement("tr");
-            tr.innerHTML = '<td style="padding:4px 8px;font-family:var(--mono);font-size:.75rem">' + step + '</td><td style="text-align:right;padding:4px 8px">' + (seconds ? seconds.toFixed(3) + " s" : "—") + '</td>';
+            tr.innerHTML = '<td style="padding:6px 8px;font-family:var(--mono);font-size:.75rem;color:var(--text)">' + step + '</td><td style="text-align:right;padding:6px 8px;color:var(--text2)">' + (seconds ? seconds.toFixed(3) + " s" : "—") + '</td>';
             tb.appendChild(tr);
           }
         }

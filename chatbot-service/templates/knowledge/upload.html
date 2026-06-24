@@ -3,8 +3,12 @@
 {% block content %}
 <div style="max-width:560px">
   <div class="page-header">
-    <h1>Upload document</h1>
-    <a href="{% url 'knowledge:list' %}" class="btn btn-ghost btn-sm">← Back</a>
+    <div style="display:flex;align-items:center;gap:12px">
+      <a href="{% url 'knowledge:list' %}" class="btn btn-ghost btn-sm" style="padding:5px 8px">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M10.5 3L5.5 8l5 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+      </a>
+      <h1>Upload document</h1>
+    </div>
   </div>
 
   {% if error %}
@@ -22,7 +26,9 @@
       <div class="upload-zone" id="drop-zone">
         <input type="file" name="files" id="file-input" required multiple
                accept=".pdf,.txt,.md,.csv,image/png,image/jpeg,image/webp,image/gif">
-        <div class="upload-icon">📄</div>
+        <div class="upload-icon">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 16V4m0 0L8 8m4-4l4 4M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg>
+        </div>
         <div class="upload-text">Choose one or more files, or drag and drop</div>
         <div class="upload-hint">PDF · TXT · MD · CSV · PNG · JPG · WEBP — max 50 MB</div>
         <div class="file-selected" id="file-selected"></div>
@@ -36,13 +42,24 @@
         <option value="none">No OCR</option>
       </select>
     </div>
+    <div class="form-group" style="display:flex;align-items:center;gap:10px">
+      <label class="toggle" style="margin:0">
+        <input type="checkbox" name="generate_summary" value="1" checked id="summ-toggle">
+        <span class="toggle-slider"></span>
+      </label>
+      <label for="summ-toggle" style="font-size:.875rem;cursor:pointer;font-weight:500">Generate summary</label>
+    </div>
 
-    <div class="flex-gap">
+    <div class="flex-gap" style="margin-top:20px">
       <button type="submit" class="btn btn-primary">Upload</button>
       <a href="{% url 'knowledge:list' %}" class="btn btn-ghost">Cancel</a>
     </div>
   </form>
 </div>
+<style>
+  .upload-icon { font-size: 1.5rem; margin-bottom: 10px; color: var(--text3); }
+  .upload-icon svg { display: inline-block; }
+</style>
 <script>
 const inp=document.getElementById('file-input'),lbl=document.getElementById('file-selected'),zone=document.getElementById('drop-zone'),ocr=document.getElementById('ocr-group');
 function needsOcr(name){const e=name.split('.').pop().toLowerCase();return['png','jpg','jpeg','webp','gif','pdf'].includes(e);}

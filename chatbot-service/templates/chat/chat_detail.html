@@ -2,36 +2,45 @@
 {% load chat_tags %}
 {% block title %}{{ chat.title }} — Chatbot{% endblock %}
 {% block main_class %}full-h{% endblock %}
+{% block head %}
+{{ block.super }}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>document.addEventListener('DOMContentLoaded', function(){ hljs.highlightAll(); });</script>
+{% endblock %}
 
 {% block body %}
+<style>.flash-wrap { display: none; }</style>
 <div class="chat-container">
 
   <!-- Top bar -->
   <div class="chat-topbar">
-    <span class="chat-topbar-title">
-      {{ chat.title }}
-      {% if chat.archived %}<span class="badge badge-pending" style="margin-left:8px">archived</span>{% endif %}
-    </span>
+    <div class="chat-topbar-left">
+      <a href="{% url 'chat:list' %}" class="chat-back-btn" title="Back to chats">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M10.5 3L5.5 8l5 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+      </a>
+      <div class="chat-topbar-info">
+        <span class="chat-topbar-title">{{ chat.title }}</span>
+        {% if chat.archived %}<span class="badge badge-pending" style="margin-left:8px;font-size:.6rem">archived</span>{% endif %}
+      </div>
+    </div>
     <div class="chat-topbar-actions">
-      <form method="post" action="{% url 'chat:lora' chat.id %}" class="lora-form">
+      <select id="lora-select" class="topbar-select" title="LoRA adapter">
+        {% for val, label in lora_adapters %}
+          <option value="{{ val }}"{% if val == current_lora %} selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      <button type="button" class="topbar-btn" id="compact-btn" title="Summarize older messages" onclick="compactChat('{{ chat.id }}')">
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor"><path d="M1 2.5A1.5 1.5 0 012.5 1h3A1.5 1.5 0 017 2.5v3A1.5 1.5 0 015.5 7h-3A1.5 1.5 0 011 5.5v-3zm8 0A1.5 1.5 0 0110.5 1h3A1.5 1.5 0 0115 2.5v3A1.5 1.5 0 0113.5 7h-3A1.5 1.5 0 019 5.5v-3zm-8 8A1.5 1.5 0 012.5 9h3A1.5 1.5 0 017 10.5v3A1.5 1.5 0 015.5 15h-3A1.5 1.5 0 011 13.5v-3zm8 0A1.5 1.5 0 0110.5 9h3a1.5 1.5 0 011.5 1.5v3a1.5 1.5 0 01-1.5 1.5h-3A1.5 1.5 0 019 13.5v-3z"/></svg>
+      </button>
+      <button type="button" class="topbar-btn" onclick="openShareModal()" id="share-btn" title="Share chat">
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor"><path d="M3.5 9a1.5 1.5 0 100-3 1.5 1.5 0 000 3zM12.5 5a1.5 1.5 0 100-3 1.5 1.5 0 000 3zM12.5 14a1.5 1.5 0 100-3 1.5 1.5 0 000 3z"/><path d="M5.35 7.65l5.3-3.3M5.35 8.35l5.3 3.3" stroke="currentColor" stroke-width="1.2" fill="none"/></svg>
+      </button>
+      <form method="post" action="{% url 'chat:archive' chat.id %}" class="archive-form" id="archive-form">
         {% csrf_token %}
         <input type="hidden" name="next" value="{% url 'chat:detail' chat.id %}">
-        <select name="lora_adapter" class="lora-select" onchange="this.form.submit()" title="LoRA adapter">
-          {% for val, label in lora_adapters %}
-            <option value="{{ val }}"{% if val == current_lora %} selected{% endif %}>{{ label }}</option>
-          {% endfor %}
-        </select>
-      </form>
-      <form method="post" action="{% url 'chat:compact' chat.id %}" class="compact-form">
-        {% csrf_token %}
-        <button type="submit" class="btn btn-ghost btn-sm" title="Summarize older messages with the LLM">Compact</button>
-      </form>
-      <a href="{% url 'chat:share' chat.id %}" class="btn btn-ghost btn-sm">Share</a>
-      <form method="post" action="{% url 'chat:archive' chat.id %}" style="display:inline">
-        {% csrf_token %}
-        <input type="hidden" name="next" value="{% url 'chat:detail' chat.id %}">
-        <button type="submit" class="btn btn-ghost btn-sm">
-          {% if chat.archived %}Restore{% else %}Archive{% endif %}
+        <button type="submit" class="topbar-btn" title="{% if chat.archived %}Restore{% else %}Archive{% endif %}">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor"><path d="M2 2.5A1.5 1.5 0 013.5 1h9A1.5 1.5 0 0114 2.5v1a1.5 1.5 0 01-1.5 1.5h-9A1.5 1.5 0 012 3.5v-1z"/><path d="M3 6v6.5A2.5 2.5 0 005.5 15h5A2.5 2.5 0 0013 12.5V6H3zm4 2.5a.5.5 0 01.5-.5h1a.5.5 0 01.5.5v1a.5.5 0 01-.5.5h-1a.5.5 0 01-.5-.5v-1z"/></svg>
         </button>
       </form>
     </div>
@@ -74,15 +83,67 @@
             {% endif %}
             <div class="msg-bubble">{{ msg.content }}</div>
             {% if msg.attachments %}
-              <div class="attach-chips">
-                {% for a in msg.attachments %}<span class="attach-chip">📎 {{ a.original_filename }}</span>{% endfor %}
+              <div class="attach-cards">
+                {% for a in msg.attachments %}
+                  {% with fn_lower=a.original_filename|lower %}
+                  {% with is_img=a.mime_type|slice:":5" %}
+                  <div class="attach-card" data-attach-index="{{ forloop.counter0 }}" data-preview-url="{% url 'chat:attachment' chat.id msg.id a.original_filename %}" data-mime="{{ a.mime_type }}">
+                    <div class="attach-card-icon
+                      {% if is_img == 'image' %}attach-card-icon-img-type{% elif '.pdf' in fn_lower %}attach-card-icon-pdf{% elif '.txt' in fn_lower or '.md' in fn_lower or '.csv' in fn_lower %}attach-card-icon-txt{% else %}attach-card-icon-other{% endif %}">
+                      {% if is_img == 'image' %}
+                        <img src="{% url 'chat:attachment' chat.id msg.id a.original_filename %}"
+                             class="attach-card-icon-img"
+                             onclick="event.stopPropagation(); openLightbox(this.src)" alt="{{ a.original_filename }}">
+                      {% elif '.pdf' in fn_lower %}
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/></svg>
+                      {% elif '.txt' in fn_lower or '.md' in fn_lower %}
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
+                      {% else %}
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                      {% endif %}
+                    </div>
+                    <div class="attach-card-body" onclick="previewAttachment(this.parentNode)" style="cursor:pointer">
+                      <div class="attach-card-name">{{ a.original_filename }}</div>
+                      <div class="attach-card-meta">
+                        {% if a.size_bytes >= 1048576 %}
+                          {{ a.size_bytes|filesizeformat }}
+                        {% elif a.size_bytes >= 1024 %}
+                          {{ a.size_bytes|filesizeformat }}
+                        {% else %}
+                          {{ a.size_bytes }} B
+                        {% endif %}
+                        {% if a.document_ref_id %}
+                          <span class="attach-knowledge-badge">
+                            <svg width="9" height="9" viewBox="0 0 16 16" fill="currentColor"><path d="M13.5 3.5l-7 7-3.5-3.5" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>
+                            Knowledge
+                          </span>
+                        {% endif %}
+                      </div>
+                    </div>
+                    <div class="attach-card-actions">
+                      <button class="attach-card-btn attach-card-btn-knowledge
+                        {% if a.document_ref_id %}active{% endif %}"
+                        onclick="toggleKnowledge(this, '{{ chat.id }}', '{{ msg.id }}', {{ forloop.counter0 }})"
+                        title="{% if a.document_ref_id %}Ingested into knowledge{% else %}Ingest into knowledge{% endif %}">
+                        <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor"><path d="M10 4v12M4 10h12" stroke="currentColor" stroke-width="2" fill="none"/></svg>
+                      </button>
+                      <a href="{% url 'chat:attachment' chat.id msg.id a.original_filename %}"
+                         class="attach-card-btn attach-card-btn-download" download
+                         title="Download {{ a.original_filename }}">
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a.5.5 0 01.5.5v8.793l3.146-3.147a.5.5 0 11.708.708l-4 4a.5.5 0 01-.708 0l-4-4a.5.5 0 11.708-.708L7.5 10.293V1.5A.5.5 0 018 1z"/><path d="M2 13a1 1 0 011 1v.5A1.5 1.5 0 004.5 16h7A1.5 1.5 0 0013 14.5V14a1 1 0 011 1v.5a2.5 2.5 0 01-2.5 2.5h-7A2.5 2.5 0 012 15.5V14a1 1 0 011-1z"/></svg>
+                      </a>
+                    </div>
+                  </div>
+                  {% endwith %}
+                  {% endwith %}
+                {% endfor %}
               </div>
             {% endif %}
             {% with rag_log=msg.metadata.rag_search_log %}
               {% if rag_log %}
                 <button class="rag-details-toggle" onclick="toggleRagDetails(this)" type="button">
                   <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor"><path d="M8 4a.5.5 0 01.5.5v3h3a.5.5 0 010 1h-3v3a.5.5 0 01-1 0v-3h-3a.5.5 0 010-1h3v-3A.5.5 0 018 4z"/></svg>
-                  {% if rag_log.rag_needed %}RAG·{{ rag_log.total_results }} results{% else %}RAG not needed{% endif %}·{{ rag_log.timing.total }}s
+                  <span class="rag-btn-label">{% if rag_log.rag_needed %}RAG·{{ rag_log.total_results }} results{% else %}RAG not needed{% endif %}·{{ rag_log.timing.total }}s</span>
                 </button>
                 <div class="rag-details-panel">
                   {% if rag_log.rag_used %}
@@ -215,6 +276,18 @@
     </div>
   </div>
 
+  <!-- Copy conversation -->
+  <div class="copy-conv-row" id="copy-conv-row">
+    <button type="button" class="btn btn-ghost btn-sm" onclick="copyConversation('text')" title="Copy as plain text">
+      <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor" style="margin-right:4px"><path d="M4 1.5A1.5 1.5 0 005.5 3h5A1.5 1.5 0 0012 1.5v1A1.5 1.5 0 0110.5 4h-5A1.5 1.5 0 014 2.5v-1z"/><path d="M4 3.5A1.5 1.5 0 002.5 5v8A1.5 1.5 0 004 14.5h8a1.5 1.5 0 001.5-1.5V5A1.5 1.5 0 0012 3.5H4z"/></svg>
+      Copy as text
+    </button>
+    <button type="button" class="btn btn-ghost btn-sm" onclick="copyConversation('markdown')" title="Copy as Markdown">
+      <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor" style="margin-right:4px"><path d="M14 3a1 1 0 011 1v8a1 1 0 01-1 1H2a1 1 0 01-1-1V4a1 1 0 011-1h12zM2 2a2 2 0 00-2 2v8a2 2 0 002 2h12a2 2 0 002-2V4a2 2 0 00-2-2H2z"/><path d="M8.5 5.5v5h-2l-2-2-2 2h-2v-5h2v2.5l1.5-1.5 1.5 1.5V5.5h2z"/></svg>
+      Copy as Markdown
+    </button>
+  </div>
+
   <!-- Input -->
   <div class="input-area">
     <div class="input-inner">
@@ -251,16 +324,69 @@
     </div>
   </div>
 
+  <div class="toast-container" id="toast-container"></div>
+
+  <!-- Share modal -->
+  <div class="share-modal-overlay" id="share-modal">
+    <div class="share-modal">
+      <div class="share-modal-header">
+        <h3>Share this chat</h3>
+        <button class="share-modal-close" onclick="closeShareModal()">✕</button>
+      </div>
+      <div class="share-modal-body">
+        <div id="share-loading" style="text-align:center;padding:24px;color:var(--text3)">Loading…</div>
+        <div id="share-active" style="display:none">
+          <p class="text-muted" style="margin-bottom:12px;font-size:.875rem">Anyone with this link can view the chat.</p>
+          <div class="share-url-row">
+            <input type="text" id="share-url-input" readonly class="share-url-input">
+            <button type="button" class="btn btn-primary btn-sm" id="share-copy-btn" onclick="copyShareUrl()">Copy link</button>
+          </div>
+          <div class="share-meta" id="share-meta"></div>
+          <div class="share-actions">
+            <button type="button" class="btn btn-ghost btn-sm" onclick="regenerateShareLink()">Regenerate</button>
+            <button type="button" class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="revokeShareLink()">Revoke link</button>
+          </div>
+        </div>
+        <div id="share-inactive" style="display:none">
+          <p class="text-muted" style="margin-bottom:16px;font-size:.875rem">Create a public read-only link to share this conversation.</p>
+          <button type="button" class="btn btn-primary" onclick="createShareLink()">Create share link</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
 </div>
 
+<script>
+/* ── Convert server flash messages to toast on load ── */
+(function() {
+  var flashes = document.querySelectorAll('.flash');
+  flashes.forEach(function(f) {
+    var type = 'info';
+    if (f.classList.contains('flash-success')) type = 'success';
+    else if (f.classList.contains('flash-error')) type = 'error';
+    else if (f.classList.contains('flash-warning')) type = 'warning';
+    setTimeout(function() {
+      showToast(f.textContent.trim(), type);
+      f.remove();
+    }, 100);
+  });
+})();
+</script>
 <script>
 function toggleRagDetails(btn) {
   var panel = btn.nextElementSibling;
   if (panel && panel.classList.contains('rag-details-panel')) {
     panel.classList.toggle('open');
-    btn.innerHTML = panel.classList.contains('open')
-      ? '<svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor"><path d="M4 8a.5.5 0 01.5-.5h7a.5.5 0 010 1h-7A.5.5 0 014 8z"/></svg> RAG details'
-      : '<svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor"><path d="M8 4a.5.5 0 01.5.5v3h3a.5.5 0 010 1h-3v3a.5.5 0 01-1 0v-3h-3a.5.5 0 010-1h3v-3A.5.5 0 018 4z"/></svg> RAG details';
+    var label = btn.querySelector('.rag-btn-label');
+    if (!label) return;
+    if (panel.classList.contains('open')) {
+      btn.querySelector('svg:first-child').outerHTML = '<svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor"><path d="M4 8a.5.5 0 01.5-.5h7a.5.5 0 010 1h-7A.5.5 0 014 8z"/></svg>';
+      label.textContent = ' Hide details';
+    } else {
+      btn.querySelector('svg:first-child').outerHTML = '<svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor"><path d="M8 4a.5.5 0 01.5.5v3h3a.5.5 0 010 1h-3v3a.5.5 0 01-1 0v-3h-3a.5.5 0 010-1h3v-3A.5.5 0 018 4z"/></svg>';
+      label.textContent = '';
+    }
   }
 }
 function toggleReasoning(btn) {
@@ -271,6 +397,307 @@ function toggleReasoning(btn) {
     var span = btn.querySelector('span');
     if (span) span.textContent = panel.classList.contains('open') ? 'Hide thinking' : 'Show thinking';
   }
+}
+function openLightbox(src) {
+  var overlay = document.createElement('div');
+  overlay.className = 'lightbox-overlay';
+  var zoom = 1, panX = 0, panY = 0, dragging = false, startX, startY;
+
+  var stage = document.createElement('div');
+  stage.className = 'lb-stage';
+
+  var img = document.createElement('img');
+  img.className = 'lb-img';
+  img.src = src;
+  img.alt = 'Preview';
+  img.draggable = false;
+
+  function applyTransform() {
+    if (zoom <= 1) {
+      img.style.transform = '';
+      img.style.maxWidth = '90vw';
+      img.style.maxHeight = '85vh';
+      img.classList.remove('zoomed');
+    } else {
+      img.style.maxWidth = 'none';
+      img.style.maxHeight = 'none';
+      img.style.transform = 'translate(' + panX + 'px,' + panY + 'px) scale(' + zoom + ')';
+      img.classList.add('zoomed');
+    }
+  }
+  function setZoom(z) {
+    zoom = Math.max(0.25, Math.min(10, z));
+    document.getElementById('lb-zoom-label').textContent = Math.round(zoom * 100) + '%';
+    applyTransform();
+  }
+
+  img.addEventListener('mousedown', function(e) {
+    if (zoom <= 1) return;
+    dragging = true;
+    startX = e.clientX - panX;
+    startY = e.clientY - panY;
+    img.classList.add('dragging');
+    e.preventDefault();
+  });
+  window.addEventListener('mousemove', function(e) {
+    if (!dragging) return;
+    panX = e.clientX - startX;
+    panY = e.clientY - startY;
+    applyTransform();
+  });
+  window.addEventListener('mouseup', function() {
+    dragging = false;
+    img.classList.remove('dragging');
+  });
+  stage.addEventListener('wheel', function(e) {
+    e.preventDefault();
+    var delta = e.deltaY > 0 ? -0.1 : 0.1;
+    var rect = img.getBoundingClientRect();
+    var mx = (e.clientX - rect.left) / rect.width;
+    var my = (e.clientY - rect.top) / rect.height;
+    var newZoom = Math.max(0.25, Math.min(10, zoom + delta));
+    if (newZoom !== zoom) {
+      panX = mx * (newZoom - zoom) * rect.width / zoom + panX * newZoom / zoom;
+      panY = my * (newZoom - zoom) * rect.height / zoom + panY * newZoom / zoom;
+      zoom = newZoom;
+      document.getElementById('lb-zoom-label').textContent = Math.round(zoom * 100) + '%';
+      applyTransform();
+    }
+  }, {passive: false});
+
+  /* Toolbar */
+  var tb = document.createElement('div');
+  tb.className = 'lb-toolbar';
+
+  var zoomin = document.createElement('button');
+  zoomin.className = 'lb-toolbar-btn'; zoomin.innerHTML = '🔍+'; zoomin.title = 'Zoom in';
+  zoomin.addEventListener('click', function() { setZoom(zoom + 0.25); });
+
+  var zoomout = document.createElement('button');
+  zoomout.className = 'lb-toolbar-btn'; zoomout.innerHTML = '🔍−'; zoomout.title = 'Zoom out';
+  zoomout.addEventListener('click', function() { setZoom(zoom - 0.25); });
+
+  var zoomlbl = document.createElement('span');
+  zoomlbl.className = 'lb-zoom-level'; zoomlbl.id = 'lb-zoom-label';
+  zoomlbl.textContent = '100%';
+
+  var resetBtn = document.createElement('button');
+  resetBtn.className = 'lb-toolbar-btn'; resetBtn.textContent = '⟲ Reset'; resetBtn.title = 'Reset zoom';
+  resetBtn.addEventListener('click', function() { zoom=1; panX=0; panY=0; setZoom(1); });
+
+  var d1 = document.createElement('span'); d1.className = 'lb-toolbar-divider';
+
+  var copyBtn = document.createElement('button');
+  copyBtn.className = 'lb-toolbar-btn'; copyBtn.innerHTML = '📋 Copy'; copyBtn.title = 'Copy image to clipboard';
+  copyBtn.addEventListener('click', function() {
+    var c = document.createElement('canvas');
+    c.width = img.naturalWidth; c.height = img.naturalHeight;
+    var ctx = c.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+    c.toBlob(function(blob) {
+      if (!blob) return;
+      navigator.clipboard.write([new ClipboardItem({'image/png': blob})]).then(function() {
+        copyBtn.textContent = '✓ Copied'; copyBtn.classList.add('active');
+        setTimeout(function() { copyBtn.innerHTML = '📋 Copy'; copyBtn.classList.remove('active'); }, 2000);
+      }).catch(function() {});
+    });
+  });
+
+  var d2 = document.createElement('span'); d2.className = 'lb-toolbar-divider';
+
+  var dlBtn = document.createElement('button');
+  dlBtn.className = 'lb-toolbar-btn'; dlBtn.innerHTML = '⬇ Download'; dlBtn.title = 'Download image';
+  dlBtn.addEventListener('click', function() {
+    var a = document.createElement('a');
+    a.href = src; a.download = 'image.png'; a.click();
+  });
+
+  tb.appendChild(zoomin); tb.appendChild(zoomout); tb.appendChild(zoomlbl);
+  tb.appendChild(resetBtn); tb.appendChild(d1);
+  tb.appendChild(copyBtn); tb.appendChild(d2);
+  tb.appendChild(dlBtn);
+
+  var closeBtn = document.createElement('button');
+  closeBtn.className = 'lb-close'; closeBtn.innerHTML = '✕';
+  closeBtn.addEventListener('click', function() { overlay.remove(); });
+
+  stage.appendChild(img); stage.appendChild(tb); stage.appendChild(closeBtn);
+  overlay.appendChild(stage);
+  overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+}
+
+function previewAttachment(card) {
+  var url = card.dataset.previewUrl;
+  var mime = card.dataset.mime || '';
+  if (mime.startsWith('image/')) {
+    openLightbox(url);
+  } else if (mime === 'application/pdf' || mime.startsWith('text/')) {
+    openFilePreview(url, card.dataset.mime || '');
+  } else {
+    window.open(url, '_blank');
+  }
+}
+
+function openFilePreview(url, mime) {
+  var fontSize = 14;
+  var overlay = document.createElement('div');
+  overlay.className = 'lightbox-overlay';
+  overlay.style.cursor = 'default';
+
+  var container = document.createElement('div');
+  container.style.cssText = 'background:#1e1e2e;border-radius:12px;width:90vw;height:85vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 8px 40px rgba(0,0,0,.5);';
+
+  var header = document.createElement('div');
+  header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 14px;background:#2a2a3a;flex-shrink:0;';
+
+  var title = document.createElement('span');
+  title.style.cssText = 'color:#e0e0e8;font-size:.8rem;font-weight:600;';
+  title.textContent = mime.startsWith('text/') ? 'Text Preview' : 'PDF Preview';
+  header.appendChild(title);
+
+  var hdrRight = document.createElement('div');
+  hdrRight.style.cssText = 'display:flex;align-items:center;gap:5px;';
+
+  if (mime.startsWith('text/')) {
+    var zoomInBtn = document.createElement('button');
+    zoomInBtn.style.cssText = 'background:none;border:1px solid rgba(255,255,255,.15);border-radius:5px;color:#b0b0c0;cursor:pointer;font-size:.7rem;padding:3px 7px;';
+    zoomInBtn.textContent = 'A+'; zoomInBtn.title = 'Increase text size';
+    zoomInBtn.addEventListener('click', function() { fontSize = Math.min(28, fontSize + 2); if (pre) pre.style.fontSize = fontSize + 'px'; });
+
+    var zoomOutBtn = document.createElement('button');
+    zoomOutBtn.style.cssText = zoomInBtn.style.cssText;
+    zoomOutBtn.textContent = 'A−'; zoomOutBtn.title = 'Decrease text size';
+    zoomOutBtn.addEventListener('click', function() { fontSize = Math.max(8, fontSize - 2); if (pre) pre.style.fontSize = fontSize + 'px'; });
+
+    var copyBtn = document.createElement('button');
+    copyBtn.style.cssText = zoomInBtn.style.cssText;
+    copyBtn.innerHTML = '📋 Copy all'; copyBtn.title = 'Copy entire text';
+    copyBtn.addEventListener('click', function() {
+      if (!pre) return;
+      navigator.clipboard.writeText(pre.textContent || '').then(function() {
+        copyBtn.textContent = '✓ Copied';
+        copyBtn.style.cssText = 'background:none;border:1px solid #6ee7b7;border-radius:5px;color:#6ee7b7;cursor:pointer;font-size:.7rem;padding:3px 7px;';
+        setTimeout(function() { copyBtn.innerHTML = '📋 Copy all'; copyBtn.style.cssText = zoomInBtn.style.cssText; }, 2000);
+      });
+    });
+
+    hdrRight.appendChild(zoomOutBtn); hdrRight.appendChild(zoomInBtn);
+    var d = document.createElement('span'); d.style.cssText = 'width:1px;height:16px;background:rgba(255,255,255,.1);margin:0 4px;'; hdrRight.appendChild(d);
+    hdrRight.appendChild(copyBtn);
+  }
+
+  var closeBtn = document.createElement('button');
+  closeBtn.style.cssText = 'background:none;border:none;color:#a0a0b0;font-size:1.2rem;cursor:pointer;padding:2px 6px;border-radius:4px;margin-left:6px;';
+  closeBtn.textContent = '✕';
+  closeBtn.addEventListener('click', function() { overlay.remove(); });
+  closeBtn.addEventListener('mouseenter', function() { this.style.color = '#fff'; });
+  closeBtn.addEventListener('mouseleave', function() { this.style.color = '#a0a0b0'; });
+  hdrRight.appendChild(closeBtn);
+  header.appendChild(hdrRight);
+  container.appendChild(header);
+
+  var body = document.createElement('div');
+  body.style.cssText = 'flex:1;overflow:auto;padding:0;';
+
+  if (mime === 'application/pdf') {
+    var embed = document.createElement('embed');
+    embed.src = url;
+    embed.type = 'application/pdf';
+    embed.style.cssText = 'width:100%;height:100%;border:none;';
+    body.appendChild(embed);
+  } else {
+    var pre = document.createElement('pre');
+    pre.style.cssText = 'margin:0;padding:16px;font-size:' + fontSize + 'px;line-height:1.6;color:#cdd6f4;white-space:pre-wrap;word-break:break-word;';
+    pre.textContent = 'Loading…';
+    body.appendChild(pre);
+    fetch(url).then(function(r) { return r.text(); }).then(function(t) {
+      pre.textContent = t;
+      if (typeof hljs !== 'undefined') {
+        try { hljs.highlightElement(pre); } catch(e) {}
+      }
+    }).catch(function() { pre.textContent = 'Failed to load file.'; });
+  }
+  container.appendChild(body);
+  overlay.appendChild(container);
+  overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+}
+function copyCode(id) {
+  var el = document.getElementById(id);
+  if (!el) return;
+  var text = el.textContent || el.innerText;
+  navigator.clipboard.writeText(text).then(function() {
+    var btn = el.closest('pre').previousElementSibling.querySelector('.code-block-btn');
+    if (btn) { btn.textContent = '✓ Copied'; btn.classList.add('copied'); setTimeout(function(){ btn.textContent = '📋 Copy'; btn.classList.remove('copied'); }, 2000); }
+  }).catch(function() {});
+}
+function downloadCode(id, lang) {
+  var el = document.getElementById(id);
+  if (!el) return;
+  var text = el.textContent || el.innerText;
+  var blob = new Blob([text], {type: 'text/plain'});
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'code.' + (lang || 'txt');
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+function showToast(message, type) {
+  type = type || 'info';
+  var container = document.getElementById('toast-container');
+  var toast = document.createElement('div');
+  toast.className = 'toast toast-' + type;
+  var msgSpan = document.createElement('span');
+  msgSpan.textContent = message;
+  toast.appendChild(msgSpan);
+  var closeBtn = document.createElement('button');
+  closeBtn.className = 'toast-close';
+  closeBtn.textContent = '✕';
+  closeBtn.addEventListener('click', function() { toast.remove(); });
+  toast.appendChild(closeBtn);
+  container.appendChild(toast);
+  setTimeout(function() {
+    if (toast.parentNode) toast.remove();
+  }, 5000);
+}
+
+function toggleKnowledge(btn, chatId, msgId, index) {
+  if (btn.classList.contains('active')) return;
+  btn.classList.add('active');
+  btn.title = 'Ingesting…';
+  btn.style.opacity = '0.5';
+  fetch('/chats/' + chatId + '/attachment/' + msgId + '/' + index + '/ingest/', {
+    method: 'POST',
+    headers: {
+      'X-CSRFToken': '{{ csrf_token }}',
+      'Content-Type': 'application/json'
+    }
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    btn.style.opacity = '1';
+    if (data.status === 'ingested' || data.status === 'already_ingested') {
+      btn.title = 'Ingested into knowledge';
+      btn.classList.add('active');
+      var badge = document.createElement('span');
+      badge.className = 'attach-knowledge-badge';
+      badge.innerHTML = '<svg width="9" height="9" viewBox="0 0 16 16" fill="currentColor"><path d="M13.5 3.5l-7 7-3.5-3.5" stroke="currentColor" stroke-width="1.5" fill="none"/></svg> Knowledge';
+      var meta = btn.closest('.attach-card').querySelector('.attach-card-meta');
+      if (meta) meta.appendChild(badge);
+      showToast('Added to knowledge base: ' + (btn.closest('.attach-card').querySelector('.attach-card-name')?.textContent || ''), 'success');
+    } else {
+      btn.title = 'Ingestion failed';
+      btn.style.color = 'var(--red)';
+      showToast(data.error || 'Knowledge ingestion failed', 'error');
+    }
+  })
+  .catch(function(err) {
+    btn.style.opacity = '1';
+    btn.title = 'Error';
+    btn.style.color = 'var(--red)';
+    showToast('Knowledge ingestion error', 'error');
+  });
 }
 (function () {
   /* ── auto-resize textarea ── */
@@ -306,6 +733,27 @@ function toggleReasoning(btn) {
     }
   });
 
+  /* ── file attachment helper ── */
+  function getFileIconHTML(file) {
+    var ext = file.name.split('.').pop().toLowerCase();
+    var isImg = file.type && file.type.startsWith('image/');
+    if (isImg) {
+      var url = URL.createObjectURL(file);
+      return '<img src="' + url + '" alt="">';
+    }
+    if (ext === 'pdf') return '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/></svg>';
+    if (ext === 'txt' || ext === 'md') return '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="15" x2="15" y2="15"/></svg>';
+    return '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
+  }
+  function getFileIconClass(file) {
+    var ext = file.name.split('.').pop().toLowerCase();
+    var isImg = file.type && file.type.startsWith('image/');
+    if (isImg) return '';
+    if (ext === 'pdf') return 'chip-icon-pdf';
+    if (ext === 'txt' || ext === 'md') return 'chip-icon-txt';
+    return 'chip-icon-other';
+  }
+
   /* ── file attachment ── */
   const fileInput = document.getElementById('file-input');
   const attachBtn = document.getElementById('attach-btn');
@@ -327,8 +775,13 @@ function toggleReasoning(btn) {
     Array.from(this.files).forEach((f, i) => {
       const chip = document.createElement('div');
       chip.className = 'file-preview-chip';
+      const iconDiv = document.createElement('div');
+      iconDiv.className = 'chip-icon ' + getFileIconClass(f);
+      iconDiv.innerHTML = getFileIconHTML(f);
+      chip.appendChild(iconDiv);
       const nameSpan = document.createElement('span');
-      nameSpan.textContent = '📎 ' + f.name;
+      nameSpan.className = 'chip-name';
+      nameSpan.textContent = f.name;
       chip.appendChild(nameSpan);
       const kbBtn = document.createElement('button');
       kbBtn.type = 'button';
@@ -343,19 +796,23 @@ function toggleReasoning(btn) {
         this.classList.toggle('active', !active);
       });
       chip.appendChild(kbBtn);
+      var removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'chip-remove';
+      removeBtn.textContent = '✕';
+      removeBtn.title = 'Remove file';
+      removeBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        chip.remove();
+        if (!strip.querySelector('.file-preview-chip')) {
+          fileInput.value = '';
+          fileAttached = false;
+          knowledgeIndicesInput.value = '';
+        }
+      });
+      chip.appendChild(removeBtn);
       strip.appendChild(chip);
     });
-    const clear = document.createElement('button');
-    clear.type = 'button';
-    clear.title = 'Remove all';
-    clear.textContent = '✕';
-    clear.addEventListener('click', function () {
-      fileInput.value = '';
-      strip.innerHTML = '';
-      fileAttached = false;
-      knowledgeIndicesInput.value = '';
-    });
-    strip.appendChild(clear);
   });
 
   /* collect knowledge indices on submit */
@@ -453,6 +910,18 @@ function toggleReasoning(btn) {
     }
   }
 
+  function renderCodeBlock(code, lang) {
+    var langClass = lang ? ' class="language-' + lang + '"' : '';
+    var langLabel = lang || 'code';
+    var codeId = 'cb-' + Math.random().toString(36).slice(2, 8);
+    return '<div class="code-block-header">' +
+      '<span>' + langLabel + '</span>' +
+      '<span>' +
+      '<button class="code-block-btn" onclick="copyCode(\'' + codeId + '\')" title="Copy code">📋 Copy</button>' +
+      '<button class="code-block-btn" onclick="downloadCode(\'' + codeId + '\', \'' + langLabel + '\')" title="Download" style="margin-left:4px">⬇ Download</button>' +
+      '</span></div>' +
+      '<pre><code' + langClass + ' id="' + codeId + '">' + escHtml(code) + '</code></pre>';
+  }
   function render(text) {
     const esc = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     const withToolCalls = esc.replace(
@@ -466,13 +935,20 @@ function toggleReasoning(btn) {
           '</div>';
       }
     );
-    const withPre = withToolCalls.replace(/```[\w]*\n?([\s\S]*?)```/g, function(_, c) {
-      return '<pre><code>' + c.trim() + '</code></pre>';
+    const withPre = withToolCalls.replace(/```(\w*)\n?([\s\S]*?)```/g, function(_, lang, c) {
+      return renderCodeBlock(c.trim(), lang);
     });
     const withCode = withPre.replace(/`([^`\n]+)`/g, '<code>$1</code>');
     const withBold = withCode.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
     const withEm   = withBold.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
     return withEm.split('\n\n').map(p => '<p>' + p.replace(/\n/g,'<br>') + '</p>').join('');
+  }
+
+  /* ── after each text render, highlight code blocks ── */
+  function highlightCodeBlocks(container) {
+    container.querySelectorAll('pre code').forEach(function(el) {
+      if (typeof hljs !== 'undefined') hljs.highlightElement(el);
+    });
   }
 
   const es = new EventSource(streamUrl);
@@ -504,6 +980,7 @@ function toggleReasoning(btn) {
       }
       buf += d.content;
       contentEl.innerHTML = render(buf);
+      highlightCodeBlocks(contentEl);
       scrollBot(false);
 
     } else if (d.type === 'cancelled') {
@@ -686,5 +1163,167 @@ function toggleReasoning(btn) {
     }, 200);
   });
 })();
+
+/* ── LoRA AJAX switch ─────────────────────────────────────── */
+(function() {
+  var sel = document.getElementById('lora-select');
+  if (sel) {
+    sel.addEventListener('change', function() {
+      var val = this.value;
+      fetch('{% url "chat:lora" chat.id %}', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': '{{ csrf_token }}', 'X-Requested-With': 'XMLHttpRequest', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lora_adapter: val })
+      })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        showToast('LoRA switched to ' + (data.lora_adapter || 'none'), 'success');
+      })
+      .catch(function() {
+        showToast('Failed to switch LoRA', 'error');
+      });
+    });
+  }
+})();
+
+/* ── Compact AJAX ─────────────────────────────────────────── */
+function compactChat(chatId) {
+  var btn = document.getElementById('compact-btn');
+  btn.disabled = true;
+  btn.style.opacity = '.5';
+  fetch('/chats/' + chatId + '/compact/', {
+    method: 'POST',
+    headers: { 'X-CSRFToken': '{{ csrf_token }}', 'X-Requested-With': 'XMLHttpRequest' }
+  })
+  .then(function(r) {
+    if (r.redirected) { window.location.href = r.url; return; }
+    return r.json();
+  })
+  .then(function(data) {
+    btn.disabled = false; btn.style.opacity = '1';
+    if (data && data.status) showToast(data.status, 'info');
+    else showToast('Chat compacted', 'success');
+  })
+  .catch(function() {
+    btn.disabled = false; btn.style.opacity = '1';
+    showToast('Compact failed', 'error');
+  });
+}
+
+/* ── Share modal ─────────────────────────────────────────── */
+function openShareModal() {
+  var modal = document.getElementById('share-modal');
+  modal.classList.add('open');
+  loadShareStatus();
+}
+function closeShareModal() {
+  document.getElementById('share-modal').classList.remove('open');
+}
+function loadShareStatus() {
+  var active = document.getElementById('share-active');
+  var inactive = document.getElementById('share-inactive');
+  var loading = document.getElementById('share-loading');
+  active.style.display = 'none';
+  inactive.style.display = 'none';
+  loading.style.display = '';
+  fetch('{% url "chat:share-json" chat.id %}')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      loading.style.display = 'none';
+      if (data.active) {
+        active.style.display = '';
+        document.getElementById('share-url-input').value = data.url;
+        document.getElementById('share-meta').textContent = data.created_at ? 'Created ' + new Date(data.created_at).toLocaleDateString() : '';
+      } else {
+        inactive.style.display = '';
+      }
+    })
+    .catch(function() {
+      loading.style.display = 'none';
+      showToast('Failed to load share status', 'error');
+    });
+}
+function createShareLink() {
+  var btn = document.querySelector('#share-inactive .btn-primary');
+  btn.disabled = true; btn.textContent = 'Creating…';
+  fetch('{% url "chat:share-json" chat.id %}', {
+    method: 'POST',
+    headers: { 'X-CSRFToken': '{{ csrf_token }}' }
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    if (data.active) {
+      loadShareStatus();
+      showToast('Share link created', 'success');
+    } else {
+      showToast('Failed to create share link', 'error');
+      btn.disabled = false; btn.textContent = 'Create share link';
+    }
+  })
+  .catch(function() {
+    btn.disabled = false; btn.textContent = 'Create share link';
+    showToast('Failed to create share link', 'error');
+  });
+}
+function regenerateShareLink() {
+  if (!confirm('The current link will be revoked. Continue?')) return;
+  createShareLink();
+}
+function revokeShareLink() {
+  if (!confirm('Revoke this share link? Anyone with the link will lose access.')) return;
+  fetch('{% url "chat:share-json" chat.id %}', {
+    method: 'DELETE',
+    headers: { 'X-CSRFToken': '{{ csrf_token }}' }
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    loadShareStatus();
+    showToast('Share link revoked', 'info');
+  })
+  .catch(function() {
+    showToast('Failed to revoke share link', 'error');
+  });
+}
+function copyShareUrl() {
+  var el = document.getElementById('share-url-input');
+  el.select();
+  navigator.clipboard.writeText(el.value).then(function() {
+    var btn = document.getElementById('share-copy-btn');
+    btn.textContent = 'Copied!';
+    setTimeout(function() { btn.textContent = 'Copy link'; }, 2000);
+  });
+}
+/* close modal on overlay click */
+document.addEventListener('click', function(e) {
+  if (e.target.classList.contains('share-modal-overlay')) closeShareModal();
+});
+
+/* ── Copy conversation ──────────────────────────────────── */
+function copyConversation(format) {
+  var msgs = document.querySelectorAll('.msg');
+  if (!msgs.length) { showToast('No messages to copy', 'info'); return; }
+  var lines = [];
+  msgs.forEach(function(m) {
+    var isUser = m.classList.contains('msg-user');
+    var role = isUser ? 'You' : 'Assistant';
+    var contentEl = isUser ? m.querySelector('.msg-bubble') : m.querySelector('.msg-content');
+    if (!contentEl) return;
+    var text = contentEl.textContent || contentEl.innerText || '';
+    text = text.trim();
+    if (!text) return;
+    if (format === 'markdown') {
+      lines.push('**' + role + ':** ' + text);
+    } else {
+      lines.push(role + ': ' + text);
+    }
+    lines.push('');
+  });
+  var output = lines.join('\n').trim();
+  navigator.clipboard.writeText(output).then(function() {
+    showToast('Conversation copied as ' + format, 'success');
+  }).catch(function() {
+    showToast('Failed to copy', 'error');
+  });
+}
 </script>
 {% endblock %}

@@ -243,12 +243,18 @@ class DocumentStatusJsonView(LoginRequiredMixin, DetailView):
                     processing_status = mapping_status
 
                 step_summary = rag_data.get("step_summary") or {}
+                steps = rag_data.get("steps") or []
                 ss_total = step_summary.get("total", 0)
                 ss_done = step_summary.get("completed", 0)
                 ss_failed = step_summary.get("failed", 0)
                 if ss_total > 0:
                     progress_pct = round((ss_done + ss_failed) / ss_total * 100)
-                current_step = step_summary.get("current_step")
+                current_step = step_summary.get("current_step") or ""
+                if not current_step and steps:
+                    for s in steps:
+                        if s.get("status") in ("running", "pending"):
+                            current_step = s.get("name", "")
+                            break
 
                 job_status = job.status
 
@@ -351,9 +357,10 @@ class DocumentUploadView(LoginRequiredMixin, View):
                 kind=DocumentReference.Kind.KNOWLEDGE,
             )
             if rag_client.is_enabled():
+                generate_summary = request.POST.get("generate_summary", "1") == "1"
                 docs_root = getattr(settings, "DOCS_ROOT", os.path.join(settings.MEDIA_ROOT, "docs"))
                 full_path = os.path.join(docs_root, rel_path)
-                result = rag_client.ingest(full_path, ocr_mode=ocr_mode)
+                result = rag_client.ingest(full_path, ocr_mode=ocr_mode, generate_summary=generate_summary)
                 if result and (job_id := result.get("id")):
                     IngestionJob.objects.create(
                         document_reference=doc_ref,
@@ -368,6 +375,83 @@ class DocumentUploadView(LoginRequiredMixin, View):
 
         messages.success(request, f"{len(uploaded_files)} file(s) uploaded — processing started.")
         return redirect("knowledge:list")
+
+
+class IngestionQueueView(LoginRequiredMixin, View):
+    """HTML page for queue management."""
+    template_name = "knowledge/queue.html"
+
+    def get(self, request):
+        from django.shortcuts import render
+        return render(request, self.template_name)
+
+
+class IngestionQueueJsonView(LoginRequiredMixin, View):
+    """JSON endpoint for queue management."""
+
+    def get(self, request):
+        jobs = IngestionJob.objects.filter(
+            document_reference__owner=request.user,
+            document_reference__kind=DocumentReference.Kind.KNOWLEDGE,
+        ).select_related("document_reference").order_by("-created_at")[:100]
+
+        if rag_client.is_enabled():
+            for job in jobs:
+                _sync_rag_job(job, job.document_reference)
+
+        items = []
+        for job in jobs:
+            rag_steps = (job.metadata or {}).get("rag_steps") or []
+            step_summary = (job.metadata or {}).get("rag_step_summary") or {}
+            items.append({
+                "id": str(job.id),
+                "document_id": str(job.document_reference.id),
+                "title": job.document_reference.title,
+                "status": job.status,
+                "error": job.error,
+                "progress_pct": step_summary.get("progress_pct"),
+                "current_step": step_summary.get("current_step", ""),
+                "steps": rag_steps,
+                "created_at": job.created_at.isoformat() if job.created_at else None,
+            })
+        return JsonResponse({"jobs": items})
+
+    def delete(self, request, job_id=None):
+        if not job_id:
+            return JsonResponse({"error": "job_id required"}, status=400)
+        job = get_object_or_404(
+            IngestionJob, id=job_id,
+            document_reference__owner=request.user,
+        )
+        if job.status in (IngestionJob.Status.QUEUED, IngestionJob.Status.RUNNING):
+            if rag_client.is_enabled() and job.metadata:
+                rag_job_id = job.metadata.get("rag_job_id")
+                if rag_job_id:
+                    rag_client.cancel_job(rag_job_id)
+            job.status = IngestionJob.Status.FAILED
+            job.error = "Cancelled by user"
+            job.save(update_fields=["status", "error"])
+        return JsonResponse({"status": "cancelled"})
+
+    def patch(self, request, job_id=None):
+        if not job_id:
+            return JsonResponse({"error": "job_id required"}, status=400)
+        job = get_object_or_404(
+            IngestionJob, id=job_id,
+            document_reference__owner=request.user,
+        )
+        import json as json_mod
+        body = json_mod.loads(request.body) if request.body else {}
+        action = body.get("action", "")
+        if action == "cancel":
+            return self.delete(request, job_id)
+        if action == "delete":
+            doc_ref = job.document_reference
+            job.delete()
+            if doc_ref:
+                doc_ref.delete()
+            return JsonResponse({"status": "deleted"})
+        return JsonResponse({"error": "unknown action"}, status=400)
 
 
 class DocumentDeleteView(LoginRequiredMixin, View):

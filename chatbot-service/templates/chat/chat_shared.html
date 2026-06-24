@@ -1,71 +1,186 @@
 {% load static %}
+{% load chat_tags %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{{ chat.title }} — Shared</title>
+  <title>{{ chat.title }} — Shared Chat</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script>document.addEventListener('DOMContentLoaded', function(){ hljs.highlightAll(); });</script>
   <link rel="stylesheet" href="{% static 'css/app.css' %}">
+  <style>
+    .shared-page { background: var(--bg); min-height: 100vh; display: flex; flex-direction: column; }
+    .shared-header {
+      position: sticky; top: 0; z-index: 50;
+      background: rgba(255,255,255,.92); backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--bd);
+    }
+    .shared-header-inner {
+      max-width: 780px; margin: 0 auto;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 24px; gap: 16px;
+    }
+    .shared-brand { display: flex; align-items: center; gap: 10px; }
+    .shared-brand svg { flex-shrink: 0; }
+    .shared-brand-text { font-weight: 700; font-size: .875rem; color: var(--text); }
+    .shared-chat-title { font-size: .8125rem; color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 300px; }
+    .shared-by { font-size: .75rem; color: var(--text3); margin-top: 1px; }
+    .shared-msg-wrap {
+      flex: 1; max-width: 780px; margin: 0 auto;
+      padding: 28px 24px 60px; width: 100%;
+    }
+    .shared-msg-wrap .msg { margin-bottom: 24px; }
+    .shared-msg-wrap .msg-bubble {
+      background: var(--surface);
+      border: 1px solid var(--bd);
+      border-radius: 18px;
+      padding: 10px 16px;
+      max-width: 82%;
+      font-size: .9375rem;
+      line-height: 1.55;
+      white-space: pre-wrap;
+      word-break: break-word;
+      margin-left: auto;
+    }
+    .shared-msg-wrap .msg-content { font-size: .9375rem; line-height: 1.65; white-space: pre-wrap; word-break: break-word; color: var(--text); }
+    .shared-msg-wrap .msg-content code {
+      background: var(--surface); border: 1px solid var(--bd);
+      border-radius: 4px; padding: 1px 5px;
+      font: .875em var(--mono);
+    }
+    .shared-msg-wrap .msg-content pre {
+      background: #1e1e2e; color: #cdd6f4;
+      border-radius: var(--r-sm);
+      padding: 14px 16px; overflow-x: auto;
+      font: .8375em/1.5 var(--mono);
+      margin: .5em 0;
+    }
+    .shared-msg-wrap .msg-content pre code { background: none; border: none; padding: 0; color: inherit; }
+    .shared-footer {
+      text-align: center; padding: 20px 24px; border-top: 1px solid var(--bd);
+      font-size: .8125rem; color: var(--text3);
+      background: var(--bg);
+    }
+    .shared-footer a { color: var(--accent); font-weight: 500; }
+    .continue-btn {
+      display: inline-flex; align-items: center; gap: 8px;
+      background: var(--accent); color: #fff; border: none;
+      padding: 10px 22px; border-radius: 10px;
+      font-size: .875rem; font-weight: 600; cursor: pointer;
+      transition: background .15s, transform .12s, box-shadow .15s;
+      text-decoration: none;
+    }
+    .continue-btn:hover { background: var(--accent-h); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,113,227,.3); text-decoration: none; color: #fff; }
+    .shared-continue-row {
+      display: flex; align-items: center; justify-content: center; gap: 16px;
+      padding: 24px 0 8px; flex-wrap: wrap;
+    }
+    .shared-continue-row .text-muted { font-size: .8125rem; }
+    @media (max-width: 640px) {
+      .shared-header-inner { padding: 12px 16px; }
+      .shared-msg-wrap { padding: 20px 16px 40px; }
+      .shared-chat-title { max-width: 160px; }
+    }
+  </style>
 </head>
-<body style="background:var(--surface);min-height:100vh">
+<body class="shared-page">
 
-<div style="max-width:760px;margin:0 auto;padding:24px 20px">
-
-  <!-- header -->
-  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;padding-bottom:16px;border-bottom:1px solid var(--bd)">
-    <div>
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
-        <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-          <rect width="20" height="20" rx="5" fill="#0071e3"/>
-          <path d="M4 13.5l3.5-7 2.5 5 2-2.5 3.5 5" stroke="#fff" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-        <span style="font-weight:700;font-size:.9375rem">Chatbot</span>
+<div class="shared-header">
+  <div class="shared-header-inner">
+    <div class="shared-brand">
+      <svg width="24" height="24" viewBox="0 0 20 20" fill="none">
+        <rect width="20" height="20" rx="5" fill="#0071e3"/>
+        <path d="M4 13.5l3.5-7 2.5 5 2-2.5 3.5 5" stroke="#fff" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <div>
+        <div class="shared-brand-text">Shared Chat</div>
+        <div class="shared-chat-title">{{ chat.title }}</div>
       </div>
-      <h1 style="font-size:1.25rem;font-weight:700">{{ chat.title }}</h1>
-      <p style="font-size:.8125rem;color:var(--text2);margin-top:4px">
-        Shared by {{ share.user.email }} · read-only
-      </p>
     </div>
-    {% if user.is_authenticated %}
-      <a href="{% url 'chat:list' %}" class="btn btn-ghost btn-sm">My chats</a>
-    {% else %}
-      <a href="{% url 'login' %}" class="btn btn-primary btn-sm">Sign in</a>
-    {% endif %}
-  </div>
-
-  <!-- messages -->
-  <div>
-    {% if not chat_messages %}
-      <div class="empty"><p>No messages in this chat yet.</p></div>
-    {% endif %}
-
-    {% for msg in chat_messages %}
-      {% if msg.role == 'user' %}
-        <div class="msg msg-user" style="margin-bottom:20px">
-          <div class="msg-bubble">{{ msg.content }}</div>
-          <div class="msg-time">{{ msg.created_at|time:"H:i" }}</div>
-        </div>
-
-      {% elif msg.role == 'assistant' and msg.content %}
-        <div class="msg msg-assistant" style="margin-bottom:20px">
-          <div class="msg-bot-avatar">
-            <svg width="13" height="13" viewBox="0 0 20 20" fill="none">
-              <path d="M4 13.5l3.5-7 2.5 5 2-2.5 3.5 5" stroke="#fff" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-          </div>
-          <div class="msg-bot-body">
-            <div class="msg-content">{{ msg.content }}</div>
-            <div class="msg-bot-time">{{ msg.created_at|time:"H:i" }}</div>
-          </div>
-        </div>
+    <div class="shared-by">Shared by {{ share.user.email }}</div>
+    <div style="display:flex;gap:8px;flex-shrink:0">
+      {% if user.is_authenticated %}
+        <form method="post" action="{% url 'chat-shared-continue' share.token %}">
+          {% csrf_token %}
+          <button type="submit" class="continue-btn">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 3a5 5 0 100 10A5 5 0 008 3zm0 1a4 4 0 110 8A4 4 0 018 4z"/><path d="M7.5 5.5v5a.5.5 0 001 0v-5a.5.5 0 00-1 0z"/><path d="M5.5 7.5h5a.5.5 0 010 1h-5a.5.5 0 010-1z"/></svg>
+            Continue this chat
+          </button>
+        </form>
+        <a href="{% url 'chat:list' %}" class="btn btn-ghost btn-sm" style="align-self:center">My chats</a>
+      {% else %}
+        <a href="{% url 'login' %}?next={{ request.get_full_path|urlencode }}" class="btn btn-primary btn-sm">Sign in to continue</a>
       {% endif %}
-    {% endfor %}
+    </div>
   </div>
-
-  <div style="margin-top:32px;padding-top:16px;border-top:1px solid var(--bd);text-align:center;font-size:.8125rem;color:var(--text3)">
-    This is a read-only shared view. <a href="{% url 'login' %}">Sign in</a> to start your own conversation.
-  </div>
-
 </div>
+
+<div class="shared-msg-wrap">
+  {% if not chat_messages %}
+    <div class="empty"><p>No messages in this chat yet.</p></div>
+  {% endif %}
+
+  {% for msg in chat_messages %}
+    {% if msg.role == 'user' %}
+      <div class="msg msg-user">
+        <div class="msg-bubble">{{ msg.content }}</div>
+        {% if msg.attachments %}
+          <div class="attach-cards" style="margin-top:6px;justify-content:flex-end">
+            {% for a in msg.attachments %}
+              <div class="attach-card" style="pointer-events:none">
+                <div class="attach-card-icon
+                  {% with fn_lower=a.original_filename|lower %}
+                  {% if a.mime_type|slice:":5" == 'image' %}attach-card-icon-img-type{% elif '.pdf' in fn_lower %}attach-card-icon-pdf{% elif '.txt' in fn_lower or '.md' in fn_lower or '.csv' in fn_lower %}attach-card-icon-txt{% else %}attach-card-icon-other{% endif %}{% endwith %}">
+                  {% with fn_lower=a.original_filename|lower %}
+                  {% if a.mime_type|slice:":5" == 'image' %}
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+                  {% elif '.pdf' in fn_lower %}
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/></svg>
+                  {% elif '.txt' in fn_lower or '.md' in fn_lower %}
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
+                  {% else %}
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                  {% endif %}
+                  {% endwith %}
+                </div>
+                <div class="attach-card-body">
+                  <div class="attach-card-name">{{ a.original_filename }}</div>
+                  <div class="attach-card-meta">
+                    {% if a.size_bytes >= 1048576 %}{{ a.size_bytes|filesizeformat }}{% elif a.size_bytes >= 1024 %}{{ a.size_bytes|filesizeformat }}{% else %}{{ a.size_bytes }} B{% endif %}
+                  </div>
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+        {% endif %}
+        <div class="msg-time">{{ msg.created_at|time:"H:i" }}</div>
+      </div>
+
+    {% elif msg.role == 'assistant' and msg.content %}
+      <div class="msg msg-assistant">
+        <div class="msg-bot-avatar">
+          <svg width="13" height="13" viewBox="0 0 20 20" fill="none">
+            <path d="M4 13.5l3.5-7 2.5 5 2-2.5 3.5 5" stroke="#fff" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <div class="msg-bot-body">
+          <div class="msg-content">{{ msg.content|format_content }}</div>
+          <div class="msg-bot-time">{{ msg.created_at|time:"H:i" }}</div>
+        </div>
+      </div>
+    {% endif %}
+  {% endfor %}
+</div>
+
+<div class="shared-footer">
+  {% if user.is_authenticated %}
+    This is a read-only shared view. <a href="{% url 'chat:list' %}">Go to your chats</a> to continue the conversation.
+  {% else %}
+    This is a read-only shared view. <a href="{% url 'login' %}">Sign in</a> to continue this chat or start your own.
+  {% endif %}
+</div>
+
 </body>
 </html>

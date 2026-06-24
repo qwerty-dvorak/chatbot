@@ -416,9 +416,22 @@ class ContextBuilder:
             if not rag_client.is_enabled():
                 return None, None
 
-            decision_start = time.time()
-            decision = self._decide_retrieval(mentions)
-            decision_time = time.time() - decision_start
+            # Fast path: skip LLM routing when no explicit document context
+            if not mentions.selected_sources and not mentions.unresolved_mentions:
+                decision = {
+                    "use_rag": False,
+                    "search_query": mentions.clean_query,
+                    "hyde": False,
+                    "sub_queries": False,
+                    "stepback": False,
+                    "use_reranker": True,
+                    "decision_source": "fast-path",
+                }
+                decision_time = 0
+            else:
+                decision_start = time.time()
+                decision = self._decide_retrieval(mentions)
+                decision_time = time.time() - decision_start
             rag_log = {
                 "rag_needed": decision["use_rag"],
                 "rag_used": False,

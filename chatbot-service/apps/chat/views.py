@@ -121,7 +121,7 @@ class ChatDetailView(LoginRequiredMixin, DetailView):
                     "sha256": sha256,
                 }
                 if idx in knowledge_indices:
-                    doc_ref = self._ingest_attachment(request.user, file, path, sha256)
+                    doc_ref = ingest_attachment(request.user, file, path, sha256)
                     if doc_ref:
                         att["document_ref_id"] = str(doc_ref.id)
                 attachments.append(att)
@@ -133,87 +133,96 @@ class ChatDetailView(LoginRequiredMixin, DetailView):
         context["form"] = form
         return self.render_to_response(context)
 
-    def _ingest_attachment(self, user, file, path, sha256):
-        """Create a DocumentReference + trigger RAG ingestion for a chat attachment."""
-        try:
-            from apps.documents.models import ContentBlob, ArtifactRevision, DocumentReference
-            from apps.ingestion.models import IngestionJob
-            from apps.knowledge.rag_client import rag_client
-            from apps.knowledge.views import _docs_storage, _save_doc_file
-            from django.conf import settings
-            from django.core.files.base import ContentFile
+def ingest_attachment(user, file, file_storage_path, sha256):
+    """Create a DocumentReference + trigger RAG ingestion for a chat attachment."""
+    logger = logging.getLogger(__name__)
+    try:
+        from apps.documents.models import ContentBlob, ArtifactRevision, DocumentReference
+        from apps.ingestion.models import IngestionJob
+        from apps.knowledge.rag_client import rag_client
+        from apps.knowledge.views import _docs_storage, _save_doc_file
+        from django.conf import settings
+        from django.core.files.base import ContentFile
 
-            from apps.ingestion.models import IngestionJob
-            existing = ContentBlob.objects.filter(content_hash=sha256).first()
-            doc_ref = None
-            if existing:
-                doc_ref = DocumentReference.objects.filter(
-                    artifact_revision__blob=existing, owner=user,
-                    kind=DocumentReference.Kind.KNOWLEDGE,
-                ).first()
-                if doc_ref:
-                    latest_job = IngestionJob.objects.filter(
-                        document_reference=doc_ref
-                    ).order_by("-created_at").first()
-                    if not latest_job or latest_job.status != "failed":
-                        return doc_ref
+        existing = ContentBlob.objects.filter(content_hash=sha256).first()
+        doc_ref = None
+        if existing:
+            doc_ref = DocumentReference.objects.filter(
+                artifact_revision__blob=existing, owner=user,
+                kind=DocumentReference.Kind.KNOWLEDGE,
+            ).first()
+            if doc_ref:
+                latest_job = IngestionJob.objects.filter(
+                    document_reference=doc_ref
+                ).order_by("-created_at").first()
+                if not latest_job or latest_job.status != "failed":
+                    logger.info("Reusing existing doc_ref %s for user %s, sha256=%s", doc_ref.id, user.id, sha256[:12])
+                    return doc_ref
 
-            import os
-            mime = file.content_type or "application/octet-stream"
-            file.seek(0)
-            raw = file.read()
-            docs_storage = _docs_storage()
-            rel_path = _save_doc_file(str(user.id), ContentFile(raw, file.name))
+        import os
+        mime = file.content_type or "application/octet-stream"
+        file.seek(0)
+        raw = file.read()
+        rel_path = _save_doc_file(str(user.id), ContentFile(raw, file.name))
+        logger.info("Saved attachment file to %s for user %s", rel_path, user.id)
 
-            if not doc_ref:
-                blob, _ = ContentBlob.objects.get_or_create(
-                    content_hash=sha256,
-                    defaults={
-                        "mime_type": mime,
-                        "size_bytes": file.size,
-                        "object_key": rel_path,
-                        "storage_status": ContentBlob.StorageStatus.STORED,
-                    },
+        if not doc_ref:
+            blob, _ = ContentBlob.objects.get_or_create(
+                content_hash=sha256,
+                defaults={
+                    "mime_type": mime,
+                    "size_bytes": file.size,
+                    "object_key": rel_path,
+                    "storage_status": ContentBlob.StorageStatus.STORED,
+                },
+            )
+            revision, _ = ArtifactRevision.objects.get_or_create(
+                blob=blob,
+                pipeline_fingerprint=sha256[:16],
+                defaults={
+                    "extracted_text": "",
+                    "processing_status": ArtifactRevision.ProcessingStatus.PENDING,
+                },
+            )
+            doc_ref = DocumentReference.objects.create(
+                owner=user,
+                artifact_revision=revision,
+                title=file.name,
+                kind=DocumentReference.Kind.KNOWLEDGE,
+            )
+            logger.info("Created new doc_ref %s for file %s", doc_ref.id, file.name)
+        else:
+            revision = doc_ref.artifact_revision
+            logger.info("Reusing blob for doc_ref %s, file %s", doc_ref.id, file.name)
+
+        if rag_client.is_enabled():
+            docs_root = getattr(settings, "DOCS_ROOT",
+                                os.path.join(settings.MEDIA_ROOT, "docs"))
+            full_path = os.path.join(docs_root, rel_path)
+            logger.info("Calling rag_client.ingest for %s", full_path)
+            ingest_result = rag_client.ingest(full_path)
+            job = None
+            if ingest_result and ingest_result.get("id"):
+                logger.info("RAG ingest job %s started for doc_ref %s", ingest_result["id"], doc_ref.id)
+                job = rag_client.poll_job(ingest_result["id"], max_retries=30, interval=0.5)
+                IngestionJob.objects.create(
+                    document_reference=doc_ref,
+                    metadata={"rag_job_id": ingest_result["id"], "status": (job or {}).get("status", "unknown")},
                 )
-                revision, _ = ArtifactRevision.objects.get_or_create(
-                    blob=blob,
-                    pipeline_fingerprint=sha256[:16],
-                    defaults={
-                        "extracted_text": "",
-                        "processing_status": ArtifactRevision.ProcessingStatus.PENDING,
-                    },
-                )
-                doc_ref = DocumentReference.objects.create(
-                    owner=user,
-                    artifact_revision=revision,
-                    title=file.name,
-                    kind=DocumentReference.Kind.KNOWLEDGE,
-                )
+            if job and job.get("status") in ("succeeded", "completed"):
+                revision.processing_status = ArtifactRevision.ProcessingStatus.READY
+                revision.save(update_fields=["processing_status"])
+                logger.info("RAG ingest completed for doc_ref %s", doc_ref.id)
             else:
-                revision = doc_ref.artifact_revision
-
-            if rag_client.is_enabled():
-                docs_root = getattr(settings, "DOCS_ROOT",
-                                    os.path.join(settings.MEDIA_ROOT, "docs"))
-                full_path = os.path.join(docs_root, rel_path)
-                ingest_result = rag_client.ingest(full_path)
-                job = None
-                if ingest_result and ingest_result.get("id"):
-                    job = rag_client.poll_job(ingest_result["id"], max_retries=30, interval=0.5)
-                    IngestionJob.objects.create(
-                        document_reference=doc_ref,
-                        metadata={"rag_job_id": ingest_result["id"], "status": (job or {}).get("status", "unknown")},
-                    )
-                if job and job.get("status") in ("succeeded", "completed"):
-                    revision.processing_status = ArtifactRevision.ProcessingStatus.READY
-                    revision.save(update_fields=["processing_status"])
-            else:
-                IngestionJob.objects.create(document_reference=doc_ref)
-            return doc_ref
-        except Exception as exc:
-            import logging
-            logging.getLogger(__name__).exception("Failed to ingest attachment: %s", exc)
-            return None
+                job_status = (job or {}).get("status", "no-job")
+                logger.warning("RAG ingest did not complete for doc_ref %s — status=%s", doc_ref.id, job_status)
+        else:
+            IngestionJob.objects.create(document_reference=doc_ref)
+            logger.info("Queued local ingestion job for doc_ref %s", doc_ref.id)
+        return doc_ref
+    except Exception as exc:
+        logger.exception("Failed to ingest attachment: %s", exc)
+        return None
 
 
 class ChatArchiveView(LoginRequiredMixin, View):
@@ -232,7 +241,12 @@ class ChatLoraView(LoginRequiredMixin, View):
 
     def post(self, request, chat_id):
         chat = get_object_or_404(Chat, id=chat_id, user=request.user)
-        lora = request.POST.get("lora_adapter", "").strip()
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+            import json as json_mod
+            data = json_mod.loads(request.body) if request.body else {}
+            lora = data.get("lora_adapter", "").strip()
+        else:
+            lora = request.POST.get("lora_adapter", "").strip()
         meta = dict(chat.metadata)
         if lora:
             meta["lora_adapter"] = lora
@@ -240,6 +254,8 @@ class ChatLoraView(LoginRequiredMixin, View):
             meta.pop("lora_adapter", None)
         chat.metadata = meta
         chat.save(update_fields=["metadata"])
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+            return JsonResponse({"status": "ok", "lora_adapter": lora or None})
         return redirect(request.POST.get("next") or reverse("chat:detail", args=[chat_id]))
 
 
@@ -292,6 +308,48 @@ class ChatShareView(LoginRequiredMixin, CreateView):
         return reverse("chat:share", args=[self.kwargs["chat_id"]])
 
 
+class ChatShareJsonView(LoginRequiredMixin, View):
+    """JSON API for creating/revoking/checking share links."""
+
+    def get(self, request, chat_id):
+        chat = get_object_or_404(Chat, id=chat_id, user=request.user)
+        share = ChatShare.objects.filter(chat=chat, revoked=False).first()
+        if not share:
+            return JsonResponse({"active": False, "url": None})
+        return JsonResponse({
+            "active": True,
+            "token": share.token,
+            "url": request.build_absolute_uri(reverse("chat-shared", args=[share.token])),
+            "created_at": share.created_at.isoformat() if share.created_at else None,
+        })
+
+    def post(self, request, chat_id):
+        chat = get_object_or_404(Chat, id=chat_id, user=request.user)
+        existing = ChatShare.objects.filter(chat=chat, revoked=False).first()
+        if existing:
+            existing.revoked = True
+            existing.save(update_fields=["revoked"])
+        share = ChatShare.objects.create(
+            chat=chat,
+            user=request.user,
+            token=uuid.uuid4().hex,
+        )
+        return JsonResponse({
+            "active": True,
+            "token": share.token,
+            "url": request.build_absolute_uri(reverse("chat-shared", args=[share.token])),
+            "created_at": share.created_at.isoformat() if share.created_at else None,
+        })
+
+    def delete(self, request, chat_id):
+        chat = get_object_or_404(Chat, id=chat_id, user=request.user)
+        share = ChatShare.objects.filter(chat=chat, revoked=False).first()
+        if share:
+            share.revoked = True
+            share.save(update_fields=["revoked"])
+        return JsonResponse({"active": False})
+
+
 class ChatStreamView(LoginRequiredMixin, View):
     def get(self, request, chat_id):
         chat = get_object_or_404(Chat, id=chat_id, user=request.user)
@@ -310,6 +368,68 @@ class ChatStreamView(LoginRequiredMixin, View):
             )
         from .streaming import stream_chat_response
         return stream_chat_response(pending_msg, request.user)
+
+
+class ChatAttachmentView(LoginRequiredMixin, View):
+    """Serve an attachment file from a user message."""
+
+    def get(self, request, chat_id, msg_id, filename):
+        chat = get_object_or_404(Chat, id=chat_id, user=request.user)
+        msg = get_object_or_404(Message, id=msg_id, chat=chat)
+        if not msg.attachments:
+            return JsonResponse({"error": "no attachments"}, status=404)
+        att = None
+        for a in msg.attachments:
+            if a.get("original_filename") == filename or a.get("file", "").endswith(filename):
+                att = a
+                break
+        if not att:
+            return JsonResponse({"error": "file not found"}, status=404)
+        file_path = att["file"]
+        from django.core.files.storage import default_storage
+        if not default_storage.exists(file_path):
+            return JsonResponse({"error": "file not found on disk"}, status=404)
+        from django.http import FileResponse
+        import mimetypes
+        mime = att.get("mime_type") or mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        disposition = "inline" if mime.startswith("image/") else "attachment"
+        response = FileResponse(default_storage.open(file_path, "rb"), content_type=mime)
+        response["Content-Disposition"] = f'{disposition}; filename="{filename}"'
+        response["Content-Length"] = att.get("size_bytes", 0)
+        return response
+
+
+class ChatAttachmentIngestView(LoginRequiredMixin, View):
+    """Toggle (ingest) an existing message attachment into the knowledge base."""
+
+    def post(self, request, chat_id, msg_id, index):
+        chat = get_object_or_404(Chat, id=chat_id, user=request.user)
+        msg = get_object_or_404(Message, id=msg_id, chat=chat)
+        if not msg.attachments or index < 0 or index >= len(msg.attachments):
+            return JsonResponse({"error": "invalid attachment index"}, status=400)
+        attachments = list(msg.attachments)
+        att = attachments[index]
+        if att.get("document_ref_id"):
+            return JsonResponse({"status": "already_ingested", "document_ref_id": att["document_ref_id"]})
+        from django.core.files.base import ContentFile
+        from django.core.files.storage import default_storage
+        file_path = att["file"]
+        if not default_storage.exists(file_path):
+            return JsonResponse({"error": "file not found"}, status=404)
+        raw = default_storage.open(file_path, "rb").read()
+        fake_file = ContentFile(raw, name=att["original_filename"])
+        fake_file.content_type = att.get("mime_type", "application/octet-stream")
+        import traceback
+        try:
+            doc_ref = ingest_attachment(request.user, fake_file, file_path, att.get("sha256", ""))
+        except Exception as exc:
+            return JsonResponse({"error": f"Ingestion failed: {exc}"}, status=500)
+        if doc_ref:
+            att["document_ref_id"] = str(doc_ref.id)
+            msg.attachments = attachments
+            msg.save(update_fields=["attachments"])
+            return JsonResponse({"status": "ingested", "document_ref_id": str(doc_ref.id)})
+        return JsonResponse({"error": "Ingestion failed — check server logs"}, status=500)
 
 
 class ChatCancelStreamView(LoginRequiredMixin, View):
@@ -337,3 +457,30 @@ class SharedChatView(TemplateView):
         context["chat"] = share.chat
         context["chat_messages"] = Message.objects.filter(chat=share.chat).order_by("created_at")
         return context
+
+
+class SharedChatContinueView(LoginRequiredMixin, View):
+    """Fork a shared chat into a new chat for the logged-in user."""
+
+    def post(self, request, token):
+        share = get_object_or_404(ChatShare, token=token, revoked=False)
+        original = share.chat
+        import uuid as uuid_mod
+        new_chat = Chat.objects.create(
+            user=request.user,
+            title=original.title or "Continued chat",
+            path=uuid_mod.uuid4().hex[:16],
+            metadata=original.metadata or {},
+        )
+        for msg in Message.objects.filter(chat=original).order_by("created_at"):
+            Message.objects.create(
+                chat=new_chat,
+                role=msg.role,
+                content=msg.content,
+                attachments=msg.attachments,
+                tool_calls_data=msg.tool_calls_data,
+                metadata=msg.metadata,
+                status=msg.status,
+                created_at=msg.created_at,
+            )
+        return redirect("chat:detail", chat_id=new_chat.id)

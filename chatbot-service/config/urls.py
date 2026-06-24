@@ -5,7 +5,7 @@ from django.urls import include, path
 
 from apps.accounts.views import SettingsView
 from apps.api import health_check, stats
-from apps.chat.views import SharedChatView
+from apps.chat.views import SharedChatContinueView, SharedChatView
 
 urlpatterns = [
     path("", lambda r: redirect("chat:list")),
@@ -22,6 +22,7 @@ urlpatterns = [
     path("knowledge/", include("apps.knowledge.urls")),
     path("memory/", include("apps.memory.urls")),
     path("share/<str:token>/", SharedChatView.as_view(), name="chat-shared"),
+    path("share/<str:token>/continue/", SharedChatContinueView.as_view(), name="chat-shared-continue"),
     path("settings/", SettingsView.as_view(), name="settings"),
     path("api/health/", health_check, name="api-health"),
     path("api/stats/", stats, name="api-stats"),

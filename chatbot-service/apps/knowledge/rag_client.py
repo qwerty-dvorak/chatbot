@@ -36,7 +36,8 @@ class RagApiClient:
             return None
 
     def ingest(self, file_path: str, ocr_mode: str | None = None,
-               document_reference_id: str | None = None) -> dict | None:
+               document_reference_id: str | None = None,
+               generate_summary: bool = True) -> dict | None:
         if not self.enabled:
             logger.info("RAG API disabled, skipping ingest for %s", file_path)
             return None
@@ -53,6 +54,8 @@ class RagApiClient:
                     data["ocr_mode"] = ocr_mode
                 if document_reference_id:
                     data["document_id"] = document_reference_id
+                if not generate_summary:
+                    data["skip_summary"] = "true"
                 resp = self._timed_request("POST", f"{self.base_url}/v1/ingest", files=files, data=data, timeout=self.timeout)
                 return resp.json()
         except requests.RequestException as exc:

@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # BEGIN BARC BASE IMAGE
 FROM ubuntu:24.04
 # END BARC BASE IMAGE
