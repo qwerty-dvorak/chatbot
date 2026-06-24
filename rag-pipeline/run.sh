@@ -19,11 +19,11 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 case "${1:-}" in
   local)
     export $(grep -v '^#' "$ROOT_DIR/models/.env.local" 2>/dev/null | xargs)
-    exec bash "$SCRIPT_DIR/shell_scripts/start-services-runpod.sh"
+    exec bash "$SCRIPT_DIR/shell_scripts/start-services.sh"
     ;;
   runpod)
     export $(grep -v '^#' "$ROOT_DIR/models/.env.runpod" 2>/dev/null | xargs)
-    exec bash "$SCRIPT_DIR/shell_scripts/start-services-runpod.sh"
+    exec bash "$SCRIPT_DIR/shell_scripts/start-services.sh"
     ;;
   *)
     echo "Usage: bash run.sh {local|runpod}"

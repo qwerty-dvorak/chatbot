@@ -1,11 +1,11 @@
 #!/bin/bash
-# Start chatbot services with models on RunPod.
+# Start chatbot services.
 # PostgreSQL is expected to be running via db/start.sh.
 #
 # Usage:
-#   bash shell_scripts/start-services-with-runpod.sh
-#   bash shell_scripts/start-services-with-runpod.sh --clean
-#   bash shell_scripts/start-services-with-runpod.sh --clean --no-rag
+#   bash shell_scripts/start-services.sh
+#   bash shell_scripts/start-services.sh --clean
+#   bash shell_scripts/start-services.sh --clean --no-rag
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -21,12 +21,12 @@ for arg in "$@"; do
     --clean) CLEAN=true ;;
     --no-rag) NO_RAG=true ;;
     --help|-h)
-      echo "Usage: bash shell_scripts/start-services-with-runpod.sh [--clean] [--no-rag]"
+      echo "Usage: bash shell_scripts/start-services.sh [--clean] [--no-rag]"
       exit 0
       ;;
     *)
       echo "ERROR: Unknown argument: $arg"
-      echo "Usage: bash shell_scripts/start-services-with-runpod.sh [--clean] [--no-rag]"
+      echo "Usage: bash shell_scripts/start-services.sh [--clean] [--no-rag]"
       exit 1
       ;;
   esac

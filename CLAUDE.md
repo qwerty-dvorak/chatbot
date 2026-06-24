@@ -25,7 +25,7 @@ for the unified test orchestrator.
 
 Model files live in a **separate git repo** at the same level as this repo (`../models/`).
 They are mounted as Docker volumes at runtime — never copied into this repo.
-See `chatbot-service/shell_scripts/start-services-with-runpod.sh` and `rag-pipeline/shell_scripts/start-services-runpod.sh` for mount paths.
+See `chatbot-service/shell_scripts/start-services.sh` and `rag-pipeline/shell_scripts/start-services.sh` for mount paths.
 
 LoRA adapters live in the separate sibling directory `../lora_adapters/`,
 grouped by provider/owner and repository. Each repository contains

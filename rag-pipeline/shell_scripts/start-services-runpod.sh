@@ -2,8 +2,8 @@
 # Start RAG pipeline with ML models on RunPod (Milvus, PostgreSQL, RAG API locally).
 #
 # Usage:
-#   bash shell_scripts/start-services-runpod.sh
-#   bash shell_scripts/start-services-runpod.sh --clean
+#   bash shell_scripts/start-services.sh
+#   bash shell_scripts/start-services.sh --clean
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
