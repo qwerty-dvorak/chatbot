@@ -402,6 +402,14 @@ function openLightbox(src) {
   var overlay = document.createElement('div');
   overlay.className = 'lightbox-overlay';
   var zoom = 1, panX = 0, panY = 0, dragging = false, startX, startY;
+  function closeLightbox() {
+    document.removeEventListener('keydown', onLightboxKeydown);
+    overlay.remove();
+  }
+  function onLightboxKeydown(e) {
+    if (e.key === 'Escape') closeLightbox();
+  }
+  document.addEventListener('keydown', onLightboxKeydown);
 
   var stage = document.createElement('div');
   stage.className = 'lb-stage';
@@ -519,11 +527,11 @@ function openLightbox(src) {
 
   var closeBtn = document.createElement('button');
   closeBtn.className = 'lb-close'; closeBtn.innerHTML = '✕';
-  closeBtn.addEventListener('click', function() { overlay.remove(); });
+  closeBtn.addEventListener('click', closeLightbox);
 
   stage.appendChild(img); stage.appendChild(tb); stage.appendChild(closeBtn);
   overlay.appendChild(stage);
-  overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+  overlay.addEventListener('click', function(e) { if (e.target === overlay) closeLightbox(); });
   document.body.appendChild(overlay);
 }
 
@@ -544,6 +552,14 @@ function openFilePreview(url, mime) {
   var overlay = document.createElement('div');
   overlay.className = 'lightbox-overlay';
   overlay.style.cursor = 'default';
+  function closePreview() {
+    document.removeEventListener('keydown', onPreviewKeydown);
+    overlay.remove();
+  }
+  function onPreviewKeydown(e) {
+    if (e.key === 'Escape') closePreview();
+  }
+  document.addEventListener('keydown', onPreviewKeydown);
 
   var container = document.createElement('div');
   container.style.cssText = 'background:#1e1e2e;border-radius:12px;width:90vw;height:85vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 8px 40px rgba(0,0,0,.5);';
@@ -590,7 +606,7 @@ function openFilePreview(url, mime) {
   var closeBtn = document.createElement('button');
   closeBtn.style.cssText = 'background:none;border:none;color:#a0a0b0;font-size:1.2rem;cursor:pointer;padding:2px 6px;border-radius:4px;margin-left:6px;';
   closeBtn.textContent = '✕';
-  closeBtn.addEventListener('click', function() { overlay.remove(); });
+  closeBtn.addEventListener('click', closePreview);
   closeBtn.addEventListener('mouseenter', function() { this.style.color = '#fff'; });
   closeBtn.addEventListener('mouseleave', function() { this.style.color = '#a0a0b0'; });
   hdrRight.appendChild(closeBtn);
@@ -620,7 +636,7 @@ function openFilePreview(url, mime) {
   }
   container.appendChild(body);
   overlay.appendChild(container);
-  overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+  overlay.addEventListener('click', function(e) { if (e.target === overlay) closePreview(); });
   document.body.appendChild(overlay);
 }
 function copyCode(id) {
@@ -727,6 +743,7 @@ function toggleKnowledge(btn, chatId, msgId, index) {
   thinkingInput.addEventListener('change', updateThinkingMode);
   updateThinkingMode();
   ta.addEventListener('keydown', function (e) {
+    if (document.querySelector('.mention-dropdown')) return;
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       if (!sendBtn.disabled && (ta.value.trim() || fileAttached)) form.submit();
@@ -1080,6 +1097,7 @@ function toggleKnowledge(btn, chatId, msgId, index) {
     dropdown.style.bottom = (window.innerHeight - rect.top + 4) + 'px';
     dropdown.style.left = rect.left + 'px';
     document.body.appendChild(dropdown);
+    highlightItem(0);
   }
 
   function highlightItem(idx) {
@@ -1122,10 +1140,6 @@ function toggleKnowledge(btn, chatId, msgId, index) {
       return;
     }
     var queryAfterAt = val.slice(atIdx + 1, pos).toLowerCase();
-    if (queryAfterAt.length === 0) {
-      if (dropdown) { dropdown.remove(); dropdown = null; }
-      return;
-    }
     getDocs(function(docs) {
       var matches = docs.filter(function(d) { return d.toLowerCase().indexOf(queryAfterAt) !== -1; });
       showDropdown(matches);
@@ -1148,11 +1162,11 @@ function toggleKnowledge(btn, chatId, msgId, index) {
       if (prev < 0) prev = items.length - 1;
       highlightItem(prev);
     } else if (e.key === 'Tab' || e.key === 'Enter') {
-      if (selectedIdx >= 0) {
-        e.preventDefault();
-        insertHighlighted();
-      }
+      e.preventDefault();
+      if (selectedIdx < 0) highlightItem(0);
+      insertHighlighted();
     } else if (e.key === 'Escape') {
+      e.preventDefault();
       if (dropdown) { dropdown.remove(); dropdown = null; selectedIdx = -1; }
     }
   });
