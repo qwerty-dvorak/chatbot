@@ -51,7 +51,7 @@ See `TESTING.md` for full details, manual curl examples, and troubleshooting.
 |---------|------|-------|---------|
 | rag-text-embed | 8090 | vllm/vllm-openai:latest | nvidia/llama-embed-nemotron-8b text embeddings |
 | rag-multimodal-embed | 8091 | vllm/vllm-openai:latest | nvidia/nemotron-colembed-vl-8b-v2 multimodal embeddings |
-| rag-reranker | 8092 | vllm/vllm-openai:latest | Qwen3-VL-Reranker-8B pooling via /pooling endpoint |
+| rag-reranker | 8092 | vllm/vllm-openai:latest | Qwen3-VL-Reranker-2B pooling via /pooling endpoint |
 | rag-api | 8093 | rag-api (ubuntu:24.04) | FastAPI, durable SQLite queue, ingestion worker, search |
 | paddleocr-vl | RunPod :8000 or in-process | PaddleOCR-VL-1.6 / PaddleOCR | Image and scanned-page OCR |
 | postgres | 5433 | postgres:16 | Shared DB with chatbot-service |

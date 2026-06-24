@@ -40,7 +40,7 @@ no mocks, uses the live stack's PostgreSQL, LLM endpoints, and environment varia
 | Chat LLM (Gemma) | 8430 | gemma-inference | vLLM serving google/gemma-4-26B-A4B-it |
 | Text Embed | 8090 | rag-text-embed | nvidia/llama-embed-nemotron-8b |
 | Multimodal Embed | 8091 | rag-multimodal-embed | nvidia/nemotron-colembed-vl-8b-v2 |
-| Reranker | 8092 | rag-reranker | Qwen3-VL-Reranker-8B |
+| Reranker | 8092 | rag-reranker | Qwen3-VL-Reranker-2B |
 | RAG API | 8093 | rag-api | FastAPI ingest/search pipeline |
 | PostgreSQL | 5433 | chatbot-postgres | Shared DB |
 | Milvus | 19530 | milvus-standalone | Vector store |

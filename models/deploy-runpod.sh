@@ -237,7 +237,7 @@ print(json.dumps(d))")
   RERANKER_TPL=$(create_template "rag-reranker-$TS" \
     --image "vllm/vllm-openai:latest" \
     --docker-entrypoint "/bin/bash" \
-    --docker-start-cmd '-c,exec python3 -m vllm.entrypoints.openai.api_server --model Qwen/Qwen3-VL-Reranker-8B --runner pooling --trust-remote-code --port 8000 --gpu-memory-utilization 0.90 --max-model-len 4096 --hf-overrides "$HF_OVERRIDES"' \
+    --docker-start-cmd '-c,exec python3 -m vllm.entrypoints.openai.api_server --model Qwen/Qwen3-VL-Reranker-2B --runner pooling --trust-remote-code --port 8000 --gpu-memory-utilization 0.90 --max-model-len 4096 --hf-overrides "$HF_OVERRIDES"' \
     --env "$RERANKER_ENV_JSON" \
     --ports "8000/http" \
     --container-disk-in-gb 50)
@@ -258,7 +258,7 @@ else
   OCR_TPL=$(create_template "paddleocr-vl-$TS" \
     --image "vllm/vllm-openai:latest" \
     --docker-entrypoint "/bin/bash" \
-    --docker-start-cmd "-c,exec python3 -m vllm.entrypoints.openai.api_server --model PaddlePaddle/PaddleOCR-VL-1.6 --trust-remote-code --port 8000 --gpu-memory-utilization 0.90 --max-model-len 131072 --limit-mm-per-prompt '{\"image\": 1, \"video\": 0}'" \
+    --docker-start-cmd "-c,exec python3 -m vllm.entrypoints.openai.api_server --model PaddlePaddle/PaddleOCR-VL-1.6 --trust-remote-code --port 8000 --gpu-memory-utilization 0.85 --max-num-batched-tokens 16384 --no-enable-prefix-caching --mm-processor-cache-gb 0" \
     --env "$HF_ENV_JSON" \
     --ports "8000/http" \
     --container-disk-in-gb 50)
@@ -309,17 +309,6 @@ wait_running() {
   done
 }
 
-wait_http() {
-  local name="$1" url="$2" max="${3:-1800}"
-  local elapsed=0
-  echo -n "  $name healthy"
-  while true; do
-    local code; code=$(curl -sk -o /dev/null -w "%{http_code}" "$url" 2>/dev/null || echo "000")
-    [[ "$code" == "200" ]] && { echo " ✓"; return 0; }
-    sleep 30; elapsed=$((elapsed + 30)); echo -n "."
-    [[ $elapsed -ge $max ]] && { echo " TIMEOUT (last HTTP $code)"; return 1; }
-  done
-}
 
 echo ""
 echo "Waiting for pods to reach RUNNING..."
@@ -335,13 +324,12 @@ MM_URL="https://${MM_POD}-8000.proxy.runpod.net"
 RERANKER_URL="https://${RERANKER_POD}-8000.proxy.runpod.net"
 OCR_URL="https://${OCR_POD}-8000.proxy.runpod.net"
 
-echo ""
-echo "Waiting for vLLM health endpoints..."
-wait_http "chat-llm"    "$CHAT_URL/health"
-wait_http "text-embed"  "$TEXT_URL/health"
-wait_http "mm-embed"    "$MM_URL/health"
-wait_http "reranker"    "$RERANKER_URL/health"
-wait_http "PaddleOCR"   "$OCR_URL/health"
+bash "$SCRIPT_DIR/wait-health.sh" \
+  "chat-llm=$CHAT_URL/health" \
+  "text-embed=$TEXT_URL/health" \
+  "mm-embed=$MM_URL/health" \
+  "reranker=$RERANKER_URL/health" \
+  "paddleocr=$OCR_URL/health"
 
 # Detect embedding dimensions
 detect_dim() {

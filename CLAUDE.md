@@ -38,7 +38,7 @@ barc/
 │   ├── gemma-4-26B-A4B-it/
 │   ├── llama-embed-nemotron-8b/
 │   ├── nemotron-colembed-vl-8b-v2/
-│   └── Qwen3-VL-Reranker-8B/
+│   └── Qwen3-VL-Reranker-2B/
 └── lora_adapters/
     └── EvilScript/
         ├── taboo-book-gemma-4-E4B-it/

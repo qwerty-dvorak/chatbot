@@ -114,6 +114,7 @@ docker run -d \
   -e RAG_API_ENABLED="$RAG_API_ENABLED" \
   -e RAG_API_BASE_URL="$RAG_API_BASE_URL" \
   -e RAG_ENABLED="$RAG_ENABLED" \
+  -e CSRF_TRUSTED_ORIGINS="https://nonevidential-autopotamic-alaine.ngrok-free.dev" \
   -e RAG_TOP_K=5 \
   -e RAG_MIN_SIMILARITY=0.45 \
   -e TOOL_CALLS_ENABLED=true \

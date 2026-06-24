@@ -14,6 +14,10 @@ DATABASES = {
         "PORT": os.environ.get("POSTGRES_PORT", "5433"),  # noqa: F405
     }
 }
+csrf_env = os.environ.get("CSRF_TRUSTED_ORIGINS", "")
+# This splits the string by commas into a real Python list
+CSRF_TRUSTED_ORIGINS = [origin.strip() for origin in csrf_env.split(",") if origin.strip()]
+
 
 # For intranet HTTP-only deployment, disable secure cookie flags
 # (set HTTPS=true env var to re-enable when running behind TLS)

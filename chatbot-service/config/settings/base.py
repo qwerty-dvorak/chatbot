@@ -94,6 +94,9 @@ LOGOUT_REDIRECT_URL = "/"
 # Debug: log all LLM API calls with truncated payloads
 CHAT_DEBUG = os.environ.get("CHAT_DEBUG", "false").lower() in ("true", "1", "yes")
 
+csrf_env = os.environ.get("CSRF_TRUSTED_ORIGINS", "")
+# This splits the string by commas into a real Python list
+CSRF_TRUSTED_ORIGINS = [origin.strip() for origin in csrf_env.split(",") if origin.strip()]
 # Reasoning / thinking mode: enables structured step-by-step reasoning
 # Passes chat_template_kwargs with enable_thinking=True to the LLM.
 # The reasoning content is stored in message metadata under the "reasoning" key.
