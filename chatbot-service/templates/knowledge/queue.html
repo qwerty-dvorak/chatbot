@@ -7,6 +7,7 @@
       <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M10.5 3L5.5 8l5 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
     </a>
     <h1>Ingestion Queue</h1>
+    <span class="badge badge-processing" id="queue-count-badge" style="font-size:.7rem">0</span>
   </div>
   <div style="display:flex;gap:8px">
     <a href="{% url 'knowledge:list' %}" class="btn btn-ghost btn-sm">Knowledge</a>
@@ -17,6 +18,8 @@
   </div>
 </div>
 
+<p class="text-muted" style="font-size:.8125rem;margin-bottom:16px">Drag to reorder · Only active/pending/failed items shown</p>
+
 <div id="queue-container">
   <div style="text-align:center;padding:48px;color:var(--text3)">Loading queue…</div>
 </div>
@@ -24,6 +27,7 @@
 <script>
 (function() {
   var container = document.getElementById('queue-container');
+  var dragSrcEl = null;
 
   function loadQueue() {
     container.innerHTML = '<div style="text-align:center;padding:48px;color:var(--text3)">Loading…</div>';
@@ -33,33 +37,32 @@
         renderJobs(data.jobs || []);
       })
       .catch(function() {
-        container.innerHTML = '<div class="card" style="text-align:center;padding:48px;color:var(--red)">Failed to load queue</div>';
+        container.innerHTML = '<div class="card" style="text-align:center;padding:48px;color:var(--red)">Failed to load queue</div>'
+        setTimeout(loadQueue, 5000);
       });
   }
 
   function renderJobs(jobs) {
+    var badge = document.getElementById('queue-count-badge');
+    if (badge) badge.textContent = jobs.length;
+
     if (!jobs.length) {
-      container.innerHTML = '<div class="card" style="text-align:center;padding:48px"><p style="color:var(--text2)">No ingestion jobs.</p></div>';
+      container.innerHTML = '<div class="card" style="text-align:center;padding:48px"><p style="color:var(--text2)">All caught up — no active ingestion jobs.</p></div>';
       return;
     }
-    var html = '<div class="queue-list">';
+    var html = '<div class="queue-list" id="queue-list">';
     jobs.forEach(function(job) {
       var isActive = job.status === 'queued' || job.status === 'running';
-      var stepInfo = '';
-      if (job.current_step) {
-        stepInfo = '<span class="queue-step">' + job.current_step.replace(/_/g, ' ') + '</span>';
-      }
-      if (job.progress_pct != null) {
-        stepInfo += '<span class="queue-pct">' + job.progress_pct + '%</span>';
-      }
-      html += '<div class="queue-item queue-' + job.status + '" data-job-id="' + job.id + '">';
+      html += '<div class="queue-item queue-' + job.status + '" data-job-id="' + job.id + '" draggable="true" data-queue-order="' + (job.queue_order || 0) + '">';
+      /* drag handle */
+      html += '<div class="queue-drag-handle" title="Drag to reorder"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M5 4a1 1 0 110-2 1 1 0 010 2zm6 0a1 1 0 110-2 1 1 0 010 2zM5 9a1 1 0 110-2 1 1 0 010 2zm6 0a1 1 0 110-2 1 1 0 010 2zM5 14a1 1 0 110-2 1 1 0 010 2zm6 0a1 1 0 110-2 1 1 0 010 2z"/></svg></div>';
       html += '<div class="queue-item-body">';
       html += '<div class="queue-item-title"><a href="{% url "knowledge:list" %}' + job.document_id + '/">' + escapeHtml(job.title) + '</a></div>';
       html += '<div class="queue-item-meta">';
       html += '<span class="badge badge-' + job.status + '">' + job.status + '</span>';
-      html += stepInfo;
+      if (job.current_step) html += '<span class="queue-step">' + job.current_step.replace(/_/g, ' ') + '</span>';
+      if (job.progress_pct != null) html += '<span class="queue-pct">' + job.progress_pct + '%</span>';
       if (job.error) html += '<span class="queue-error">' + escapeHtml(job.error.substring(0, 80)) + '</span>';
-      html += '<span class="queue-time" title="' + (job.created_at || '') + '">' + (job.created_at ? new Date(job.created_at).toLocaleString() : '') + '</span>';
       html += '</div>';
       if (job.steps && job.steps.length) {
         html += '<div class="queue-steps-bar">';
@@ -69,7 +72,7 @@
           else if (s.status === 'running') cls += ' dot-running';
           else if (s.status === 'failed') cls += ' dot-failed';
           else cls += ' dot-pending';
-          html += '<span class="' + cls + '" title="' + (s.name || '') + ': ' + (s.status || '') + '"></span>';
+          html += '<span class="' + cls + '" title="' + (s.name || '').replace(/_/g, ' ') + ': ' + (s.status || '') + '"></span>';
         });
         html += '</div>';
       }
@@ -78,13 +81,92 @@
       if (isActive) {
         html += '<button class="topbar-btn" onclick="cancelJob(\'' + job.id + '\')" title="Cancel"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M2 4a2 2 0 012-2h8a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V4z"/></svg></button>';
       }
-      html += '<button class="topbar-btn" onclick="deleteJob(\'' + job.id + '\')" title="Delete" style="color:var(--red)"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M5.5 5.5A.5.5 0 016 6v6a.5.5 0 01-1 0V6a.5.5 0 01.5-.5zm2.5 0a.5.5 0 01.5.5v6a.5.5 0 01-1 0V6a.5.5 0 01.5-.5zm3 .5a.5.5 0 00-1 0v6a.5.5 0 001 0V6z"/><path d="M14.5 3a1 1 0 01-1 1H13v9a2 2 0 01-2 2H5a2 2 0 01-2-2V4h-.5a1 1 0 01-1-1V2a1 1 0 011-1H6a1 1 0 011-1h2a1 1 0 011 1h3.5a1 1 0 011 1v1z"/></svg></button>';
+      html += '<button class="topbar-btn" onclick="deleteJob(\'' + job.id + '\')" title="Delete item" style="color:var(--red)"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M5.5 5.5A.5.5 0 016 6v6a.5.5 0 01-1 0V6a.5.5 0 01.5-.5zm2.5 0a.5.5 0 01.5.5v6a.5.5 0 01-1 0V6a.5.5 0 01.5-.5zm3 .5a.5.5 0 00-1 0v6a.5.5 0 001 0V6z"/><path d="M14.5 3a1 1 0 01-1 1H13v9a2 2 0 01-2 2H5a2 2 0 01-2-2V4h-.5a1 1 0 01-1-1V2a1 1 0 011-1H6a1 1 0 011-1h2a1 1 0 011 1h3.5a1 1 0 011 1v1z"/></svg></button>';
       html += '</div>';
       html += '</div>';
     });
     html += '</div>';
     container.innerHTML = html;
+    attachDragHandlers();
     setTimeout(loadQueue, 5000);
+  }
+
+  function attachDragHandlers() {
+    var items = container.querySelectorAll('.queue-item[draggable]');
+    items.forEach(function(item) {
+      item.addEventListener('dragstart', handleDragStart);
+      item.addEventListener('dragover', handleDragOver);
+      item.addEventListener('dragenter', handleDragEnter);
+      item.addEventListener('dragleave', handleDragLeave);
+      item.addEventListener('drop', handleDrop);
+      item.addEventListener('dragend', handleDragEnd);
+    });
+  }
+
+  function handleDragStart(e) {
+    dragSrcEl = this;
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', this.dataset.jobId);
+    this.classList.add('queue-dragging');
+  }
+
+  function handleDragOver(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  }
+
+  function handleDragEnter(e) {
+    e.preventDefault();
+    if (this !== dragSrcEl) this.classList.add('queue-drag-over');
+  }
+
+  function handleDragLeave(e) {
+    this.classList.remove('queue-drag-over');
+  }
+
+  function handleDrop(e) {
+    e.stopPropagation();
+    if (dragSrcEl && dragSrcEl !== this) {
+      var parent = document.getElementById('queue-list');
+      var items = Array.from(parent.querySelectorAll('.queue-item[draggable]'));
+      var fromIdx = items.indexOf(dragSrcEl);
+      var toIdx = items.indexOf(this);
+      if (fromIdx < toIdx) {
+        this.parentNode.insertBefore(dragSrcEl, this.nextSibling);
+      } else {
+        this.parentNode.insertBefore(dragSrcEl, this);
+      }
+      saveOrder();
+    }
+    this.classList.remove('queue-drag-over');
+    return false;
+  }
+
+  function handleDragEnd(e) {
+    this.classList.remove('queue-dragging');
+    document.querySelectorAll('.queue-drag-over').forEach(function(el) {
+      el.classList.remove('queue-drag-over');
+    });
+  }
+
+  function saveOrder() {
+    var parent = document.getElementById('queue-list');
+    if (!parent) return;
+    var order = Array.from(parent.querySelectorAll('.queue-item[draggable]')).map(function(el) {
+      return el.dataset.jobId;
+    });
+    fetch('{% url "knowledge:queue-data" %}', {
+      method: 'POST',
+      headers: { 'X-CSRFToken': '{{ csrf_token }}', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'reorder', order: order })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.status === 'reordered') {
+        showToast('Queue reordered', 'success');
+      }
+    })
+    .catch(function() {});
   }
 
   function escapeHtml(s) {
@@ -94,9 +176,9 @@
 
   window.cancelJob = function(jobId) {
     if (!confirm('Cancel this ingestion job?')) return;
-    fetch('{% url "knowledge:queue" %}' + jobId + '/', {
+    fetch('{% url "knowledge:queue-data" %}' + jobId + '/', {
       method: 'PATCH',
-      headers: {'X-CSRFToken': '{{ csrf_token }}', 'Content-Type': 'application/json'},
+      headers: { 'X-CSRFToken': '{{ csrf_token }}', 'Content-Type': 'application/json' },
       body: JSON.stringify({action: 'cancel'})
     })
     .then(function(r) { return r.json(); })
@@ -105,10 +187,10 @@
   };
 
   window.deleteJob = function(jobId) {
-    if (!confirm('Delete this job and its document?')) return;
-    fetch('{% url "knowledge:queue" %}' + jobId + '/', {
+    if (!confirm('Delete this job and document?')) return;
+    fetch('{% url "knowledge:queue-data" %}' + jobId + '/', {
       method: 'PATCH',
-      headers: {'X-CSRFToken': '{{ csrf_token }}', 'Content-Type': 'application/json'},
+      headers: { 'X-CSRFToken': '{{ csrf_token }}', 'Content-Type': 'application/json' },
       body: JSON.stringify({action: 'delete'})
     })
     .then(function(r) { return r.json(); })
@@ -121,18 +203,32 @@
 </script>
 
 <style>
-.queue-list { display: flex; flex-direction: column; gap: 8px; }
+.queue-list { display: flex; flex-direction: column; gap: 6px; }
 .queue-item {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px 16px;
+  gap: 10px;
+  padding: 10px 14px;
   background: var(--bg);
   border: 1px solid var(--bd);
   border-radius: var(--r);
-  transition: box-shadow .13s;
+  transition: box-shadow .13s, border-color .13s, opacity .2s;
+  user-select: none;
 }
 .queue-item:hover { box-shadow: 0 1px 4px rgba(0,0,0,.06); }
+.queue-item.queue-dragging { opacity: .4; }
+.queue-item.queue-drag-over { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(0,113,227,.15); }
+.queue-drag-handle {
+  cursor: grab;
+  color: var(--text3);
+  flex-shrink: 0;
+  display: flex;
+  padding: 4px;
+  border-radius: 4px;
+  transition: color .12s, background .12s;
+}
+.queue-drag-handle:hover { color: var(--text2); background: var(--surface); }
+.queue-drag-handle:active { cursor: grabbing; }
 .queue-item-body { flex: 1; min-width: 0; }
 .queue-item-title { font-weight: 500; font-size: .9375rem; }
 .queue-item-title a { color: var(--text); text-decoration: none; }
@@ -141,7 +237,6 @@
 .queue-step { font-size: .75rem; color: var(--text2); font-family: var(--mono); }
 .queue-pct { font-size: .7rem; color: var(--text3); font-weight: 600; }
 .queue-error { font-size: .72rem; color: var(--red); }
-.queue-time { font-size: .68rem; color: var(--text3); margin-left: auto; }
 .queue-item-actions { display: flex; gap: 2px; flex-shrink: 0; }
 .queue-steps-bar { display: flex; gap: 3px; margin-top: 6px; }
 .queue-step-dot {

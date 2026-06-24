@@ -389,11 +389,14 @@ class IngestionQueueView(LoginRequiredMixin, View):
 class IngestionQueueJsonView(LoginRequiredMixin, View):
     """JSON endpoint for queue management."""
 
-    def get(self, request):
+    def get(self, request, job_id=None):
+        # Show only items that are NOT yet succeeded
         jobs = IngestionJob.objects.filter(
             document_reference__owner=request.user,
             document_reference__kind=DocumentReference.Kind.KNOWLEDGE,
-        ).select_related("document_reference").order_by("-created_at")[:100]
+        ).exclude(
+            status=IngestionJob.Status.SUCCEEDED,
+        ).select_related("document_reference").order_by("queue_order", "-created_at")[:100]
 
         if rag_client.is_enabled():
             for job in jobs:
@@ -409,6 +412,7 @@ class IngestionQueueJsonView(LoginRequiredMixin, View):
                 "title": job.document_reference.title,
                 "status": job.status,
                 "error": job.error,
+                "queue_order": job.queue_order,
                 "progress_pct": step_summary.get("progress_pct"),
                 "current_step": step_summary.get("current_step", ""),
                 "steps": rag_steps,
@@ -432,6 +436,20 @@ class IngestionQueueJsonView(LoginRequiredMixin, View):
             job.error = "Cancelled by user"
             job.save(update_fields=["status", "error"])
         return JsonResponse({"status": "cancelled"})
+
+    def post(self, request, job_id=None):
+        import json as json_mod
+        body = json_mod.loads(request.body) if request.body else {}
+        action = body.get("action", "")
+        if action == "reorder":
+            order = body.get("order", [])
+            for idx, job_id_str in enumerate(order):
+                IngestionJob.objects.filter(
+                    id=job_id_str,
+                    document_reference__owner=request.user,
+                ).update(queue_order=idx)
+            return JsonResponse({"status": "reordered"})
+        return JsonResponse({"error": "unknown action"}, status=400)
 
     def patch(self, request, job_id=None):
         if not job_id:

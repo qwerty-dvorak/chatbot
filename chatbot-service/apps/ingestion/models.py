@@ -23,6 +23,7 @@ class IngestionJob(models.Model):
     attempts = models.IntegerField(default=0)
     error = models.TextField(default="")
     metadata = models.JSONField(default=dict, blank=True)
+    queue_order = models.IntegerField(default=0, db_index=True)
     started_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
