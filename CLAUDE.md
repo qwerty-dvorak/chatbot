@@ -14,7 +14,7 @@ for the unified test orchestrator.
 |-----------|---------|
 | `chatbot-service/` | Django chatbot with streaming LLM, RAG, memory, tool calling |
 | `rag-pipeline/` | Standalone document ingestion + advanced RAG pipeline |
-| `models/` | Model deployment scripts + .env configs (deploy-local.sh, deploy-runpod.sh, teardown-runpod.sh, clone_models.sh) |
+| `models/` | Model deployment scripts + .env configs (deploy-local-gemma.sh, deploy-local-others.sh, deploy-runpod.sh, teardown-runpod.sh, clone_models.sh) |
 | `db/` | PostgreSQL management scripts (start, stop, clear, exec, health) — port 5433 |
 | `milvus/` | Milvus+minio+etcd management scripts (start, stop, clear, check) |
 | `tests/` | Unified test orchestrator: tests/run.sh dispatches to tests/chatbot/, tests/rag/, tests/integration/ |
@@ -48,7 +48,7 @@ barc/
 `models/deploy-runpod.sh` discovers this two-level layout, uses each local Git
 `origin` (or derives `https://huggingface.co/<owner>/<repo>`), clones all
 compatible adapters into `/lora_adapters/<owner>/<repo>` on the pod, and gives
-vLLM those local paths. `models/deploy-local.sh` mounts the entire adapter root
+vLLM those local paths. `models/deploy-local-gemma.sh` mounts the entire adapter root
 read-only and registers adapters compatible with the local base model. Override
 the root with `LORA_ADAPTERS_DIR=/absolute/path`.
 

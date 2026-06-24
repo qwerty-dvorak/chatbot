@@ -1,7 +1,7 @@
 #!/bin/bash
 # Start all chatbot services with real Gemma inference (GPU required).
 # Infrastructure (PostgreSQL) is expected to be running via db/start.sh.
-# Model servers are expected to be running via models/deploy-local.sh.
+# Model servers are expected to be running via models/deploy-local-gemma.sh + models/deploy-local-others.sh.
 #
 # Usage:
 #   bash shell_scripts/start-services.sh

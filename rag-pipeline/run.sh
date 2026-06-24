@@ -10,7 +10,7 @@
 # Infrastructure prerequisites:
 #   - PostgreSQL: db/start.sh
 #   - Milvus:     milvus/start.sh
-#   - Models:     models/deploy-local.sh (for local mode)
+#   - Models:     models/deploy-local-gemma.sh + models/deploy-local-others.sh (for local mode)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -28,7 +28,7 @@ case "${1:-}" in
   *)
     echo "Usage: bash run.sh {local|runpod}"
     echo ""
-    echo "  local     Start with local GPU (requires models/deploy-local.sh)"
+    echo "  local     Start with local GPU (requires models/deploy-local-gemma.sh + deploy-local-others.sh)"
     echo "  runpod    Start with RunPod cloud GPU (requires models/deploy-runpod.sh)"
     exit 1
     ;;

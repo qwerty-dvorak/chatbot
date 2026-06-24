@@ -1,5 +1,5 @@
 #!/bin/bash
-# Shared LoRA discovery for deploy-local.sh and deploy-runpod.sh.
+# Shared LoRA discovery for deploy-local-gemma.sh and deploy-runpod.sh.
 # Expected layout: <root>/<provider>/<repository>/adapter_config.json
 
 lora_rank_ceiling() {

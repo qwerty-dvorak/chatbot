@@ -277,7 +277,8 @@ bash models/deploy-runpod.sh
 For local Docker, the same root is mounted read-only at `/lora_adapters`:
 
 ```bash
-bash models/deploy-local.sh
+bash models/deploy-local-gemma.sh
+bash models/deploy-local-others.sh
 ```
 
 Set `LORA_ADAPTERS_DIR=/absolute/path` to override the default sibling

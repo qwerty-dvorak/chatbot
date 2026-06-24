@@ -82,7 +82,8 @@ if [[ "$MODE" == "RUNPOD" ]]; then
   fi
   bash "$SCRIPT_DIR/models/deploy-runpod.sh"
 else
-  bash "$SCRIPT_DIR/models/deploy-local.sh"
+  bash "$SCRIPT_DIR/models/deploy-local-gemma.sh"
+  bash "$SCRIPT_DIR/models/deploy-local-others.sh"
 fi
 
 # Step 3: Start RAG pipeline
