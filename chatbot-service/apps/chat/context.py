@@ -13,6 +13,7 @@ from apps.llm.prompts import (
     DOCUMENT_SELECTION_CONTEXT_PROMPT,
     MEMORY_CONTEXT_PROMPT,
     RAG_CONTEXT_PROMPT,
+    RETRIEVAL_ROUTER_PROMPT,
     SYSTEM_PROMPT,
 )
 
@@ -359,34 +360,10 @@ class ContextBuilder:
         try:
             from apps.llm.clients import LiteLLMClient
             client = LiteLLMClient()
-            prompt = (
-                "You are the retrieval router for a knowledge-grounded chat system. "
-                "First decide whether the request needs facts from the knowledge base. "
-                "Document names listed below are application-resolved scope selectors, "
-                "not search text and not tool calls. If retrieval is needed and documents "
-                "are selected, retrieval will be restricted to exactly those documents.\n\n"
-                "Respond ONLY with one JSON object using this schema:\n"
-                '{"use_rag": boolean, "search_query": string, "hyde": boolean, '
-                '"sub_queries": boolean, "stepback": boolean, "use_reranker": boolean}\n\n'
-                "Guidelines:\n"
-                "- use_rag: true only when the answer requires document or knowledge-base content.\n"
-                "- An information question, summary, comparison, or explanation about a selected "
-                "document normally requires RAG. Casual conversation or a request answerable "
-                "without the knowledge base does not.\n"
-                "- search_query: rewrite the request as a standalone semantic retrieval query. "
-                "Do not include @ syntax. Preserve the user's intent; use selected filenames only "
-                "when they clarify an otherwise incomplete request.\n"
-                "- hyde (Hypothetical Document Embedding): True if generating a "
-                "hypothetical answer/paragraph first would help. Use for open-ended "
-                "or abstract questions (e.g. \"explain X\", \"tell me about Y\"). "
-                "False for simple factual lookups.\n"
-                "- sub_queries: True if the question is complex or multi-part and "
-                "could benefit from decomposition. False for short/factual queries.\n"
-                "- stepback: True if answering requires broader context or background "
-                "knowledge. False for direct, specific queries.\n\n"
-                f"Request without selectors: {json.dumps(query)}\n"
-                f"Selected documents: {json.dumps(list(mentions.selected_sources))}\n"
-                f"Unresolved mentions: {json.dumps(list(mentions.unresolved_mentions))}"
+            prompt = RETRIEVAL_ROUTER_PROMPT.format(
+                query=json.dumps(query),
+                sources=json.dumps(list(mentions.selected_sources)),
+                unresolved=json.dumps(list(mentions.unresolved_mentions)),
             )
             response = client.chat_completion(
                 messages=[{"role": "user", "content": prompt}],

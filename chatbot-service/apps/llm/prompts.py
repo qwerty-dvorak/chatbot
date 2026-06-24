@@ -1,28 +1,20 @@
-SYSTEM_PROMPT = """You are a helpful AI assistant with access to tools and a knowledge base.
+import os
 
-Guidelines:
-- Answer based on retrieved knowledge when available.
-- Knowledge retrieval is performed before you answer. Never emit or request a rag.search tool call.
-- Treat @document mentions as document selectors supplied by the context builder, not as tool requests or search-query text.
-- If you don't know something, say so clearly.
-- Use tools when appropriate to gather information.
-- Cite sources when using retrieved knowledge.
-- Be concise and direct.
-- Do not fabricate information, citations, or data."""
+_PROMPTS_DIR = os.path.join(os.path.dirname(__file__), "prompts")
 
-MEMORY_CONTEXT_PROMPT = """The following are saved memories about the user:
-{memories}"""
 
-COMPACTION_CONTEXT_PROMPT = """Previous conversation summary:
-{summary}
+def _load(name: str) -> str:
+    path = os.path.join(_PROMPTS_DIR, name)
+    try:
+        with open(path) as f:
+            return f.read().strip()
+    except FileNotFoundError:
+        return ""
 
-Key facts from earlier context:
-{facts}"""
 
-DOCUMENT_SELECTION_CONTEXT_PROMPT = """Document selection for this turn:
-{selection}
-
-These document names were resolved by the application. They define retrieval scope only; do not call a tool for the @mentions."""
-
-RAG_CONTEXT_PROMPT = """Relevant knowledge base results retrieved before this response:
-{results}"""
+SYSTEM_PROMPT = _load("system.txt")
+MEMORY_CONTEXT_PROMPT = _load("memory_context.txt")
+COMPACTION_CONTEXT_PROMPT = _load("compaction_context.txt")
+DOCUMENT_SELECTION_CONTEXT_PROMPT = _load("document_selection_context.txt")
+RAG_CONTEXT_PROMPT = _load("rag_context.txt")
+RETRIEVAL_ROUTER_PROMPT = _load("retrieval_router.txt")

@@ -21,11 +21,18 @@ BUILTIN_TOOL_DEFS = [
     {
         "name": "knowledge.grep",
         "display_name": "Knowledge Grep",
-        "description": "Strict substring search across knowledge document chunks",
+        "description": (
+            "Strict substring grep across user-uploaded knowledge documents. "
+            "Use ONLY to find exact text matches in documents already uploaded by the user. "
+            "DO NOT use for general factual questions, definitions, or common knowledge "
+            "that you can answer from your training data. "
+            "Only call this when the user explicitly asks you to search within their documents "
+            "for a specific word or phrase."
+        ),
         "schema": {
             "type": "object",
             "properties": {
-                "pattern": {"type": "string", "description": "Text pattern to search for"},
+                "pattern": {"type": "string", "description": "Exact text substring to search for in uploaded documents"},
                 "top_k": {"type": "integer", "description": "Max results", "default": 10},
                 "case_sensitive": {"type": "boolean", "description": "Case-sensitive match", "default": False},
                 "document_title": {"type": "string", "description": "Filter by document title (substring match)", "default": ""},

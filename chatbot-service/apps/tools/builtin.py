@@ -152,7 +152,7 @@ def memory_aggregate(arguments: dict[str, Any], context: dict = {}) -> dict:
 
 @register_builtin("knowledge.grep")
 def knowledge_grep(arguments: dict[str, Any], context: dict = {}) -> dict:
-    """Strict substring search across knowledge document chunks.
+    """Strict substring grep across user-uploaded knowledge documents.
 
     When RAG API is enabled, also searches the RAG pipeline for results.
     """
@@ -190,40 +190,6 @@ def knowledge_grep(arguments: dict[str, Any], context: dict = {}) -> dict:
                 "snippet":       snippet,
                 "match_count":   snippet.lower().count(pattern.lower()),
             })
-
-        # If few local results and RAG is enabled, search the RAG pipeline too
-        if len(matches) < top_k:
-            from apps.knowledge.rag_client import rag_client
-            if rag_client.is_enabled():
-                seen_titles = {m["document_title"] for m in matches}
-                extra_k = top_k - len(matches)
-                rag_resp = rag_client.search(
-                    pattern,
-                    top_k=extra_k * 2,
-                    artifact_sources=[document_title] if document_title else None,
-                )
-                for result in (rag_resp.get("results") or []):
-                    text = (result.get("text") or "")[:300]
-                    source = result.get("source", "")
-                    filename = source.split("/")[-1]
-                    if document_title and document_title.lower() not in filename.lower():
-                        continue
-                    if case_sensitive and pattern not in text:
-                        continue
-                    if not case_sensitive and pattern.lower() not in text.lower():
-                        continue
-                    if filename in seen_titles:
-                        continue
-                    seen_titles.add(filename)
-                    matches.append({
-                        "document_id": result.get("id", ""),
-                        "document_title": filename,
-                        "chunk_index": result.get("chunk_index", 0),
-                        "snippet": text,
-                        "match_count": text.lower().count(pattern.lower()),
-                    })
-                    if len(matches) >= top_k:
-                        break
 
         return {
             "pattern": pattern,

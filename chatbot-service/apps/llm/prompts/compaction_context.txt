@@ -1,0 +1,5 @@
+Previous conversation summary:
+{summary}
+
+Key facts from earlier context:
+{facts}

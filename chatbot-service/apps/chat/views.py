@@ -100,8 +100,14 @@ class ChatDetailView(LoginRequiredMixin, DetailView):
                 metadata={"thinking_mode": form.cleaned_data.get("thinking_mode", False)},
             )
             attachments = []
-            add_to_knowledge = form.cleaned_data.get("add_to_knowledge", False)
-            for file in form.cleaned_data.get("attachment", []):
+            knowledge_indices = set()
+            raw = form.cleaned_data.get("knowledge_indices", "")
+            if raw:
+                try:
+                    knowledge_indices = set(int(i) for i in raw.split(",") if i.strip())
+                except (ValueError, TypeError):
+                    pass
+            for idx, file in enumerate(form.cleaned_data.get("attachment", [])):
                 import hashlib
                 sha256 = hashlib.sha256(file.read()).hexdigest()
                 file.seek(0)
@@ -114,7 +120,7 @@ class ChatDetailView(LoginRequiredMixin, DetailView):
                     "size_bytes": file.size,
                     "sha256": sha256,
                 }
-                if add_to_knowledge:
+                if idx in knowledge_indices:
                     doc_ref = self._ingest_attachment(request.user, file, path, sha256)
                     if doc_ref:
                         att["document_ref_id"] = str(doc_ref.id)

@@ -5,15 +5,27 @@
 #
 # Usage:
 #   bash deploy-local-others.sh
-#   bash deploy-local-others.sh --clean   # tear down and restart
+#   bash deploy-local-others.sh --clean
+#   bash deploy-local-others.sh --no-healthcheck
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 MODEL_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)/models"
+NO_HEALTHCHECK="${NO_HEALTHCHECK:-false}"
 
-if [[ "$*" == *"--clean"* ]]; then
-  echo "Removing support containers..."
-  docker rm -f rag-text-embed rag-multimodal-embed rag-reranker rag-ocr 2>/dev/null || true
+for arg in "$@"; do
+  case "$arg" in
+    --clean) echo "Removing support containers..."; docker rm -f rag-text-embed rag-multimodal-embed rag-reranker rag-ocr 2>/dev/null || true ;;
+    --no-healthcheck) NO_HEALTHCHECK=true ;;
+  esac
+done
+
+HEALTH_ARGS=(
+  --health-cmd='python3 -c "import urllib.request; urllib.request.urlopen(\"http://localhost:8000/health\")" 2>/dev/null && echo ok'
+  --health-interval=15s --health-timeout=10s --health-retries=20 --health-start-period=60s
+)
+if $NO_HEALTHCHECK; then
+  HEALTH_ARGS=()
 fi
 
 echo "Starting Text Embedding Server (GPU 0)..."
@@ -24,8 +36,7 @@ docker run -d \
   --shm-size=16g \
   -v "$MODEL_DIR/llama-embed-nemotron-8b:/model" \
   -p 8090:8000 \
-  --health-cmd='python3 -c "import urllib.request; urllib.request.urlopen(\"http://localhost:8000/health\")" 2>/dev/null && echo ok' \
-  --health-interval=15s --health-timeout=10s --health-retries=20 --health-start-period=60s \
+  "${HEALTH_ARGS[@]}" \
   vllm/vllm-openai:latest \
   --model /model \
   --trust-remote-code \
@@ -40,8 +51,7 @@ docker run -d \
   --shm-size=16g \
   -v "$MODEL_DIR/nemotron-colembed-vl-8b-v2:/model" \
   -p 8091:8000 \
-  --health-cmd='python3 -c "import urllib.request; urllib.request.urlopen(\"http://localhost:8000/health\")" 2>/dev/null && echo ok' \
-  --health-interval=15s --health-timeout=10s --health-retries=20 --health-start-period=60s \
+  "${HEALTH_ARGS[@]}" \
   vllm/vllm-openai:latest \
   --model /model \
   --trust-remote-code \
@@ -59,8 +69,7 @@ docker run -d \
   --shm-size=16g \
   -v "$MODEL_DIR/Qwen3-VL-Reranker-2B:/model" \
   -p 8092:8000 \
-  --health-cmd='python3 -c "import urllib.request; urllib.request.urlopen(\"http://localhost:8000/health\")" 2>/dev/null && echo ok' \
-  --health-interval=15s --health-timeout=10s --health-retries=20 --health-start-period=60s \
+  "${HEALTH_ARGS[@]}" \
   vllm/vllm-openai:latest \
   --model /model \
   --trust-remote-code \
@@ -76,8 +85,7 @@ docker run -d \
   --gpus '"device=2"' \
   --shm-size=16g \
   -p 8093:8000 \
-  --health-cmd='python3 -c "import urllib.request; urllib.request.urlopen(\"http://localhost:8000/health\")" 2>/dev/null && echo ok' \
-  --health-interval=15s --health-timeout=10s --health-retries=20 --health-start-period=60s \
+  "${HEALTH_ARGS[@]}" \
   vllm/vllm-openai:latest \
   --model PaddlePaddle/PaddleOCR-VL-1.6 \
   --trust-remote-code \
@@ -87,12 +95,14 @@ docker run -d \
   --mm-processor-cache-gb 0
 
 # ── Wait for health ──────────────────────────────────────────────────────
-bash "$SCRIPT_DIR/wait-health.sh" \
-  "chat-llm=http://localhost:8430/health" \
-  "text-embed=http://localhost:8090/health" \
-  "mm-embed=http://localhost:8091/health" \
-  "reranker=http://localhost:8092/health" \
-  "paddleocr=http://localhost:8093/health"
+if ! $NO_HEALTHCHECK; then
+  bash "$SCRIPT_DIR/wait-health.sh" \
+    "chat-llm=http://localhost:8430/health" \
+    "text-embed=http://localhost:8090/health" \
+    "mm-embed=http://localhost:8091/health" \
+    "reranker=http://localhost:8092/health" \
+    "paddleocr=http://localhost:8093/health"
+fi
 
 # ── Detect embedding dimensions ──────────────────────────────────────────
 detect_dim() {

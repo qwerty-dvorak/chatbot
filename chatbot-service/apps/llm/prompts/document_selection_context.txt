@@ -1,0 +1,4 @@
+Document selection for this turn:
+{selection}
+
+These document names were resolved by the application. They define retrieval scope only; do not call a tool for the @mentions.

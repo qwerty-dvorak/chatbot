@@ -24,16 +24,19 @@ if [[ -f "$ENV_FILE" ]]; then
   set +a
 fi
 
+NO_HEALTHCHECK="${NO_HEALTHCHECK:-false}"
 for arg in "$@"; do
   case "$arg" in
-    --clean)    CLEAN=true ;;
-    --mode=*)   MODE="${arg#*=}" ;;
+    --clean)           CLEAN=true ;;
+    --mode=*)          MODE="${arg#*=}" ;;
+    --no-healthcheck)  NO_HEALTHCHECK=true ;;
     --help|-h)
-      echo "Usage: bash start.sh [--clean] [--mode local|runpod]"
+      echo "Usage: bash start.sh [--clean] [--mode local|runpod] [--no-healthcheck]"
       echo ""
-      echo "  --clean        Tear down and restart"
-      echo "  --mode local   Start with local GPU (default if no .env)"
-      echo "  --mode runpod  Start with RunPod cloud GPU"
+      echo "  --clean           Tear down and restart"
+      echo "  --mode local      Start with local GPU (default if no .env)"
+      echo "  --mode runpod     Start with RunPod cloud GPU"
+      echo "  --no-healthcheck  Skip all model HTTP health checks"
       exit 0 ;;
   esac
 done
@@ -72,6 +75,8 @@ $CLEAN && bash "$SCRIPT_DIR/db/clear.sh" 2>/dev/null || true
 bash "$SCRIPT_DIR/db/start.sh"
 
 # Step 2: Deploy models
+export NO_HEALTHCHECK
+
 echo ""
 echo "═══ Step 2: Deploy models ($MODE) ═══"
 if [[ "$MODE" == "RUNPOD" ]]; then

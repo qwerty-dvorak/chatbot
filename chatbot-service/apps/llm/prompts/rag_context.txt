@@ -1,0 +1,2 @@
+Relevant knowledge base results retrieved before this response:
+{results}

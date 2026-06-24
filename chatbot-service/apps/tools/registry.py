@@ -40,13 +40,12 @@ class ToolRegistry:
             return []
 
         rag_enabled = getattr(django_settings, "RAG_ENABLED", True)
-        rag_prefixes = ("rag.", "knowledge.")
 
         schemas = []
         for tool in self.get_enabled():
             if tool.name in CONTEXT_ONLY_TOOLS:
                 continue
-            if not rag_enabled and any(tool.name.startswith(p) for p in rag_prefixes):
+            if not rag_enabled and tool.name in ("rag.search", "rag.ingest", "knowledge.ingest_status"):
                 continue
             if not self._is_permitted(tool, user):
                 continue

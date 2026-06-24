@@ -19,7 +19,7 @@ class MessageForm(forms.Form):
     )
     attachment = MultipleFileField(required=False, widget=MultipleFileInput)
     thinking_mode = forms.BooleanField(required=False)
-    add_to_knowledge = forms.BooleanField(required=False)
+    knowledge_indices = forms.CharField(required=False)
 
     def clean(self):
         cleaned = super().clean()

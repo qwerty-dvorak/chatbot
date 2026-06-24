@@ -7,10 +7,11 @@
 #   export HF_TOKEN=hf_...
 #
 # Usage:
-#   bash deploy-runpod.sh               # deploy missing pods + wait for readiness
-#   bash deploy-runpod.sh --no-wait     # deploy missing pods only
-#   bash deploy-runpod.sh --clean       # teardown first then deploy
-#   bash deploy-runpod.sh --refresh-env # just re-detect existing pods and rewrite .env
+#   bash deploy-runpod.sh                   # deploy missing pods + wait for readiness
+#   bash deploy-runpod.sh --no-wait         # deploy missing pods only (no RUNNING wait, no health check)
+#   bash deploy-runpod.sh --no-healthcheck  # deploy + wait for RUNNING, skip HTTP health check
+#   bash deploy-runpod.sh --clean           # teardown first then deploy
+#   bash deploy-runpod.sh --refresh-env     # just re-detect existing pods and rewrite .env
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -19,8 +20,12 @@ TS=$(date +%s)
 GPU_ID="${GPU_ID:-NVIDIA GeForce RTX 4090}"
 CLOUD_TYPE="${CLOUD_TYPE:-community}"
 NO_WAIT=false
+NO_HEALTHCHECK="${NO_HEALTHCHECK:-false}"
 REFRESH_ENV=false
-[[ "${1:-}" == "--no-wait" ]] && NO_WAIT=true
+for arg in "$@"; do
+  [[ "$arg" == "--no-wait" ]] && NO_WAIT=true
+  [[ "$arg" == "--no-healthcheck" ]] && NO_HEALTHCHECK=true
+done
 [[ "$*" == *"--refresh-env"* ]] && REFRESH_ENV=true
 
 if [[ "$*" == *"--clean"* ]]; then
@@ -324,12 +329,14 @@ MM_URL="https://${MM_POD}-8000.proxy.runpod.net"
 RERANKER_URL="https://${RERANKER_POD}-8000.proxy.runpod.net"
 OCR_URL="https://${OCR_POD}-8000.proxy.runpod.net"
 
-bash "$SCRIPT_DIR/wait-health.sh" \
-  "chat-llm=$CHAT_URL/health" \
-  "text-embed=$TEXT_URL/health" \
-  "mm-embed=$MM_URL/health" \
-  "reranker=$RERANKER_URL/health" \
-  "paddleocr=$OCR_URL/health"
+if ! $NO_HEALTHCHECK; then
+  bash "$SCRIPT_DIR/wait-health.sh" \
+    "chat-llm=$CHAT_URL/health" \
+    "text-embed=$TEXT_URL/health" \
+    "mm-embed=$MM_URL/health" \
+    "reranker=$RERANKER_URL/health" \
+    "paddleocr=$OCR_URL/health"
+fi
 
 # Detect embedding dimensions
 detect_dim() {

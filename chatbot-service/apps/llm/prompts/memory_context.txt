@@ -1,0 +1,2 @@
+The following are saved memories about the user:
+{memories}
