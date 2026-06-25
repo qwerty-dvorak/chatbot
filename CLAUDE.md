@@ -129,6 +129,7 @@ pg_hba.conf      →  host chatbot chatbot <client-ip>/32 md5
 - **No Docker Compose** — services are started with plain `docker run` commands or
   native processes.
 - **Python images** always use `FROM ubuntu:24.04` as base; dependencies managed with `uv`.
+<<<<<<< Updated upstream
 - **Reproducible uv resolution** — every `pyproject.toml` contains `[tool.uv]` with
   `exclude-newer = "2025-10-23T12:36:00Z"`.
 - **Milvus** is the vector store, started via `milvus/start.sh`.
@@ -136,6 +137,11 @@ pg_hba.conf      →  host chatbot chatbot <client-ip>/32 md5
 - **Adding Python dependencies** — always use `uv add <package>` inside the relevant
   subdirectory (`chatbot-service/` or `rag-pipeline/`). Never edit `pyproject.toml`
   or `uv.lock` manually.
+=======
+- **Milvus** is the vector store, started via `rag-pipeline/start-services.sh`.
+- **PostgreSQL 16** runs embedded inside the chatbot-service Docker image.
+- **Adding Python dependencies** — always use `uv add <package>` inside the relevant subdirectory (`chatbot-service/` or `rag-pipeline/`). Never edit `pyproject.toml` or `uv.lock` manually. Every `pyproject.toml` must have `[tool.uv]` with `exclude-newer = "2025-10-23T12:36:00Z"` to pin to a stable package snapshot.
+>>>>>>> Stashed changes
 
 ## Docker source configuration
 

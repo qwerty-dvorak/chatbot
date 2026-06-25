@@ -140,6 +140,10 @@ def bm25_search(
 ) -> list[SearchResult]:
     """BM25 sparse search using the persisted index.
 
+    Returns an empty list (instead of raising) when no BM25 index has been
+    built yet — this happens on a fresh deployment before any documents are
+    ingested.
+
     Tokenizes query the same way as indexing: query.lower().split().
     Returns SearchResult list with retrieval_method="bm25".
     """
@@ -188,13 +192,19 @@ def _rrf_fusion(
 ) -> list[SearchResult]:
     """Reciprocal Rank Fusion across multiple ranked result lists.
 
-    score(d) = sum(1 / (k + rank_i(d))) for each list that contains d.
-    Returns merged list sorted by fused score descending, with retrieval_method="hybrid".
+    score(d) = sum(weight_i / (k + rank_i(d))) for each list that contains d.
+
+    weights must have the same length as results_lists.  Defaults to uniform
+    weights (1.0 per list).  Pass [cfg.hybrid_alpha, 1-cfg.hybrid_alpha] for
+    vector/BM25 fusion with alpha control.
     """
-    # Map chunk id → cumulative RRF score and a representative chunk.
+    if weights is None:
+        weights = [1.0] * len(results_lists)
+
     rrf_scores: dict[str, float] = defaultdict(float)
     chunks_by_id: dict[str, Chunk] = {}
 
+<<<<<<< Updated upstream
     if weights is None:
         weights = [1.0] * len(results_lists)
     if len(weights) != len(results_lists):
@@ -204,6 +214,11 @@ def _rrf_fusion(
         for result in result_list:
             chunk_id = result.chunk.id
             # rank is 0-based; RRF formula uses 1-based rank.
+=======
+    for weight, result_list in zip(weights, results_lists):
+        for result in result_list:
+            chunk_id = result.chunk.id
+>>>>>>> Stashed changes
             rrf_scores[chunk_id] += weight / (k + result.rank + 1)
             if chunk_id not in chunks_by_id:
                 chunks_by_id[chunk_id] = result.chunk
@@ -262,6 +277,10 @@ def hybrid_search(
     vector_results = vector_search(query_embedding, top_k=top_k, extra_filter=extra_filter)
     bm25_results = bm25_search(query, top_k=top_k, source_paths=source_paths)
 
+<<<<<<< Updated upstream
+=======
+    # cfg.hybrid_alpha: 1.0 = pure vector, 0.0 = pure BM25.
+>>>>>>> Stashed changes
     fused = _rrf_fusion(
         [vector_results, bm25_results],
         weights=[cfg.hybrid_alpha, 1.0 - cfg.hybrid_alpha],
@@ -307,42 +326,24 @@ def rerank(
     documents = [r.chunk.text for r in results]
 
     # ------------------------------------------------------------------
-    # Try the vLLM /score endpoint first
+    # POST {reranker_base_url}/score  (vLLM batch scoring format)
+    # queries[i] scores against documents[i] (1-to-1 mapping)
     # ------------------------------------------------------------------
     score_url = f"{cfg.reranker_base_url.rstrip('/')}/score"
     score_payload = {
         "model": cfg.reranker_model,
-        "text_1": [query] * len(results),
-        "text_2": documents,
+        "queries": [query] * len(results),
+        "documents": documents,
     }
 
     response = httpx.post(score_url, json=score_payload, headers=headers, timeout=30)
+    response.raise_for_status()
+    response_data = response.json()
 
-    if response.status_code == 404:
-        # Fall back to the legacy /v1/rerank format (e.g. mock server)
-        rerank_url = f"{cfg.reranker_base_url.rstrip('/')}/v1/rerank"
-        rerank_payload = {
-            "model": cfg.reranker_model,
-            "query": query,
-            "documents": documents,
-            "top_n": top_k,
-        }
-        response = httpx.post(rerank_url, json=rerank_payload, headers=headers, timeout=30)
-        response.raise_for_status()
-        response_data = response.json()
-
-        scored_items = [
-            (item["index"], item.get("relevance_score", 0.0))
-            for item in response_data.get("results", [])
-        ]
-    else:
-        response.raise_for_status()
-        response_data = response.json()
-
-        scored_items = [
-            (item["index"], item.get("score", 0.0))
-            for item in response_data.get("data", [])
-        ]
+    scored_items = [
+        (item["index"], item.get("score", 0.0))
+        for item in response_data.get("data", [])
+    ]
 
     # Sort by score descending (response order is not guaranteed)
     scored_items.sort(key=lambda x: x[1], reverse=True)

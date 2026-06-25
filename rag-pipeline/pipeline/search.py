@@ -13,8 +13,6 @@ import re
 import time
 import uuid
 
-import openai
-
 from .config import cfg
 from .models import Chunk, ChunkType, SearchResult
 from .embed import embed_text
@@ -35,16 +33,22 @@ def search(
     top_k: int | None = None,
     use_reranker: bool = True,
     retrieval_mode: str = "hybrid",
+<<<<<<< Updated upstream
     enhancements: str | list[str] | None = None,
     hierarchical: bool | None = None,
     artifact_sources: list[str] | None = None,
 ) -> tuple[list[SearchResult], dict[str, float]]:
+=======
+    enhancements: list[str] | None = None,
+    use_chatbot_llm: bool = False,
+) -> list[SearchResult]:
+>>>>>>> Stashed changes
     """Full search pipeline.
 
     Steps
     -----
     1. Connect to Milvus.
-    2. Apply query enhancements: ``enhanced_queries = enhance_query(query)``.
+    2. Apply query enhancements: ``enhanced_queries = enhance_query(query, ...)``.
     3. For each enhanced query string:
        a. Build a temporary :class:`~pipeline.models.Chunk` from the query text
           and call :func:`~pipeline.embed.embed_text` to obtain its embedding.
@@ -59,18 +63,17 @@ def search(
           - ``"vector"``  – :func:`~pipeline.retrieve.vector_search`
           - ``"bm25"``    – :func:`~pipeline.retrieve.bm25_search`
           - ``"hybrid"``  – :func:`~pipeline.retrieve.hybrid_search`
-    4. Merge all per-query result lists with Reciprocal Rank Fusion via
-       :func:`~pipeline.retrieve._rrf_fusion`.
+    4. Merge all per-query result lists with Reciprocal Rank Fusion.
     5. Deduplicate by ``chunk.id`` (keep highest score).
     6. Optionally rerank with :func:`~pipeline.retrieve.rerank` using the
        original *query* (not the enhanced variants).
     7. For ``ChunkType.CHILD`` results whose ``parent_id`` is set, attempt to
        fetch the parent chunk from Milvus and store its text in
-       ``chunk.window_text`` (if not already populated).  Errors during
-       parent fetch are silently ignored.
+       ``chunk.window_text`` (if not already populated).
     8. Return the top ``cfg.rerank_top_k`` results (or *top_k* if supplied).
 
     Args:
+<<<<<<< Updated upstream
         query:          The user's search query.
         top_k:          Maximum number of results to return.  Overrides
                         ``cfg.rerank_top_k`` when given.
@@ -80,6 +83,19 @@ def search(
                         summary vectors; stage 2 = document chunks within
                         matched documents).  ``None`` falls back to
                         ``cfg.hierarchical_mode``.
+=======
+        query:            The user's search query.
+        top_k:            Maximum results.  Overrides ``cfg.rerank_top_k``.
+        use_reranker:     Whether to run the reranker after fusion.
+        retrieval_mode:   ``"vector"``, ``"bm25"``, or ``"hybrid"``.
+        enhancements:     Explicit list of enhancement names to apply (e.g.
+                          ``["hyde", "sub_queries"]``).  ``None`` reads from
+                          ``cfg.query_enhancements``.  Pass ``[]`` to disable
+                          all enhancements for instant-tier speed.
+        use_chatbot_llm:  When True, enhancement LLM calls use the chatbot-
+                          service endpoint (``cfg.chatbot_llm_*``).  For
+                          global-tier searches.
+>>>>>>> Stashed changes
 
     Returns:
         Tuple of ``(list[SearchResult], timing_dict)`` where *timing_dict*
@@ -107,6 +123,7 @@ def search(
     effective_top_k = top_k if top_k is not None else cfg.rerank_top_k
     retrieval_k = cfg.retrieval_top_k
 
+<<<<<<< Updated upstream
     if hierarchical is None:
         hierarchical = cfg.hierarchical_mode
 
@@ -117,6 +134,13 @@ def search(
     t0 = _t()
     enhanced_queries = enhance_query(query, enhancements=enhancements)
     timing["enhance_query"] = round(_t() - t0, 4)
+=======
+    enhanced_queries = enhance_query(
+        query,
+        enhancements=enhancements,
+        use_chatbot_llm=use_chatbot_llm,
+    )
+>>>>>>> Stashed changes
 
     # ------------------------------------------------------------------
     # Per-query retrieval
@@ -178,6 +202,7 @@ def search(
             continue
         embedding = embedded[0].embedding
 
+<<<<<<< Updated upstream
         artifact_filter = ""
         if artifact_paths:
             escaped = [p.replace("\\", "\\\\").replace('"', '\\"') for p in artifact_paths]
@@ -228,6 +253,15 @@ def search(
                     source_paths=artifact_paths,
                 )
         t_search_total += _t() - t0
+=======
+        mode = retrieval_mode.lower()
+        if mode == "vector":
+            results = vector_search(embedding, retrieval_k)
+        elif mode == "bm25":
+            results = bm25_search(q_text, retrieval_k)
+        else:
+            results = hybrid_search(q_text, embedding, retrieval_k)
+>>>>>>> Stashed changes
 
         if results:
             all_result_lists.append(results)
@@ -275,6 +309,10 @@ def search(
         if cid not in seen or sr.score > seen[cid].score:
             seen[cid] = sr
     deduped = sorted(seen.values(), key=lambda r: r.score, reverse=True)
+<<<<<<< Updated upstream
+=======
+
+>>>>>>> Stashed changes
     for i, sr in enumerate(deduped):
         sr.rank = i
     timing["dedup"] = round(_t() - t0, 4)
@@ -313,7 +351,10 @@ def search(
                         chunk.window_text = parent_text
             except Exception:  # noqa: BLE001
                 pass
+<<<<<<< Updated upstream
     timing["parent_fetch"] = round(_t() - t0, 4)
+=======
+>>>>>>> Stashed changes
 
     # Exact scoped matches are deterministic evidence and must survive semantic
     # reranking. Place them first, then append non-duplicate semantic results.

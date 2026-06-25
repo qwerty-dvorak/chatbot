@@ -1,26 +1,35 @@
 """Ingestion orchestrator for the RAG pipeline.
 
-Ties together:
-  extract → chunk → (optional hypothetical-question augmentation) → embed → index
+For the three-tier API see :mod:`pipeline.tiers`.  This module keeps the
+original :func:`ingest_path` entry point for backwards compatibility and
+exposes it as a thin wrapper over the tier system (defaulting to SLOW).
 
-The :func:`ingest_path` function is the main entry point.  It accepts a file
-or directory path, processes every supported document it finds, keeps the
-Milvus text collection and BM25 index up-to-date, and returns a stats dict.
+Two-track ingestion for PDF documents (slow / global tiers):
+  Track A (text):  page images → PaddleOCR-VL (OCR) → text chunks
+                   → text embedding → Milvus text collection
+  Track B (image): page images → multimodal embedding (/pooling, image-only)
+                   → Milvus image collection
+
+Instant tier skips both OCR and Track B, using PyMuPDF text extraction only.
+
+The :func:`ingest_path` function is the main entry point for the legacy API.
 """
 
 import hashlib
 import json
 import os
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from tqdm import tqdm
 
 from .config import cfg
-from .models import RawDocument, Chunk, ChunkType, EmbeddedChunk
-from .extract import extract
+from .models import IngestionTier, RawDocument, Chunk, ChunkType, EmbeddedChunk
+from .extract import extract, extract_fast
+from .ocr import ocr_pages
 from .chunk import chunk as chunk_doc
-from .embed import embed_all
+from .embed import embed_text, embed_multimodal
 from .index import (
     connect_milvus,
     index_chunks,
@@ -40,7 +49,6 @@ def _file_md5(path: Path) -> str:
 
 
 def _registry_path() -> str:
-    from .config import cfg
     return os.path.join(
         os.path.dirname(os.path.abspath(cfg.bm25_index_path)),
         "ingested_registry.json",
@@ -77,32 +85,25 @@ def ingest_path(
     strategy: str | None = None,
     add_hypothetical_questions: bool = False,
 ) -> dict:
-    """Ingest all documents from *path* (file or directory).
+    """Ingest all documents from *path* (file or directory) using the SLOW tier.
+
+    This function is kept for backwards compatibility.  New callers should use
+    :func:`pipeline.tiers.ingest_tier` for explicit tier control.
 
     Steps
     -----
     1. Connect to Milvus.
-    2. Collect all file paths to process.  If *path* is a directory every
-       file whose extension is in :data:`_SUPPORTED_EXTENSIONS` is included
-       (recursively).  If *path* is a single file it is processed directly.
+    2. Collect file paths to process (recursive for directories).
     3. For each file:
        a. :func:`~pipeline.extract.extract` → :class:`~pipeline.models.RawDocument`
-       b. :func:`~pipeline.chunk.chunk` → ``list[Chunk]``
-       c. If *add_hypothetical_questions* is ``True``, generate hypothetical
-          questions for every **text** chunk (chunks where ``image_data`` is
-          ``None``) and create a new ``ChunkType.TEXT`` chunk per question
-          whose ``parent_id`` is the originating chunk's id.
-       d. :func:`~pipeline.embed.embed_all` → ``list[EmbeddedChunk]``
-       e. :func:`~pipeline.index.index_chunks` → persisted to Milvus.
-       f. Collect all text chunks for the BM25 index.
-    4. Attempt to load and extend any existing BM25 index; fall back to
-       building a fresh index from this run's chunks alone.
-    5. Save the BM25 index.
-    6. Return a stats dict:
-       ``{"files_processed": n, "chunks_created": n, "embeddings_indexed": n}``
-
-    Errors for individual files are caught, printed, and skipped so that one
-    bad file does not abort the entire run.
+       b. OCR page images concurrently (PDFs only).
+       c. :func:`~pipeline.chunk.chunk` → ``list[Chunk]``
+       d. If *add_hypothetical_questions* is ``True``, generate questions
+          per text chunk and index them as separate chunks.
+       e. :func:`~pipeline.embed.embed_text` + :func:`~pipeline.embed.embed_multimodal`
+       f. :func:`~pipeline.index.index_chunks` → Milvus.
+    4. Build / extend BM25 index.
+    5. Return stats dict.
 
     Args:
         path:                       File or directory path to ingest.
@@ -110,13 +111,12 @@ def ingest_path(
                                     (``"recursive"``, ``"sentence_window"``,
                                     ``"hierarchical"``).  ``None`` uses
                                     ``cfg.chunk_strategy``.
-        add_hypothetical_questions: When ``True``, augment each text chunk
-                                    with LLM-generated hypothetical questions
-                                    at index time.
+        add_hypothetical_questions: Augment each text chunk with LLM-generated
+                                    hypothetical questions at index time.
 
     Returns:
-        Stats dictionary with keys ``files_processed``, ``chunks_created``,
-        and ``embeddings_indexed``.
+        Stats dict: ``files_processed``, ``files_skipped_duplicate``,
+        ``chunks_created``, ``embeddings_indexed``.
     """
     connect_milvus()
 
@@ -137,13 +137,13 @@ def ingest_path(
     all_text_chunks_for_bm25: list[Chunk] = []
 
     for file_path in tqdm(file_paths, desc="Ingesting files", unit="file"):
-        # Skip files that have already been ingested with the same content.
         try:
             file_hash = _file_md5(file_path)
         except OSError:
             file_hash = ""
 
-        registry_key = file_path.name
+        # Use resolved absolute path as registry key to avoid filename collisions
+        registry_key = str(file_path.resolve())
         if registry_key in registry and registry[registry_key].get("hash") == file_hash:
             files_skipped += 1
             continue
@@ -152,13 +152,53 @@ def ingest_path(
             # --- Extract ---
             doc: RawDocument = extract(str(file_path))
 
-            # --- Chunk ---
-            chunks: list[Chunk] = chunk_doc(doc, strategy)
+            page_images = [img for img, _ in doc.images] if doc.images else []
+            ocr_texts: list[str] = []
+            image_chunks_placeholder: list[Chunk] = []
+
+            if page_images:
+                # Track B placeholder chunks (filled after OCR)
+                for i, (img_bytes, _) in enumerate(doc.images):
+                    image_chunks_placeholder.append(Chunk(
+                        id=uuid.uuid4().hex,
+                        source_path=doc.path,
+                        text="",
+                        chunk_type=ChunkType.IMAGE,
+                        metadata={**doc.metadata, "image_index": i,
+                                   "ingestion_tier": IngestionTier.SLOW.value},
+                        image_data=img_bytes,
+                    ))
+
+                # OCR runs concurrently in a background thread
+                with ThreadPoolExecutor(max_workers=1) as ocr_executor:
+                    ocr_future = ocr_executor.submit(ocr_pages, page_images)
+                    ocr_texts = ocr_future.result()
+
+                # Backfill OCR text
+                doc_text = "\n\n".join(t for t in ocr_texts if t)
+                for i, chunk in enumerate(image_chunks_placeholder):
+                    if i < len(ocr_texts):
+                        chunk.text = ocr_texts[i]
+            else:
+                doc_text = doc.text
+
+            # Rebuild doc with full OCR text
+            doc = RawDocument(
+                path=doc.path,
+                content_type=doc.content_type,
+                text=doc_text,
+                images=[],
+                metadata=doc.metadata,
+            )
+
+            # --- Track A: chunk + embed text ---
+            text_chunks: list[Chunk] = chunk_doc(doc, strategy)
+            for c in text_chunks:
+                c.metadata["ingestion_tier"] = IngestionTier.SLOW.value
 
             # --- Optional hypothetical-question augmentation ---
             extra_chunks: list[Chunk] = []
             if add_hypothetical_questions:
-                text_chunks = [c for c in chunks if c.image_data is None]
                 for chunk in text_chunks:
                     if not chunk.text.strip():
                         continue
@@ -172,31 +212,35 @@ def ingest_path(
                                 source_path=chunk.source_path,
                                 text=question,
                                 chunk_type=ChunkType.TEXT,
-                                metadata={**chunk.metadata, "is_hypothetical_question": True},
+                                metadata={**chunk.metadata,
+                                           "is_hypothetical_question": True},
                                 parent_id=chunk.id,
                             )
                         )
 
-            all_chunks = chunks + extra_chunks
+            all_text_chunks = text_chunks + extra_chunks
 
-            # --- Embed ---
-            embedded: list[EmbeddedChunk] = embed_all(all_chunks)
+            # --- Embed both tracks ---
+            embedded_text   = embed_text(all_text_chunks)
+            embedded_images = embed_multimodal(image_chunks_placeholder)
+            embedded: list[EmbeddedChunk] = embedded_text + embedded_images
 
             # --- Index into Milvus ---
             index_chunks(embedded)
 
             # --- Collect text chunks for BM25 ---
-            text_for_bm25 = [c for c in all_chunks if c.image_data is None]
+            text_for_bm25 = [c for c in all_text_chunks if c.image_data is None]
             all_text_chunks_for_bm25.extend(text_for_bm25)
 
+            all_chunks = all_text_chunks + image_chunks_placeholder
             files_processed += 1
-            total_chunks += len(all_chunks)
+            total_chunks    += len(all_chunks)
             total_embeddings += len(embedded)
 
-            # Record in registry so this file is skipped on future runs.
             registry[registry_key] = {
-                "hash": file_hash,
-                "chunks": len(all_chunks),
+                "hash":     file_hash,
+                "tier":     IngestionTier.SLOW.value,
+                "chunks":   len(all_chunks),
                 "strategy": strategy or cfg.chunk_strategy,
             }
             _save_registry(registry)
@@ -216,8 +260,9 @@ def ingest_path(
         build_bm25_index(combined_chunks)
 
     return {
-        "files_processed": files_processed,
+        "files_processed":       files_processed,
         "files_skipped_duplicate": files_skipped,
+<<<<<<< Updated upstream
         "chunks_created": total_chunks,
         "embeddings_indexed": total_embeddings,
         "embedding_info": {
@@ -225,4 +270,8 @@ def ingest_path(
             "dimension": cfg.text_embedding_dim,
             "collection": cfg.text_collection,
         },
+=======
+        "chunks_created":        total_chunks,
+        "embeddings_indexed":    total_embeddings,
+>>>>>>> Stashed changes
     }

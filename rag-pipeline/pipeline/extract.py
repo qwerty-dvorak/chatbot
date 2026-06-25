@@ -1,20 +1,15 @@
-import io
 from pathlib import Path
 
-from PIL import Image
-import pypdf
+import fitz  # PyMuPDF
 
+from .config import cfg
 from .models import ContentType, RawDocument
 
-# Extensions treated as plain text
 _TEXT_EXTENSIONS = {".txt", ".md", ".rst"}
-
-# Extensions treated as images
 _IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"}
 
 
 def _extract_text(path: Path) -> RawDocument:
-    """Read a plain-text file."""
     text = path.read_text(encoding="utf-8", errors="replace")
     metadata = {
         "filename": path.name,
@@ -30,72 +25,42 @@ def _extract_text(path: Path) -> RawDocument:
     )
 
 
-def _page_to_png_bytes(page: pypdf.PageObject) -> bytes:
-    """Render a pypdf page to PNG bytes via PIL.
-
-    pypdf >= 4 exposes ``page.images`` which yields ``ImageFile`` objects
-    whose ``.data`` attribute holds the raw compressed image bytes.  We
-    decode the first available image on the page and re-encode it as PNG so
-    the caller always receives a consistent format.
-
-    Returns an empty ``bytes`` object when no renderable image is found.
-    """
-    try:
-        page_images = list(page.images)
-    except Exception:
-        return b""
-
-    if not page_images:
-        return b""
-
-    # Composite all images on the page into one PNG by using the first image.
-    # For richer rendering, callers may replace this with a pdf2image-based
-    # approach; we stay stdlib-adjacent here.
-    try:
-        raw_data = page_images[0].data
-        img = Image.open(io.BytesIO(raw_data))
-        buf = io.BytesIO()
-        img.save(buf, format="PNG")
-        return buf.getvalue()
-    except Exception:
-        return b""
-
-
 def _extract_pdf(path: Path) -> RawDocument:
-    """Extract text and images from a PDF file."""
-    reader = pypdf.PdfReader(str(path))
-    pages_text: list[str] = []
-    images: list[bytes] = []
+    """Render each PDF page as a PNG image at cfg.ocr_pdf_dpi.
 
-    for page in reader.pages:
-        # Text
+    Text is left empty — OCR happens in the ingest pipeline via PaddleOCR-VL.
+    Each element of images is (png_bytes, ""), page text populated later by OCR.
+    """
+    doc = fitz.open(str(path))
+    images: list[tuple[bytes, str]] = []
+    matrix = fitz.Matrix(cfg.ocr_pdf_dpi / 72, cfg.ocr_pdf_dpi / 72)
+
+    for page in doc:
         try:
-            page_text = page.extract_text() or ""
+            pix = page.get_pixmap(matrix=matrix, alpha=False)
+            images.append((pix.tobytes("png"), ""))
         except Exception:
-            page_text = ""
-        pages_text.append(page_text)
+            images.append((b"", ""))
 
-        # Images — best-effort; silently skip on any error
-        png_bytes = _page_to_png_bytes(page)
-        if png_bytes:
-            images.append(png_bytes)
+    page_count = doc.page_count
+    doc.close()
 
-    text = "\n\n".join(pages_text)
     metadata = {
         "filename": path.name,
         "extension": path.suffix.lower(),
         "size_bytes": path.stat().st_size,
-        "page_count": len(reader.pages),
+        "page_count": page_count,
     }
     return RawDocument(
         path=str(path),
         content_type=ContentType.PDF,
-        text=text,
+        text="",
         images=images,
         metadata=metadata,
     )
 
 
+<<<<<<< Updated upstream
 def _extract_pdf_text_only(path: Path) -> RawDocument:
     """Extract a PDF text layer without enumerating embedded images."""
     reader = pypdf.PdfReader(str(path))
@@ -116,11 +81,80 @@ def _extract_pdf_text_only(path: Path) -> RawDocument:
             "size_bytes": path.stat().st_size,
             "page_count": len(reader.pages),
         },
+=======
+def _extract_pdf_at_dpi(path: Path, dpi: int) -> RawDocument:
+    """Render each PDF page as a PNG at an explicit *dpi*, ignoring cfg.ocr_pdf_dpi."""
+    doc = fitz.open(str(path))
+    images: list[tuple[bytes, str]] = []
+    matrix = fitz.Matrix(dpi / 72, dpi / 72)
+
+    for page in doc:
+        try:
+            pix = page.get_pixmap(matrix=matrix, alpha=False)
+            images.append((pix.tobytes("png"), ""))
+        except Exception:
+            images.append((b"", ""))
+
+    page_count = doc.page_count
+    doc.close()
+
+    metadata = {
+        "filename": path.name,
+        "extension": path.suffix.lower(),
+        "size_bytes": path.stat().st_size,
+        "page_count": page_count,
+    }
+    return RawDocument(
+        path=str(path),
+        content_type=ContentType.PDF,
+        text="",
+        images=images,
+        metadata=metadata,
+    )
+
+
+def _extract_pdf_fast(path: Path) -> RawDocument:
+    """Extract text from a PDF using PyMuPDF's built-in text layer — no OCR, no images.
+
+    Suitable for the instant tier where latency matters more than quality.
+    For scanned PDFs with no text layer, the returned text will be empty or
+    sparse; callers should fall back to OCR-based extraction in that case.
+
+    Returns a RawDocument with ``images=[]`` so the ingest pipeline skips
+    both Track B (multimodal embedding) and OCR.
+    """
+    doc = fitz.open(str(path))
+    pages_text: list[str] = []
+
+    for page in doc:
+        try:
+            t = page.get_text("text")
+            pages_text.append(t)
+        except Exception:
+            pages_text.append("")
+
+    full_text = "\n\n".join(t for t in pages_text if t.strip())
+    page_count = doc.page_count
+    doc.close()
+
+    metadata = {
+        "filename": path.name,
+        "extension": path.suffix.lower(),
+        "size_bytes": path.stat().st_size,
+        "page_count": page_count,
+        "extraction_method": "pymupdf_text",
+    }
+    return RawDocument(
+        path=str(path),
+        content_type=ContentType.PDF,
+        text=full_text,
+        images=[],
+        metadata=metadata,
+>>>>>>> Stashed changes
     )
 
 
 def _extract_image(path: Path) -> RawDocument:
-    """Read an image file as raw bytes; no text extraction."""
     raw_bytes = path.read_bytes()
     metadata = {
         "filename": path.name,
@@ -131,18 +165,17 @@ def _extract_image(path: Path) -> RawDocument:
         path=str(path),
         content_type=ContentType.IMAGE,
         text="",
-        images=[raw_bytes],
+        images=[(raw_bytes, "")],
         metadata=metadata,
     )
 
 
 def extract(path: str) -> RawDocument:
-    """Detect file type by extension and extract text + images.
+    """Detect file type and extract content.
 
-    Supported types:
-    - ``.txt``, ``.md``, ``.rst`` — plain text, no images
-    - ``.pdf``                    — text via pypdf; images from page.images (pypdf >= 4)
-    - ``.png``, ``.jpg``, ``.jpeg``, ``.gif``, ``.bmp``, ``.webp`` — raw bytes, no text
+    - ``.txt``, ``.md``, ``.rst`` — plain text read directly
+    - ``.pdf``                    — pages rendered as PNG images (OCR happens in ingest)
+    - image extensions            — raw bytes, no text
     - everything else             — treated as plain text
     """
     p = Path(path)
@@ -155,7 +188,25 @@ def extract(path: str) -> RawDocument:
     if ext in _IMAGE_EXTENSIONS:
         return _extract_image(p)
 
-    # Unknown extension — fall back to plain-text extraction
+    return _extract_text(p)
+
+
+def extract_fast(path: str) -> RawDocument:
+    """Extract content with minimal latency — suitable for instant-tier ingestion.
+
+    PDFs use PyMuPDF's text layer instead of rendering + OCR.  Images and
+    text files are handled identically to :func:`extract`.
+    """
+    p = Path(path)
+    ext = p.suffix.lower()
+
+    if ext in _TEXT_EXTENSIONS:
+        return _extract_text(p)
+    if ext == ".pdf":
+        return _extract_pdf_fast(p)
+    if ext in _IMAGE_EXTENSIONS:
+        return _extract_image(p)
+
     return _extract_text(p)
 
 

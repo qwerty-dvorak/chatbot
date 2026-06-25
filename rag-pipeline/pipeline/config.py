@@ -38,6 +38,13 @@ class Config:
     ocr_max_image_height: int = field(default_factory=lambda: int(os.getenv("OCR_MAX_IMAGE_HEIGHT", "2400")))
     ocr_languages: str = field(default_factory=lambda: os.getenv("OCR_LANGUAGES", "eng"))
 
+    # OCR endpoint (PaddleOCR-VL via vLLM /v1/chat/completions)
+    ocr_base_url: str = field(default_factory=lambda: os.getenv("OCR_BASE_URL", "http://localhost:9004/v1"))
+    ocr_api_key: str = field(default_factory=lambda: os.getenv("OCR_API_KEY", "mock"))
+    ocr_model: str = field(default_factory=lambda: os.getenv("OCR_MODEL", "PaddlePaddle/PaddleOCR-VL-1.6"))
+    # DPI for PDF page rendering (higher = better OCR quality, larger images)
+    ocr_pdf_dpi: int = field(default_factory=lambda: int(os.getenv("OCR_PDF_DPI", "150")))
+
     # Milvus
     milvus_host: str = field(default_factory=lambda: os.getenv("MILVUS_HOST", "localhost"))
     milvus_port: int = field(default_factory=lambda: int(os.getenv("MILVUS_PORT", "19530")))
@@ -83,6 +90,14 @@ class Config:
 
     # Object store (local file-system, content-addressed)
     object_store_path: str = field(default_factory=lambda: os.getenv("OBJECT_STORE_PATH", "./data/object_store"))
+
+    # Chatbot-service LLM endpoint — used for query enhancements in global-tier
+    # search (HyDE, sub-queries, stepback).  Point this at the same LLM that
+    # chatbot-service/apps/llm/clients.py uses (i.e. the real vLLM, not the mock).
+    # Falls back to chat_base_url/chat_model when unset.
+    chatbot_llm_base_url: str = field(default_factory=lambda: os.getenv("CHATBOT_LLM_BASE_URL", ""))
+    chatbot_llm_api_key: str  = field(default_factory=lambda: os.getenv("CHATBOT_LLM_API_KEY",  ""))
+    chatbot_llm_model: str    = field(default_factory=lambda: os.getenv("CHATBOT_LLM_MODEL",    ""))
 
     def __post_init__(self) -> None:
         # Validate numeric bounds that would cause confusing downstream errors

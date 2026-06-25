@@ -3,7 +3,25 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 
+class IngestionTier(str, Enum):
+    """Processing depth for document ingestion.
+
+    INSTANT — text-only, no OCR, no multimodal embedding.  Target: < 2 s per
+              page.  For chat-session file uploads that need immediate RAG.
+    SLOW    — full OCR + both text and multimodal embedding for one file.
+              Includes HyDE at search time and light hypothetical-question
+              augmentation at index time.
+    GLOBAL  — batch-mode, maximum quality.  Hierarchical chunking, full
+              hypothetical-question augmentation, all query enhancements
+              (HyDE + sub-queries + stepback) using the chatbot-service LLM.
+    """
+    INSTANT = "instant"
+    SLOW    = "slow"
+    GLOBAL  = "global"
+
+
 class ChunkType(str, Enum):
+<<<<<<< Updated upstream
     TEXT = "text"
     IMAGE = "image"
     PARENT = "parent"
@@ -17,6 +35,14 @@ class IngestionTier(str, Enum):
     INSTANT = "instant"
     SLOW = "slow"
     GLOBAL = "global"
+=======
+    TEXT            = "text"
+    IMAGE           = "image"            # page image from PDF or standalone image file
+    PARENT          = "parent"
+    CHILD           = "child"
+    SENTENCE_WINDOW = "sentence_window"
+    SUMMARY         = "summary"
+>>>>>>> Stashed changes
 
 
 class ContentType(str, Enum):
@@ -30,7 +56,7 @@ class RawDocument:
     path: str
     content_type: ContentType
     text: str                              # full extracted text
-    images: list[bytes] = field(default_factory=list)  # raw PNG/JPEG bytes per page/image
+    images: list[tuple[bytes, str]] = field(default_factory=list)  # (raw bytes, page text)
     metadata: dict = field(default_factory=dict)
 
 

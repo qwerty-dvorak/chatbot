@@ -1,26 +1,34 @@
 """Embedding layer for the RAG pipeline.
 
-Provides three public functions:
+Model: nvidia/nemotron-colembed-vl-8b-v2 (Qwen3VLNemotronEmbedModel)
+Supports T (text-only) OR I (image-only) inputs — not combined text+image.
 
-* :func:`embed_text`       – batch-embed text chunks via the text embedding model
-* :func:`embed_multimodal` – batch-embed image chunks via the multimodal model
-* :func:`embed_all`        – dispatch text/image chunks to the right function
+Public functions:
+  embed_text(chunks)       – batch text embedding via litellm /v1/embeddings
+  embed_multimodal(chunks) – image embedding via /pooling with multi_modal_data
+  embed_all(chunks)        – routes text chunks to embed_text, image chunks to embed_multimodal
 """
 
 import base64
 import logging
+<<<<<<< Updated upstream
 import os
 import time
+=======
+from concurrent.futures import ThreadPoolExecutor, as_completed
+>>>>>>> Stashed changes
 
 import httpx
-import openai
+import litellm
 
 from .config import cfg
 from .models import Chunk, EmbeddedChunk
 
 logger = logging.getLogger(__name__)
 
+litellm.suppress_debug_info = True
 
+<<<<<<< Updated upstream
 def _env_int(name: str, default: int) -> int:
     try:
         return max(1, int(os.getenv(name, str(default))))
@@ -53,17 +61,33 @@ def _text_client() -> openai.OpenAI:
     )
 
 
+=======
+# Keep at 2: vLLM L4 can handle 2 concurrent requests before throughput degrades.
+_EMBED_CONCURRENCY = 2
+
+
+def _mean_pool(token_vectors: list[list[float]]) -> list[float]:
+    if not token_vectors:
+        return []
+    dim = len(token_vectors[0])
+    pooled = [0.0] * dim
+    for vec in token_vectors:
+        for i, v in enumerate(vec):
+            pooled[i] += v
+    return [v / len(token_vectors) for v in pooled]
+
+
+>>>>>>> Stashed changes
 # ---------------------------------------------------------------------------
 # Multimodal helpers
 # ---------------------------------------------------------------------------
 
 def _image_to_data_url(image_bytes: bytes) -> str:
-    """Try to detect image format and return base64 data URL."""
-    # Detect PNG vs JPEG by magic bytes
-    if image_bytes[:8] == b'\x89PNG\r\n\x1a\n':
+    if image_bytes[:8] == b"\x89PNG\r\n\x1a\n":
         mime = "image/png"
-    else:
+    elif image_bytes[:2] == b"\xff\xd8":
         mime = "image/jpeg"
+<<<<<<< Updated upstream
     b64 = base64.b64encode(image_bytes).decode()
     return f"data:{mime};base64,{b64}"
 
@@ -85,13 +109,25 @@ def _pool_multimodal(input_payload, use_messages: bool = False) -> list[float]:
         payload["messages"] = input_payload
     else:
         payload["input"] = input_payload
+=======
+    else:
+        # JPEG2000 and anything else — send as JPEG; vLLM will handle it
+        mime = "image/jpeg"
+    return f"data:{mime};base64,{base64.b64encode(image_bytes).decode()}"
+
+
+def _pooling_text(text: str) -> list[float]:
+    """Embed text-only input via /pooling (T mode)."""
+    url = f"{cfg.multimodal_embedding_base_url.rstrip('/')}/pooling"
+>>>>>>> Stashed changes
     resp = httpx.post(
         url,
-        json=payload,
+        json={"model": cfg.multimodal_embedding_model, "input": text},
         headers={"Authorization": f"Bearer {cfg.multimodal_embedding_api_key}"},
         timeout=60,
     )
     resp.raise_for_status()
+<<<<<<< Updated upstream
 
     token_vectors = resp.json()["data"][0]["data"]
     if not token_vectors:
@@ -140,6 +176,29 @@ def _embed_multimodal_single(chunk: Chunk) -> list[float]:
     else:
         # Text-only: plain string via PoolingCompletionRequest
         return _pool_multimodal(text)
+=======
+    return _mean_pool(resp.json()["data"][0]["data"])
+
+
+def _pooling_image(image_bytes: bytes) -> list[float]:
+    """Embed image-only input via /pooling with multi_modal_data (I mode).
+
+    Sends '<image>' as the text placeholder; vLLM substitutes the actual image tokens.
+    """
+    url = f"{cfg.multimodal_embedding_base_url.rstrip('/')}/pooling"
+    resp = httpx.post(
+        url,
+        json={
+            "model": cfg.multimodal_embedding_model,
+            "input": "<image>",
+            "multi_modal_data": {"image": [_image_to_data_url(image_bytes)]},
+        },
+        headers={"Authorization": f"Bearer {cfg.multimodal_embedding_api_key}"},
+        timeout=60,
+    )
+    resp.raise_for_status()
+    return _mean_pool(resp.json()["data"][0]["data"])
+>>>>>>> Stashed changes
 
 
 # ---------------------------------------------------------------------------
@@ -272,7 +331,24 @@ def _embed_text_batch_resilient(
         return left + right, left_tokens + right_tokens
 
 
+def _embed_batch(batch: list[Chunk]) -> list[EmbeddedChunk]:
+    inputs = [c.text for c in batch]
+    # TEXT_EMBEDDING_MODEL must already carry the litellm provider prefix, e.g.
+    # "openai/nvidia/llama-embed-nemotron-8b" for a vLLM endpoint.
+    response = litellm.embedding(
+        model=cfg.text_embedding_model,
+        input=inputs,
+        api_base=cfg.embedding_base_url,
+        api_key=cfg.embedding_api_key,
+    )
+    return [
+        EmbeddedChunk(chunk=chunk, embedding=obj["embedding"], is_multimodal=False)
+        for chunk, obj in zip(batch, response.data)
+    ]
+
+
 def embed_text(chunks: list[Chunk], batch_size: int = 32) -> list[EmbeddedChunk]:
+<<<<<<< Updated upstream
     """Embed text chunks using the text embedding model.
 
     Chunks that carry ``image_data`` are skipped — they belong to
@@ -288,12 +364,23 @@ def embed_text(chunks: list[Chunk], batch_size: int = 32) -> list[EmbeddedChunk]
         One :class:`~pipeline.models.EmbeddedChunk` per text chunk, in the
         same order as the input (after image chunks have been filtered out).
     """
+=======
+    """Batch-embed text chunks via the text embedding model (litellm → /v1/embeddings)."""
+>>>>>>> Stashed changes
     text_only = [c for c in chunks if c.image_data is None]
     if not text_only:
         return []
 
-    client = _text_client()
+    batches = [text_only[i : i + batch_size] for i in range(0, len(text_only), batch_size)]
+    ordered: dict[int, list[EmbeddedChunk]] = {}
+
+    with ThreadPoolExecutor(max_workers=_EMBED_CONCURRENCY) as executor:
+        futures = {executor.submit(_embed_batch, batch): idx for idx, batch in enumerate(batches)}
+        for future in as_completed(futures):
+            ordered[futures[future]] = future.result()
+
     results: list[EmbeddedChunk] = []
+<<<<<<< Updated upstream
     t0 = time.time()
     total_tokens = 0
 
@@ -312,31 +399,49 @@ def embed_text(chunks: list[Chunk], batch_size: int = 32) -> list[EmbeddedChunk]
     total_dur = round(time.time() - t0, 4)
     logger.info("[TIMING] embed_text total %.3fs %d chunks %d tokens",
                 total_dur, len(text_only), total_tokens)
+=======
+    for idx in range(len(batches)):
+        results.extend(ordered[idx])
+>>>>>>> Stashed changes
     return results
 
 
-def embed_multimodal(chunks: list[Chunk], batch_size: int = 16) -> list[EmbeddedChunk]:
-    """Embed image chunks using the multimodal embedding model.
+def _embed_multimodal_chunk(chunk: Chunk) -> EmbeddedChunk | None:
+    """Embed one image chunk via /pooling.
 
-    Only chunks where ``chunk.image_data is not None`` are processed.  Each
-    chunk is sent individually to the vLLM multimodal embeddings endpoint using
-    a structured content input (image_url + optional text).  If the multimodal
-    call fails the chunk falls back to a text-only embedding via the multimodal
-    model.
-
-    Args:
-        chunks:     Chunks to embed.  Text-only chunks are silently skipped.
-        batch_size: Unused (kept for API compatibility; multimodal chunks are
-                    always sent one at a time).
-
-    Returns:
-        One :class:`~pipeline.models.EmbeddedChunk` per image chunk, in the
-        same order as the input (after text chunks have been filtered out).
+    Strategy (T/I model — no combined input):
+      1. Try image-only embedding (I mode) using chunk.image_data.
+      2. Fall back to text-only embedding (T mode) using chunk.text (OCR text).
+      3. Return None if both fail or no content is available.
     """
+    if chunk.image_data:
+        try:
+            embedding = _pooling_image(chunk.image_data)
+            return EmbeddedChunk(chunk=chunk, embedding=embedding, is_multimodal=True)
+        except Exception as exc:
+            logger.warning(
+                "Image embedding failed for chunk %s (%s); trying text fallback.", chunk.id, exc
+            )
+
+    text = (chunk.text or "").strip()
+    if text:
+        try:
+            embedding = _pooling_text(text)
+            return EmbeddedChunk(chunk=chunk, embedding=embedding, is_multimodal=True)
+        except Exception as exc:
+            logger.warning("Text fallback embedding failed for chunk %s (%s); skipping.", chunk.id, exc)
+
+    logger.debug("Skipping image chunk %s — no embeddable content.", chunk.id)
+    return None
+
+
+def embed_multimodal(chunks: list[Chunk]) -> list[EmbeddedChunk]:
+    """Embed image chunks concurrently via the multimodal /pooling endpoint."""
     image_only = [c for c in chunks if c.image_data is not None]
     if not image_only:
         return []
 
+<<<<<<< Updated upstream
     results: list[EmbeddedChunk] = []
     t0 = time.time()
 
@@ -375,21 +480,25 @@ def embed_multimodal(chunks: list[Chunk], batch_size: int = 16) -> list[Embedded
     logger.info("[TIMING] embed_multimodal total %.3fs %d chunks",
                 total_dur, len(image_only))
     return results
+=======
+    ordered: dict[int, EmbeddedChunk | None] = {}
+    with ThreadPoolExecutor(max_workers=_EMBED_CONCURRENCY) as executor:
+        futures = {executor.submit(_embed_multimodal_chunk, chunk): idx
+                   for idx, chunk in enumerate(image_only)}
+        for future in as_completed(futures):
+            idx = futures[future]
+            try:
+                ordered[idx] = future.result()
+            except Exception as exc:
+                logger.warning("Unexpected error embedding image chunk %d: %s", idx, exc)
+                ordered[idx] = None
+
+    return [ordered[i] for i in range(len(image_only)) if ordered[i] is not None]
+>>>>>>> Stashed changes
 
 
 def embed_all(chunks: list[Chunk]) -> list[EmbeddedChunk]:
-    """Embed all chunks, routing each to the appropriate model.
-
-    Text chunks (``image_data is None``) go to :func:`embed_text`;
-    image chunks (``image_data is not None``) go to :func:`embed_multimodal`.
-
-    Args:
-        chunks: Mixed list of text and image chunks.
-
-    Returns:
-        Combined list of embedded chunks — text embeddings first, then image
-        embeddings.
-    """
+    """Route text chunks to embed_text, image chunks to embed_multimodal."""
     text_chunks = [c for c in chunks if c.image_data is None]
     image_chunks = [c for c in chunks if c.image_data is not None]
     return embed_text(text_chunks) + embed_multimodal(image_chunks)

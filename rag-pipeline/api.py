@@ -1,4 +1,10 @@
+<<<<<<< Updated upstream
 import logging
+=======
+import os
+import uuid
+import tempfile
+>>>>>>> Stashed changes
 import shutil
 import uuid
 from contextlib import asynccontextmanager
@@ -13,6 +19,7 @@ from pydantic import BaseModel, Field
 logger = logging.getLogger(__name__)
 
 from pipeline.config import cfg
+<<<<<<< Updated upstream
 from pipeline.index import connect_milvus, get_client, _ensure_collection
 from pipeline.jobs import IngestionWorker, JobStore, TERMINAL_STATUSES
 from pipeline.models import IngestionTier
@@ -22,6 +29,17 @@ from pipeline.tiers import (
     options_for_tier,
     promote_document,
     tier_from_str,
+=======
+from pipeline.ingest import ingest_path
+from pipeline.search import search, format_results
+from pipeline.index import connect_milvus, get_client
+from pipeline.models import IngestionTier
+from pipeline.tiers import (
+    ingest_tier,
+    promote_document,
+    tier_from_str,
+    options_for_tier,
+>>>>>>> Stashed changes
 )
 
 
@@ -139,8 +157,17 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="RAG Pipeline API",
     description=(
+<<<<<<< Updated upstream
         "Local document ingestion and retrieval service. Ingestion is durable, "
         "queued, and processed by a single background worker."
+=======
+        "Document ingestion and retrieval service with three processing tiers.\n\n"
+        "**Tiers:**\n"
+        "- `instant` — text-only, no OCR, < 2 s/page.  For chat-session uploads.\n"
+        "- `slow` — full OCR + multimodal embedding for one file.\n"
+        "- `global` — batch mode, hierarchical chunks, all query enhancements.\n\n"
+        "Documents can be promoted between tiers via `POST /v1/promote`."
+>>>>>>> Stashed changes
     ),
     version="2.0.0",
     lifespan=lifespan,
@@ -162,6 +189,7 @@ class SearchRequest(BaseModel):
     top_k: int = Field(default=5, ge=1, le=100)
     mode: Literal["hybrid", "vector", "bm25"] = "hybrid"
     use_reranker: bool = True
+<<<<<<< Updated upstream
     hierarchical: bool = True
     hyde: bool = True
     sub_queries: bool = True
@@ -169,6 +197,10 @@ class SearchRequest(BaseModel):
     tier: IngestionTier | None = None
     enhancements: str | None = None
     artifact_sources: list[str] | None = None
+=======
+    enhancements: str | None = None   # comma-sep override for query_enhancements
+    tier: str | None = None           # instant | slow | global — sets search defaults
+>>>>>>> Stashed changes
 
 
 class SearchResponse(BaseModel):
@@ -182,6 +214,7 @@ class SearchResponse(BaseModel):
     timing: dict[str, float | str]
 
 
+<<<<<<< Updated upstream
 class PromotionRequest(BaseModel):
     source_path: str = Field(min_length=1)
     to_tier: IngestionTier
@@ -267,12 +300,30 @@ async def readiness():
 
 @app.get("/health")
 async def health():
+=======
+class PromoteRequest(BaseModel):
+    source_path: str
+    to_tier: str                  # instant | slow | global
+    delete_old_chunks: bool = True
+
+
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/health")
+async def health():
+    """Return service health and Milvus connection info."""
+>>>>>>> Stashed changes
     return {
         "status": "ok",
         "milvus_host": cfg.milvus_host,
         "milvus_port": cfg.milvus_port,
+<<<<<<< Updated upstream
         "worker_running": ingestion_worker.running,
         "queue": job_store.counts(),
+=======
+>>>>>>> Stashed changes
     }
 
 
@@ -284,6 +335,7 @@ async def root():
 @app.post("/v1/ingest", status_code=status.HTTP_202_ACCEPTED)
 async def enqueue_ingestion(
     files: list[UploadFile] = File(...),
+<<<<<<< Updated upstream
     tier: IngestionTier = Form(IngestionTier.SLOW),
     strategy: Literal["recursive", "sentence_window", "hierarchical"] | None = Form(None),
     hypothetical_questions: bool | None = Form(None),
@@ -300,8 +352,34 @@ async def enqueue_ingestion(
     filenames: list[str] = []
     used_names: set[str] = set()
 
+=======
+    tier: str = QueryParam("slow", description="instant | slow | global"),
+    strategy: str | None = QueryParam(None, description="Override chunk strategy"),
+    hypothetical_questions: bool = QueryParam(
+        False, description="Add hypothetical questions at index time (slow/global)"
+    ),
+):
+    """Upload and ingest one or more files into the RAG index.
+
+    **tier** controls processing depth:
+    - `instant` — fastest, text-only, no OCR.  For immediate chat RAG.
+    - `slow` — full OCR + multimodal embedding.  Default.
+    - `global` — maximum quality, all enhancements.  For batch processing.
+
+    When `tier` is set, the tier's default chunk strategy and hypothetical-
+    question settings are used unless explicitly overridden via `strategy`
+    or `hypothetical_questions`.
+    """
+    try:
+        parsed_tier = tier_from_str(tier)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    tmpdir = tempfile.mkdtemp()
+>>>>>>> Stashed changes
     try:
         for upload in files:
+<<<<<<< Updated upstream
             filename = _safe_upload_name(upload.filename, used_names)
             destination = upload_dir / filename
             async with aiofiles.open(destination, "wb") as output:
@@ -383,10 +461,77 @@ async def cancel_ingestion(job_id: str):
         )
     job_store.cancel(job_id)
     return _public_job(_get_job_or_404(job_id))
+=======
+            filename = upload.filename or f"upload_{uuid.uuid4().hex}"
+            dest = Path(tmpdir) / filename
+            content = await upload.read()
+            async with aiofiles.open(dest, "wb") as f:
+                await f.write(content)
+            filenames.append(filename)
+
+        # Use the tier system for proper per-tier behaviour
+        stats = ingest_tier(tmpdir, tier=parsed_tier)
+
+        # If caller explicitly supplied strategy or hypothetical_questions,
+        # fall back to the legacy ingest_path which respects those args.
+        if strategy is not None or hypothetical_questions:
+            stats = ingest_path(
+                tmpdir,
+                strategy=strategy,
+                add_hypothetical_questions=hypothetical_questions,
+            )
+
+        return {"status": "ok", "files": filenames, "tier": parsed_tier.value, "stats": stats}
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+>>>>>>> Stashed changes
+
+
+@app.post("/v1/promote")
+async def promote(body: PromoteRequest):
+    """Promote a document to a higher ingestion tier.
+
+    Re-ingests the file at the target tier.  By default, old Milvus chunks
+    for this file are deleted first so duplicates do not accumulate.
+
+    Typical use: promote a chat-upload (instant) to the global index as a
+    background job once the user closes the session.
+
+    Example::
+
+        POST /v1/promote
+        {
+          "source_path": "/data/uploads/report.pdf",
+          "to_tier": "global",
+          "delete_old_chunks": true
+        }
+    """
+    try:
+        to_tier = tier_from_str(body.to_tier)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    try:
+        stats = promote_document(
+            body.source_path,
+            to_tier=to_tier,
+            delete_old_chunks=body.delete_old_chunks,
+        )
+        return {"status": "ok", "stats": stats}
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @app.post("/v1/search", response_model=SearchResponse)
 async def search_endpoint(body: SearchRequest):
+<<<<<<< Updated upstream
     try:
         # Resolve enhancements — precedence: explicit string > tier > individual flags
         if body.enhancements is not None:
@@ -407,6 +552,46 @@ async def search_endpoint(body: SearchRequest):
         # Pre-resolve enhanced queries for logging
         from pipeline.query import enhance_query as _enhance
         enhanced_queries = _enhance(body.query, enhancements=enhancements)
+=======
+    """Search the RAG index with optional query enhancements.
+
+    **tier** sets search defaults (enhancements, reranker).  Explicit
+    `enhancements` / `use_reranker` fields override tier defaults.
+
+    Enhancement names: ``hyde``, ``sub_queries``, ``stepback``
+    (comma-separated in `enhancements`).
+    """
+    try:
+        # Resolve search options from tier defaults, then apply explicit overrides.
+        enhancements_list: list[str] | None = None
+        use_reranker = body.use_reranker
+        use_chatbot_llm = False
+
+        if body.tier is not None:
+            try:
+                t = tier_from_str(body.tier)
+                tier_opts = options_for_tier(t)
+                enhancements_list = list(tier_opts.query_enhancements)
+                use_reranker = tier_opts.use_reranker
+                use_chatbot_llm = tier_opts.use_chatbot_llm
+            except ValueError as e:
+                raise HTTPException(status_code=422, detail=str(e))
+
+        # Explicit enhancements string overrides tier default.
+        if body.enhancements is not None:
+            enhancements_list = [
+                s.strip() for s in body.enhancements.split(",") if s.strip()
+            ]
+
+        results = search(
+            body.query,
+            top_k=body.top_k,
+            use_reranker=use_reranker,
+            retrieval_mode=body.mode,
+            enhancements=enhancements_list,
+            use_chatbot_llm=use_chatbot_llm,
+        )
+>>>>>>> Stashed changes
 
         # Resolve reranker — tier overrides, individual flag is default
         use_reranker = body.use_reranker
@@ -425,14 +610,14 @@ async def search_endpoint(body: SearchRequest):
         )
         formatted = [
             {
-                "rank": result.rank + 1,
-                "score": result.score,
-                "method": result.retrieval_method,
-                "source": result.chunk.source_path,
+                "rank":       result.rank + 1,
+                "score":      result.score,
+                "method":     result.retrieval_method,
+                "source":     result.chunk.source_path,
                 "chunk_type": result.chunk.chunk_type.value,
-                "text": (result.chunk.window_text or result.chunk.text)[:1000],
-                "has_image": result.chunk.image_data is not None,
-                "metadata": result.chunk.metadata,
+                "text":       (result.chunk.window_text or result.chunk.text)[:1000],
+                "has_image":  result.chunk.image_data is not None,
+                "metadata":   result.chunk.metadata,
             }
             for result in results
         ]

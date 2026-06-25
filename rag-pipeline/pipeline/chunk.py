@@ -191,15 +191,15 @@ def _chunk_hierarchical(doc: RawDocument) -> list[Chunk]:
 # ---------------------------------------------------------------------------
 
 def _image_chunks(doc: RawDocument) -> list[Chunk]:
-    """Create one chunk per image in *doc.images*."""
+    """Create one chunk per image in *doc.images*, using the page text as embedding context."""
     chunks: list[Chunk] = []
-    for i, image_bytes in enumerate(doc.images):
+    for i, (image_bytes, page_text) in enumerate(doc.images):
         chunk = Chunk(
             id=_new_id(),
             source_path=doc.path,
-            text="",
-            chunk_type=ChunkType.TEXT,
-            metadata={**doc.metadata, "is_image": True, "image_index": i},
+            text=page_text,
+            chunk_type=ChunkType.IMAGE,
+            metadata={**doc.metadata, "image_index": i},
             image_data=image_bytes,
         )
         chunks.append(chunk)
