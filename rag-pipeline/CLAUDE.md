@@ -49,20 +49,12 @@ See `TESTING.md` for full details, manual curl examples, and troubleshooting.
 
 | Service | Port | Image | Purpose |
 |---------|------|-------|---------|
-<<<<<<< Updated upstream
 | rag-text-embed | 8090 | vllm/vllm-openai:latest | nvidia/llama-embed-nemotron-8b text embeddings |
-| rag-multimodal-embed | 8091 | vllm/vllm-openai:latest | nvidia/nemotron-colembed-vl-8b-v2 multimodal embeddings |
-| rag-reranker | 8092 | vllm/vllm-openai:latest | Qwen3-VL-Reranker-2B pooling via /pooling endpoint |
+| rag-multimodal-embed | 8091 | vllm/vllm-openai:latest | nvidia/nemotron-colembed-vl-8b-v2 T/I embeddings via /pooling |
+| rag-reranker | 8092 | vllm/vllm-openai:latest | Qwen3-VL-Reranker-2B scoring via /score |
 | rag-api | 8093 | rag-api (ubuntu:24.04) | FastAPI, durable SQLite queue, ingestion worker, search |
-| paddleocr-vl | RunPod :8000 or in-process | PaddleOCR-VL-1.6 / PaddleOCR | Image and scanned-page OCR |
+| paddleocr-vl | RunPod :8000 or in-process | PaddleOCR-VL-1.6 / PaddleOCR / Tesseract | Image and scanned-page OCR |
 | postgres | 5433 | postgres:16 | Shared DB with chatbot-service |
-=======
-| rag-text-embed | 8001 | vllm/vllm-openai:latest | nvidia/llama-embed-nemotron-8b text embeddings (/v1/embeddings) |
-| rag-multimodal-embed | 8002 | vllm/vllm-openai:latest | nvidia/nemotron-colembed-vl-8b-v2 T/I embeddings (/pooling) |
-| rag-reranker | 8003 | vllm/vllm-openai:latest | Qwen3-VL-Reranker-2B scoring (/score endpoint) |
-| rag-ocr | 8004 | vllm/vllm-openai:latest | PaddlePaddle/PaddleOCR-VL-1.6 page OCR (/v1/chat/completions) |
-| rag-api | 8080 | rag-api (ubuntu:24.04) | FastAPI ingestion + search service |
->>>>>>> Stashed changes
 | milvus-standalone | 19530 | milvusdb/milvus:latest | Vector store |
 
 ### Ingestion workflow (two-track)
@@ -122,27 +114,19 @@ pipeline/
   extract.py               <- File extraction; extract_fast() for instant tier
   chunk.py                 <- Chunking strategies (recursive, sentence_window, hierarchical)
   embed.py                 <- Text + multimodal embedding via OpenAI-compatible API
-<<<<<<< Updated upstream
   index.py                 <- Milvus indexing + BM25 index
-  retrieve.py              <- Vector search, BM25 search, RRF hybrid fusion, reranker
+  retrieve.py              <- Vector search, BM25 search, weighted RRF hybrid fusion, reranker
   query.py                 <- Query-time enhancement (HyDE, sub-queries, stepback)
-                             AND index-time hypothetical question generation
+                              AND index-time hypothetical question generation
+                              Supports chatbot-service LLM via CHATBOT_LLM_BASE_URL
   ingest.py                <- Ingestion orchestrator
   jobs.py                  <- SQLite job store + single background worker
-  tiers.py                 <- Tier policies and promotion
-  search.py                <- Search orchestrator (includes query-to-query resolution)
+  tiers.py                 <- Tier policies, tier definitions, and promotion
+  search.py                <- Search orchestrator (tier-aware, includes query-to-query resolution)
   text_pipeline.py         <- Full text ingest: chunk → hyde → persist → embed → index
   image_pipeline.py        <- Image-only document ingest
   image_preprocess.py      <- EXIF normalization, PNG conversion, vertical splitting
   ocr.py                   <- none/basic Tesseract/PaddleOCR backend selection
-=======
-  index.py                 <- Milvus indexing + BM25 index + delete_chunks_by_source()
-  retrieve.py              <- Vector search, BM25 search, weighted RRF, reranker
-  query.py                 <- Query enhancement (HyDE, sub-queries, stepback, hyp. Qs)
-                              Supports chatbot-service LLM via CHATBOT_LLM_BASE_URL
-  search.py                <- Search orchestrator (thread-safe, tier-aware)
-  tiers.py                 <- IngestOptions, tier definitions, ingest_tier(), promote_document()
-  ingest.py                <- Legacy entry point (wraps tier system, backwards-compat)
 mock_server/
   server.py                <- 5-port stdlib-only mock server (for local dev/testing)
 docs/
@@ -152,7 +136,6 @@ docs/
   query-enhancements.md    <- HyDE, sub-queries, stepback, hypothetical questions
   pipeline-modules.md      <- Module-by-module function reference
   issues-found.md          <- Bugs fixed + remaining known issues
->>>>>>> Stashed changes
 ```
 
 ## Key concepts
@@ -188,18 +171,12 @@ PostgreSQL listens on `*` and permits remote connections.
 
 | Method | Path | Description |
 |--------|------|-------------|
-<<<<<<< Updated upstream
 | `POST` | `/v1/ingest` | Persist uploads and queue ingestion (`202`) |
 | `GET` | `/v1/ingestions` | List ingestion and promotion jobs |
 | `GET` | `/v1/ingestions/{id}` | Read job status/result |
 | `DELETE` | `/v1/ingestions/{id}` | Cancel a queued job |
 | `POST` | `/v1/promote` | Queue re-ingestion at a higher tier |
-| `POST` | `/v1/search` | Search with optional mode and enhancements |
-=======
-| `POST` | `/v1/ingest` | Ingest one or more files (multipart form); `tier=instant\|slow\|global` |
-| `POST` | `/v1/promote` | Re-ingest a file at a higher tier (promotion) |
-| `POST` | `/v1/search` | Search with optional tier defaults and enhancements |
->>>>>>> Stashed changes
+| `POST` | `/v1/search` | Search with optional mode, tier defaults, artifact scope, and enhancements |
 | `GET` | `/docs` | Interactive API documentation (Swagger UI) |
 
 ## Chunking strategies
@@ -233,18 +210,7 @@ uv add "<package>>=1.2"   # with version constraint
 uv add --dev <package>    # dev-only dependency
 ```
 
-<<<<<<< Updated upstream
 Keep `[tool.uv] exclude-newer = "2025-10-23T12:36:00Z"` in every uv project.
-=======
-Every `pyproject.toml` must include this in `[tool.uv]` to pin to a stable package snapshot:
-
-```toml
-[tool.uv]
-exclude-newer = "2025-10-23T12:36:00Z"
-```
-
-When installing or updating a package, always ensure this setting is present.
->>>>>>> Stashed changes
 
 ## Key environment variables
 
@@ -260,12 +226,8 @@ MILVUS_HOST, MILVUS_PORT
 POSTGRES_HOST, POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_PORT
 OCR_MODE, OCR_BASE_URL, OCR_MODEL, OCR_MAX_IMAGE_HEIGHT
 CHUNK_STRATEGY, CHUNK_SIZE, CHUNK_OVERLAP
-<<<<<<< Updated upstream
 QUERY_ENHANCEMENTS, HYPOTHETICAL_QUESTIONS_PER_CHUNK
-=======
-QUERY_ENHANCEMENTS                               # comma-sep default (overridden per tier)
 HYBRID_ALPHA                                     # 0.0=pure BM25, 1.0=pure vector
->>>>>>> Stashed changes
 ```
 
 Note: `TEXT_EMBEDDING_MODEL` must include the litellm provider prefix, e.g.

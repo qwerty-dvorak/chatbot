@@ -21,7 +21,6 @@ class IngestionTier(str, Enum):
 
 
 class ChunkType(str, Enum):
-<<<<<<< Updated upstream
     TEXT = "text"
     IMAGE = "image"
     PARENT = "parent"
@@ -29,20 +28,6 @@ class ChunkType(str, Enum):
     SENTENCE_WINDOW = "sentence_window"
     SUMMARY = "summary"
     HYPOTHETICAL_QUESTION = "hypothetical_question"
-
-
-class IngestionTier(str, Enum):
-    INSTANT = "instant"
-    SLOW = "slow"
-    GLOBAL = "global"
-=======
-    TEXT            = "text"
-    IMAGE           = "image"            # page image from PDF or standalone image file
-    PARENT          = "parent"
-    CHILD           = "child"
-    SENTENCE_WINDOW = "sentence_window"
-    SUMMARY         = "summary"
->>>>>>> Stashed changes
 
 
 class ContentType(str, Enum):

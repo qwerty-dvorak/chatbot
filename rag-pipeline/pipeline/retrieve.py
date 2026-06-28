@@ -204,9 +204,6 @@ def _rrf_fusion(
     rrf_scores: dict[str, float] = defaultdict(float)
     chunks_by_id: dict[str, Chunk] = {}
 
-<<<<<<< Updated upstream
-    if weights is None:
-        weights = [1.0] * len(results_lists)
     if len(weights) != len(results_lists):
         raise ValueError("weights must have the same length as results_lists")
 
@@ -214,11 +211,6 @@ def _rrf_fusion(
         for result in result_list:
             chunk_id = result.chunk.id
             # rank is 0-based; RRF formula uses 1-based rank.
-=======
-    for weight, result_list in zip(weights, results_lists):
-        for result in result_list:
-            chunk_id = result.chunk.id
->>>>>>> Stashed changes
             rrf_scores[chunk_id] += weight / (k + result.rank + 1)
             if chunk_id not in chunks_by_id:
                 chunks_by_id[chunk_id] = result.chunk
@@ -277,10 +269,7 @@ def hybrid_search(
     vector_results = vector_search(query_embedding, top_k=top_k, extra_filter=extra_filter)
     bm25_results = bm25_search(query, top_k=top_k, source_paths=source_paths)
 
-<<<<<<< Updated upstream
-=======
     # cfg.hybrid_alpha: 1.0 = pure vector, 0.0 = pure BM25.
->>>>>>> Stashed changes
     fused = _rrf_fusion(
         [vector_results, bm25_results],
         weights=[cfg.hybrid_alpha, 1.0 - cfg.hybrid_alpha],

@@ -299,7 +299,7 @@ def _ingest_file(file_path: Path, opts: IngestOptions) -> tuple[int, int, list[C
                     id=uuid.uuid4().hex,
                     source_path=chunk.source_path,
                     text=q,
-                    chunk_type=ChunkType.TEXT,
+                    chunk_type=ChunkType.HYPOTHETICAL_QUESTION,
                     metadata={**chunk.metadata, "is_hypothetical_question": True},
                     parent_id=chunk.id,
                 ))

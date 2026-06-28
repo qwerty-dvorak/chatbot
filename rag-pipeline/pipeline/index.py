@@ -110,21 +110,6 @@ def index_chunks(embedded: list[EmbeddedChunk]) -> None:
         _insert_batch(image_chunks, cfg.image_collection)
 
 
-def delete_chunks_by_source(source_path: str, collection_name: str) -> int:
-    """Delete all chunks for a source path and return Milvus' delete count."""
-    client = get_client()
-    if not client.has_collection(collection_name):
-        return 0
-    escaped = source_path.replace("\\", "\\\\").replace('"', '\\"')
-    result = client.delete(
-        collection_name=collection_name,
-        filter=f'source_path == "{escaped}"',
-    )
-    if isinstance(result, dict):
-        return int(result.get("delete_count", 0))
-    return 0
-
-
 def _chunk_from_hit(hit: dict) -> Chunk:
     """Reconstruct a Chunk from a MilvusClient search or query result dict."""
     metadata_raw = hit.get("metadata_json", "{}")

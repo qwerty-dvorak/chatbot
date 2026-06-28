@@ -29,21 +29,14 @@ class Config:
     reranker_api_key: str = field(default_factory=lambda: os.getenv("RERANKER_API_KEY", "mock"))
     reranker_model: str = field(default_factory=lambda: os.getenv("RERANKER_MODEL", "Qwen/Qwen3-VL-Reranker-2B"))
 
-    # OCR endpoint
-    ocr_base_url: str = field(default_factory=lambda: os.getenv("OCR_BASE_URL", ""))
+    # OCR endpoint (PaddleOCR-VL via vLLM /v1/chat/completions, local PaddleOCR, or Tesseract)
+    ocr_base_url: str = field(default_factory=lambda: os.getenv("OCR_BASE_URL", "http://localhost:9004/v1"))
     ocr_api_key: str = field(default_factory=lambda: os.getenv("OCR_API_KEY", "mock"))
     ocr_model: str = field(default_factory=lambda: os.getenv("OCR_MODEL", "PaddlePaddle/PaddleOCR-VL-1.6"))
     ocr_mode: str = field(default_factory=lambda: os.getenv("OCR_MODE", "paddleocr").lower())
     ocr_pdf_dpi: int = field(default_factory=lambda: int(os.getenv("OCR_PDF_DPI", "150")))
     ocr_max_image_height: int = field(default_factory=lambda: int(os.getenv("OCR_MAX_IMAGE_HEIGHT", "2400")))
     ocr_languages: str = field(default_factory=lambda: os.getenv("OCR_LANGUAGES", "eng"))
-
-    # OCR endpoint (PaddleOCR-VL via vLLM /v1/chat/completions)
-    ocr_base_url: str = field(default_factory=lambda: os.getenv("OCR_BASE_URL", "http://localhost:9004/v1"))
-    ocr_api_key: str = field(default_factory=lambda: os.getenv("OCR_API_KEY", "mock"))
-    ocr_model: str = field(default_factory=lambda: os.getenv("OCR_MODEL", "PaddlePaddle/PaddleOCR-VL-1.6"))
-    # DPI for PDF page rendering (higher = better OCR quality, larger images)
-    ocr_pdf_dpi: int = field(default_factory=lambda: int(os.getenv("OCR_PDF_DPI", "150")))
 
     # Milvus
     milvus_host: str = field(default_factory=lambda: os.getenv("MILVUS_HOST", "localhost"))

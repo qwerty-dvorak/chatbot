@@ -211,7 +211,7 @@ def ingest_path(
                                 id=uuid.uuid4().hex,
                                 source_path=chunk.source_path,
                                 text=question,
-                                chunk_type=ChunkType.TEXT,
+                                chunk_type=ChunkType.HYPOTHETICAL_QUESTION,
                                 metadata={**chunk.metadata,
                                            "is_hypothetical_question": True},
                                 parent_id=chunk.id,
@@ -262,7 +262,6 @@ def ingest_path(
     return {
         "files_processed":       files_processed,
         "files_skipped_duplicate": files_skipped,
-<<<<<<< Updated upstream
         "chunks_created": total_chunks,
         "embeddings_indexed": total_embeddings,
         "embedding_info": {
@@ -270,8 +269,4 @@ def ingest_path(
             "dimension": cfg.text_embedding_dim,
             "collection": cfg.text_collection,
         },
-=======
-        "chunks_created":        total_chunks,
-        "embeddings_indexed":    total_embeddings,
->>>>>>> Stashed changes
     }
