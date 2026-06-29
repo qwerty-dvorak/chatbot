@@ -6,8 +6,6 @@ import time
 import urllib.error
 import urllib.request
 
-import litellm
-
 from .config import cfg
 
 logger = logging.getLogger(__name__)
@@ -58,29 +56,6 @@ def _chat(system: str, user: str) -> str:
     return content
 
 
-def _chatbot_chat(system: str, user: str) -> str:
-    """Call chatbot-service's LLM endpoint, falling back to the default chat endpoint."""
-    if not cfg.chatbot_llm_base_url:
-        return _chat(system, user)
-
-    model = cfg.chatbot_llm_model or cfg.chat_model
-    response = litellm.completion(
-        model=model,
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-        api_base=cfg.chatbot_llm_base_url,
-        api_key=cfg.chatbot_llm_api_key or "none",
-        stream=False,
-    )
-    return response.choices[0].message.content or ""
-
-
-def _get_chat_fn(use_chatbot_llm: bool):
-    return _chatbot_chat if use_chatbot_llm else _chat
-
-
 def _parse_bulleted_lines(raw: str) -> list[str]:
     items: list[str] = []
     for line in raw.splitlines():
@@ -98,15 +73,9 @@ def _parse_bulleted_lines(raw: str) -> list[str]:
     return items
 
 
-def hyde(
-    query: str,
-    n: int | None = None,
-    use_chatbot_llm: bool = False,
-) -> list[str]:
-    """Generate hypothetical answer passages for HyDE retrieval."""
+def hyde(query: str, n: int | None = None) -> list[str]:
     if n is None:
         n = cfg.hyde_n_documents
-    chat = _get_chat_fn(use_chatbot_llm)
     system = (
         f"You are a helpful assistant that generates hypothetical documents. "
         f"Given a query, write exactly {n} short, realistic passages (2-4 "
@@ -115,18 +84,12 @@ def hyde(
         f"of the query. Return each passage on its own line prefixed with '-'. "
         f"Write only the passages - no preamble, no explanation."
     )
-    return _parse_bulleted_lines(chat(system, f"Query: {query}"))[:n]
+    return _parse_bulleted_lines(_chat(system, f"Query: {query}"))[:n]
 
 
-def sub_queries(
-    query: str,
-    n: int | None = None,
-    use_chatbot_llm: bool = False,
-) -> list[str]:
-    """Decompose a complex query into simpler sub-queries."""
+def sub_queries(query: str, n: int | None = None) -> list[str]:
     if n is None:
         n = cfg.sub_queries_count
-    chat = _get_chat_fn(use_chatbot_llm)
     system = (
         f"You are an expert at breaking down complex questions into simpler "
         f"sub-questions. If the query is simple, return the original query "
@@ -135,15 +98,13 @@ def sub_queries(
         f"question. Return each sub-question on its own line, prefixed with "
         f"'-'. Output only the sub-questions, nothing else."
     )
-    results = _parse_bulleted_lines(chat(system, f"Query: {query}"))
+    results = _parse_bulleted_lines(_chat(system, f"Query: {query}"))
     if query not in results:
         results.append(query)
     return results or [query]
 
 
-def stepback(query: str, use_chatbot_llm: bool = False) -> str:
-    """Generate a broader stepback question for foundational retrieval."""
-    chat = _get_chat_fn(use_chatbot_llm)
+def stepback(query: str) -> str:
     system = (
         "You are an expert at the stepback prompting technique. "
         "Given a highly specific question, abstract it into a broader, "
@@ -151,7 +112,7 @@ def stepback(query: str, use_chatbot_llm: bool = False) -> str:
         "rules, or constraints that govern the topic. "
         "Return only the stepback question, nothing else."
     )
-    return chat(system, f"Query: {query}").strip()
+    return _chat(system, f"Query: {query}").strip()
 
 
 def hypothetical_questions_for_chunk(chunk_text: str, n: int | None = None) -> list[str]:
@@ -171,9 +132,7 @@ def hypothetical_questions_for_chunk(chunk_text: str, n: int | None = None) -> l
 def enhance_query(
     query: str,
     enhancements: str | list[str] | tuple[str, ...] | None = None,
-    use_chatbot_llm: bool = False,
 ) -> list[str]:
-    """Apply query enhancements and return deduplicated retrieval queries."""
     configured = cfg.query_enhancements if enhancements is None else enhancements
     if isinstance(configured, str):
         enabled = {item.strip() for item in configured.split(",") if item.strip()}
@@ -182,12 +141,12 @@ def enhance_query(
 
     collected: list[str] = []
     if "hyde" in enabled:
-        collected.extend(hyde(query, use_chatbot_llm=use_chatbot_llm))
+        collected.extend(hyde(query))
         collected.append(query)
     if "sub_queries" in enabled:
-        collected.extend(sub_queries(query, use_chatbot_llm=use_chatbot_llm))
+        collected.extend(sub_queries(query))
     if "stepback" in enabled:
-        stepback_query = stepback(query, use_chatbot_llm=use_chatbot_llm)
+        stepback_query = stepback(query)
         if stepback_query:
             collected.append(stepback_query)
         collected.append(query)

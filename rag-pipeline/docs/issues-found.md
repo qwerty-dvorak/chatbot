@@ -143,13 +143,6 @@ replaces the active index so concurrent search readers cannot observe a partial 
 
 ---
 
-### Promotion left stale BM25 chunks
-
-**Fix:** Promotion now removes matching source chunks from BM25 before rebuilding
-and indexing the promoted representation.
-
----
-
 ## Remaining Known Issues
 
 ### Instant-tier image files — no text content
@@ -158,14 +151,14 @@ When ingesting standalone images (`.png`, `.jpg`) at the instant tier, OCR is sk
 and multimodal embedding is disabled. The resulting chunk has empty text and is not
 embedded at all.
 
-**Workaround:** Use slow or global tier for image-only documents that need OCR. The
+**Workaround:** Use slow tier for image-only documents that need OCR. The
 instant tier is designed for text-rich files (PDFs with text layers, `.md`, `.txt`).
 
 ---
 
 ### Milvus scalar field filter — performance on large collections
 
-`delete_chunks_by_source` (used by `promote_document`) queries all chunks matching
+`delete_chunks_by_source` queries all chunks matching
 `source_path` via a scalar filter. Without a scalar index on `source_path`, this is
 a full collection scan. On collections with millions of chunks, this will be slow.
 
@@ -180,7 +173,7 @@ client.create_index(collection_name=name, field_name="source_path", index_params
 
 ### Hypothetical-question augmentation — sequential LLM calls
 
-At global-tier ingestion, hypothetical questions are generated per chunk sequentially.
+At ingestion time, hypothetical questions are generated per chunk sequentially.
 For a 100-chunk document with 3 questions per chunk, this is 300 serial LLM calls.
 
 **Workaround:** Increase `cfg.chunk_size` to reduce chunk count, or add a
@@ -213,11 +206,9 @@ The RAG pipeline API (`rag-pipeline/api.py`) exposes all ingestion and search
 endpoints. The chatbot-service integration (`chatbot-service/apps/knowledge/rag_client.py`)
 calls these endpoints for document upload and search. Key design decisions:
 
-1. **Visibility maps to tier**: `private` → `instant`, `shared` → `slow`, `global` → `global`
+1. **Visibility maps to tier**: `private` → `instant`, `shared` → `slow`
 2. **RAG API is optional**: when `RAG_API_ENABLED=false`, the chatbot-service falls
    back to its local ingestion pipeline
-3. **Global knowledge base**: documents with `visibility=global` are processed at
-   the global tier for maximum quality
 
 ### Mock server architecture
 

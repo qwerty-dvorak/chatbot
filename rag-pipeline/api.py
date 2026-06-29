@@ -18,7 +18,7 @@ from pipeline.models import IngestionTier
 from pipeline.progress import ProgressTracker
 from pipeline.query import enhance_query
 from pipeline.search import search
-from pipeline.tiers import options_for_tier, promote_document, tier_from_str
+from pipeline.tiers import options_for_tier, tier_from_str
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +90,7 @@ def _execute_job(job: dict) -> dict:
                             "chunk_strategy": chunk_strategy,
                             "generate_hyde": generate_hyde,
                             "hyde_per_chunk": options.hypothetical_questions_per_chunk,
-                            "generate_summary": tier == IngestionTier.GLOBAL,
+                            "generate_summary": True,
                         },
                         progress=tracker,
                     )
@@ -112,13 +112,6 @@ def _execute_job(job: dict) -> dict:
             "results": results,
             "errors": errors,
         }
-
-    if job["kind"] == "promote":
-        return promote_document(
-            payload["source_path"],
-            to_tier=tier_from_str(payload["to_tier"]),
-            delete_old_chunks=payload["delete_old_chunks"],
-        )
 
     raise ValueError(f"Unsupported job kind: {job['kind']}")
 
@@ -147,8 +140,8 @@ app = FastAPI(
     title="RAG Pipeline API",
     description=(
         "Local document ingestion and retrieval service. Ingestion is durable, "
-        "queued, and processed by a single background worker. Documents can "
-        "be ingested at instant, slow, or global tier and promoted later."
+        "queued, and processed by a single background worker. Documents are "
+        "ingested at instant or slow tier."
     ),
     version="2.0.0",
     lifespan=lifespan,
@@ -195,12 +188,6 @@ class SearchResponse(BaseModel):
     results: list[dict]
     total: int
     timing: dict[str, float | str]
-
-
-class PromotionRequest(BaseModel):
-    source_path: str = Field(min_length=1)
-    to_tier: IngestionTier
-    delete_old_chunks: bool = True
 
 
 def _public_job(job: dict) -> dict:
@@ -341,25 +328,6 @@ async def enqueue_ingestion(
         raise
 
 
-@app.post("/v1/promote", status_code=status.HTTP_202_ACCEPTED)
-async def enqueue_promotion(body: PromotionRequest):
-    source = Path(body.source_path)
-    if not source.is_file():
-        raise HTTPException(status_code=404, detail=f"Source file not found: {body.source_path!r}")
-
-    job = job_store.create(
-        kind="promote",
-        payload={
-            "source_path": str(source.resolve()),
-            "to_tier": body.to_tier.value,
-            "delete_old_chunks": body.delete_old_chunks,
-        },
-        filenames=[source.name],
-    )
-    ingestion_worker.notify()
-    return _public_job(job)
-
-
 @app.get("/v1/ingestions")
 async def list_ingestions(
     job_status: Literal["queued", "running", "succeeded", "failed", "cancelled"] | None = Query(
@@ -391,14 +359,12 @@ async def cancel_ingestion(job_id: str):
     return _public_job(_get_job_or_404(job_id))
 
 
-def _search_options(body: SearchRequest) -> tuple[str | tuple[str, ...], bool, bool]:
+def _search_options(body: SearchRequest) -> tuple[str | tuple[str, ...], bool]:
     use_reranker = body.use_reranker
-    use_chatbot_llm = False
 
     if body.tier is not None:
         tier_options = options_for_tier(body.tier)
         use_reranker = tier_options.use_reranker
-        use_chatbot_llm = body.tier == IngestionTier.GLOBAL
 
     if body.enhancements is not None:
         enhancements: str | tuple[str, ...] = body.enhancements
@@ -414,18 +380,14 @@ def _search_options(body: SearchRequest) -> tuple[str | tuple[str, ...], bool, b
             enabled.append("stepback")
         enhancements = tuple(enabled)
 
-    return enhancements, use_reranker, use_chatbot_llm
+    return enhancements, use_reranker
 
 
 @app.post("/v1/search", response_model=SearchResponse)
 async def search_endpoint(body: SearchRequest):
     try:
-        enhancements, use_reranker, use_chatbot_llm = _search_options(body)
-        enhanced_queries = enhance_query(
-            body.query,
-            enhancements=enhancements,
-            use_chatbot_llm=use_chatbot_llm,
-        )
+        enhancements, use_reranker = _search_options(body)
+        enhanced_queries = enhance_query(body.query, enhancements=enhancements)
         results, timing = search(
             body.query,
             top_k=body.top_k,
@@ -434,7 +396,6 @@ async def search_endpoint(body: SearchRequest):
             enhancements=enhancements,
             hierarchical=body.hierarchical,
             artifact_sources=body.artifact_sources,
-            use_chatbot_llm=use_chatbot_llm,
             pre_enhanced_queries=enhanced_queries,
         )
         formatted = [

@@ -11,13 +11,9 @@ class IngestionTier(str, Enum):
     SLOW    — full OCR + both text and multimodal embedding for one file.
               Includes HyDE at search time and light hypothetical-question
               augmentation at index time.
-    GLOBAL  — batch-mode, maximum quality.  Hierarchical chunking, full
-              hypothetical-question augmentation, all query enhancements
-              (HyDE + sub-queries + stepback) using the chatbot-service LLM.
     """
     INSTANT = "instant"
     SLOW    = "slow"
-    GLOBAL  = "global"
 
 
 class ChunkType(str, Enum):

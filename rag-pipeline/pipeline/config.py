@@ -84,14 +84,6 @@ class Config:
     # Object store (local file-system, content-addressed)
     object_store_path: str = field(default_factory=lambda: os.getenv("OBJECT_STORE_PATH", "./data/object_store"))
 
-    # Chatbot-service LLM endpoint — used for query enhancements in global-tier
-    # search (HyDE, sub-queries, stepback).  Point this at the same LLM that
-    # chatbot-service/apps/llm/clients.py uses (i.e. the real vLLM, not the mock).
-    # Falls back to chat_base_url/chat_model when unset.
-    chatbot_llm_base_url: str = field(default_factory=lambda: os.getenv("CHATBOT_LLM_BASE_URL", ""))
-    chatbot_llm_api_key: str  = field(default_factory=lambda: os.getenv("CHATBOT_LLM_API_KEY",  ""))
-    chatbot_llm_model: str    = field(default_factory=lambda: os.getenv("CHATBOT_LLM_MODEL",    ""))
-
     def __post_init__(self) -> None:
         # Validate numeric bounds that would cause confusing downstream errors
         if self.text_embedding_dim <= 0:

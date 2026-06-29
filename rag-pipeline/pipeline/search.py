@@ -80,7 +80,6 @@ def search(
     enhancements: str | list[str] | tuple[str, ...] | None = None,
     hierarchical: bool | None = None,
     artifact_sources: list[str] | None = None,
-    use_chatbot_llm: bool = False,
     pre_enhanced_queries: list[str] | None = None,
 ) -> tuple[list[SearchResult], dict[str, float | str]]:
     """Run query enhancement, retrieval, fusion, optional reranking, and context fetch."""
@@ -122,11 +121,7 @@ def search(
 
     if pre_enhanced_queries is None:
         t0 = clock()
-        enhanced_queries = enhance_query(
-            query,
-            enhancements=enhancements,
-            use_chatbot_llm=use_chatbot_llm,
-        )
+        enhanced_queries = enhance_query(query, enhancements=enhancements)
         timing["enhance_query"] = round(clock() - t0, 4)
     else:
         enhanced_queries = pre_enhanced_queries

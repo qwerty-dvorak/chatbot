@@ -227,7 +227,7 @@ phrasings will find it via question-to-question semantic matching.
 
 **How it works (index-time flow):**
 1. At ingest time, the LLM generates N questions that each chunk would answer
-   (N = `hypothetical_questions_per_chunk`, 0 for instant, 2 for slow, 3 for global).
+   (N = `hypothetical_questions_per_chunk`, 0 for instant, 2 for slow).
 2. Each question is placed into a `Chunk` object with:
    - `chunk_type = HYPOTHETICAL_QUESTION`
    - `parent_id = <source chunk UUID>`
@@ -277,7 +277,6 @@ Enhancement LLM calls use the configured chat endpoint:
 |------|---------|--------|
 | instant | — (no enhancements) | — |
 | slow | Default chat model | `CHAT_BASE_URL` / `CHAT_MODEL` |
-| global | Configured local chat model | `CHAT_BASE_URL` / `CHAT_MODEL` |
 
 Configure the endpoint with `CHAT_BASE_URL`, `CHAT_API_KEY`, and `CHAT_MODEL` in
 the RAG pipeline environment. Instant-tier search makes no enhancement call.
@@ -288,7 +287,7 @@ the RAG pipeline environment. Instant-tier search makes no enhancement call.
 
 ```python
 # pipeline/tiers.py
-GLOBAL_OPTIONS = IngestOptions(
+SLOW_OPTIONS = IngestOptions(
     ...
     query_enhancements=("hyde", "sub_queries", "stepback"),
     use_reranker=True,

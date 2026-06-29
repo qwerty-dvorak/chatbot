@@ -99,7 +99,6 @@ Client
 |                                                                             |
 |  FastAPI request layer                                                      |
 |    POST /v1/ingest ------ persist files ------+                             |
-|    POST /v1/promote --------------------------+                             |
 |    GET  /v1/ingestions/{id}                  |                             |
 |    POST /v1/search ----------------------+    |                             |
 |                                           |    v                             |
@@ -150,14 +149,14 @@ removed and no runnable job remains.
 1. The worker opens `BEGIN IMMEDIATE`.
 2. It selects the oldest `queued` row.
 3. It updates that row to `running` and commits.
-4. It executes ingestion or promotion outside the SQLite transaction.
+4. It executes ingestion outside the SQLite transaction.
 5. It writes either `succeeded` plus JSON result or `failed` plus traceback.
 
 The worker handles one job at a time. This serializes:
 
 - ingestion registry updates;
 - BM25 read/rebuild/replace operations;
-- document promotion deletes followed by replacement indexing.
+- document re-indexing with delete-before-replace.
 
 Milvus can serve searches while inserts occur. BM25 persistence uses a
 temporary file plus `os.replace`, so search readers observe either the old
@@ -184,7 +183,7 @@ SQLite table `ingestion_jobs`:
 | Column | Purpose |
 |--------|---------|
 | `id` | UUID-like hexadecimal job identifier |
-| `kind` | `ingest` or `promote` |
+| `kind` | `ingest` |
 | `status` | Queue lifecycle state |
 | `payload_json` | Internal execution parameters and persisted path |
 | `filenames_json` | User-facing uploaded filenames |
@@ -208,7 +207,7 @@ extract.py
   |-- PDF: pypdf text layer plus extractable embedded images
   `-- image: raw bytes
   |
-  +-- slow/global image bytes → ocr.py → OCR text
+  +-- slow image bytes → ocr.py → OCR text
   |
   v
 RawDocument
@@ -242,7 +241,7 @@ index.py
 
 1. For each text chunk, the LLM generates N hypothetical questions that the
    chunk would answer (N = `hypothetical_questions_per_chunk`, configured per
-   tier: 0 for instant, 2 for slow, 3 for global).
+    tier: 0 for instant, 2 for slow).
 2. Each question is placed into its own `Chunk` object with:
    - `chunk_type = ChunkType.HYPOTHETICAL_QUESTION`
    - `parent_id = <source chunk's UUID>`
@@ -281,36 +280,19 @@ file fails, the worker marks the job `failed`.
 
 `pipeline/tiers.py` maps each `IngestionTier` to immutable options.
 
-| Policy | Instant | Slow | Global |
-|--------|---------|------|--------|
-| Text extraction | yes | yes | yes |
-| OCR extracted images | no | yes | yes |
-| Text embedding | yes | yes | yes |
-| Image embedding | no | yes | yes |
-| Chunk strategy | recursive | sentence window | hierarchical |
-| Hypothetical questions per chunk | 0 | 2 | 3 |
-| Query enhancements | none | HyDE | HyDE, sub-query, stepback |
-| Reranker | off | on | on |
+| Policy | Instant | Slow |
+|--------|---------|------|
+| Text extraction | yes | yes |
+| OCR extracted images | no | yes |
+| Text embedding | yes | yes |
+| Image embedding | no | yes |
+| Chunk strategy | recursive | sentence window |
+| Hypothetical questions per chunk | 0 | 2 |
+| Query enhancements | none | HyDE |
+| Reranker | off | on |
 
 Request form fields can override chunk strategy and hypothetical-question
 generation without mutating global configuration.
-
-## Promotion
-
-Promotion is represented as a queue job, not an inline API operation:
-
-1. verify the persisted source exists;
-2. optionally delete source rows from both Milvus collections (including
-   hypothetical question vectors with matching `parent_id`);
-3. remove matching source chunks from BM25 and atomically rebuild it;
-4. remove the source from the ingestion registry;
-5. ingest with the target tier;
-6. record deleted counts and new ingestion statistics.
-
-Deletion and replacement are not one transaction across Milvus and BM25. A
-promotion failure can temporarily leave a document absent or partially
-reindexed. A future version can use versioned document IDs and switch an active
-version only after replacement indexing completes.
 
 ## Search Pipeline
 
@@ -399,7 +381,7 @@ Same schema but `embedding` uses `MULTIMODAL_EMBEDDING_DIM`.
 |--------|----------------|
 | `api.py` | HTTP validation, upload persistence, job resources, search routes |
 | `pipeline/jobs.py` | SQLite repository and worker lifecycle |
-| `pipeline/tiers.py` | Tier policy, ingestion orchestration, promotion |
+| `pipeline/tiers.py` | Tier policy, ingestion orchestration |
 | `pipeline/extract.py` | File-type extraction and instant-tier text-only PDF path |
 | `pipeline/ocr.py` | Concurrent calls to the local OCR endpoint |
 | `pipeline/chunk.py` | Chunking strategies |
@@ -493,7 +475,7 @@ Stdlib-only mock of the full RAG Pipeline API (`docs/api.md`):
 
 | Port | Route | Description |
 |------|-------|-------------|
-| 8093 | all RAG endpoints | Health, ingest, search, promote, collections |
+| 8093 | all RAG endpoints | Health, ingest, search, collections |
 
 The mock RAG API simulates async ingestion with background threads, making it
 suitable for testing the full upload→poll→search flow without Milvus or any

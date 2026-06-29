@@ -4,7 +4,7 @@ For the three-tier API see :mod:`pipeline.tiers`.  This module keeps the
 original :func:`ingest_path` entry point for backwards compatibility and
 exposes it as a thin wrapper over the tier system (defaulting to SLOW).
 
-Two-track ingestion for PDF documents (slow / global tiers):
+Two-track ingestion for PDF documents (slow tier):
   Track A (text):  page images → PaddleOCR-VL (OCR) → text chunks
                    → text embedding → Milvus text collection
   Track B (image): page images → multimodal embedding (/pooling, image-only)

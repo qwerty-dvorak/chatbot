@@ -91,7 +91,7 @@ Content type: `multipart/form-data`
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `files` | file[] | required | One or more supported documents |
-| `tier` | enum | `slow` | `instant`, `slow`, or `global` |
+| `tier` | enum | `slow` | `instant` or `slow` |
 | `strategy` | enum/null | tier default | `recursive`, `sentence_window`, or `hierarchical` |
 | `hypothetical_questions` | bool/null | tier default | Explicitly enable or disable index-time question generation |
 
@@ -101,7 +101,6 @@ Tier defaults:
 |------|------------|-----------------|----------|------------------------|
 | `instant` | Existing text layer | No | `recursive` | Disabled (0 per chunk) |
 | `slow` | Text plus OCR for extracted images | Yes | `sentence_window` | 2 per text chunk |
-| `global` | Text plus OCR for extracted images | Yes | `hierarchical` | 3 per text chunk |
 
 Example:
 
@@ -143,8 +142,7 @@ Poll the job:
 curl http://localhost:8093/v1/ingestions/daaa89d8131946138f87b84ef9fa291b
 ```
 
-A successful result includes persistent source paths that can later be passed
-to `/v1/promote`:
+A successful result includes persistent source paths:
 
 ```json
 {
@@ -172,7 +170,7 @@ count.
 
 ### `GET /v1/ingestions`
 
-List recent ingestion and promotion jobs.
+List recent ingestion jobs.
 
 Query parameters:
 
@@ -204,31 +202,6 @@ and index writes do not provide transaction-safe cancellation points.
 - `200`: queued job changed to `cancelled`
 - `404`: job does not exist
 - `409`: job is running or already terminal
-
-## Queue Promotion
-
-### `POST /v1/promote`
-
-Queue replacement of a document's existing vectors with a higher-quality tier.
-The source file must still exist in persistent storage.
-
-```bash
-curl -X POST http://localhost:8093/v1/promote \
-  -H "Content-Type: application/json" \
-  -d '{
-    "source_path": "/app/data/ingestion/uploads/JOB_ID/report.pdf",
-    "to_tier": "global",
-    "delete_old_chunks": true
-  }'
-```
-
-Response: `202 Accepted` with the same job resource shape as ingestion and
-`"kind": "promote"`.
-
-Promotion runs through the same single worker. When `delete_old_chunks` is
-true, it removes matching Milvus rows (both document chunks and hypothetical
-question chunks with matching `source_path`) and matching BM25 chunks before
-indexing the new representation.
 
 ## Search
 
@@ -277,7 +250,7 @@ curl -X POST http://localhost:8093/v1/search \
 # Use tier defaults
 curl -X POST http://localhost:8093/v1/search \
   -H "Content-Type: application/json" \
-  -d '{"query": "...", "tier": "global"}'
+  -d '{"query": "...", "tier": "slow"}'
 
 # explicit enhancements string overrides everything
 curl -X POST http://localhost:8093/v1/search \
@@ -291,7 +264,6 @@ Tier search defaults:
 |------|--------------|----------|
 | `instant` | none | off |
 | `slow` | `hyde` | on |
-| `global` | `hyde,sub_queries,stepback` | on |
 
 **Query-to-query resolution:** The search pipeline automatically resolves
 hypothetical question vector hits to their source document chunks. If a query
@@ -334,7 +306,7 @@ curl -X POST http://localhost:8093/v1/search \
       "has_image": false,
       "metadata": {
         "filename": "paper.pdf",
-        "ingestion_tier": "global"
+        "ingestion_tier": "slow"
       }
     }
   ],
@@ -407,7 +379,7 @@ FastAPI validation errors use `422`. Runtime failures use:
 
 | Status | Meaning |
 |--------|---------|
-| `404` | Job or promotion source not found |
+| `404` | Job source not found |
 | `409` | Requested job transition is not allowed |
 | `422` | Invalid request field, tier, strategy, mode, or bound |
 | `500` | Search or collection operation failed |

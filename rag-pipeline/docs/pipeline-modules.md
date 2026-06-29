@@ -32,7 +32,6 @@ None` (text-only).
 class IngestionTier(str, Enum):
     INSTANT = "instant"   # fast, text-only, no OCR, no hypothetical questions
     SLOW    = "slow"      # full OCR + multimodal, 2 hypothetical questions/chunk
-    GLOBAL  = "global"    # max quality, all enhancements, 3 hypothetical questions/chunk
 ```
 
 ### `RawDocument`
@@ -351,8 +350,7 @@ Frozen dataclass with all knobs that vary between tiers. Fields:
 ### Pre-built options
 
 - `INSTANT_OPTIONS` — no OCR, no hypothetical questions, no reranker
-- `SLOW_OPTIONS` — OCR, multimodal, 2 hypothetical questions per chunk, HyDE
-- `GLOBAL_OPTIONS` — all enhancements, 3 hypothetical questions per chunk
+- `SLOW_OPTIONS` — OCR, multimodal, HyDE + all enhancements, 2-3 hypothetical questions per chunk
 
 ### `options_for_tier(tier: IngestionTier) -> IngestOptions`
 
@@ -366,12 +364,7 @@ Parse tier string. Raises `ValueError` on unknown value.
 
 Main tiered ingestion entry point. File or directory.
 
-### `promote_document(source_path, to_tier, delete_old_chunks=True) -> dict`
 
-Re-ingest at a higher tier, optionally deleting old chunks first. Deletion
-removes both document chunks and hypothetical question vectors for the source.
-
----
 
 ## `pipeline/jobs.py`
 
@@ -382,7 +375,7 @@ transitions, cancellation, restart recovery, and queue counts.
 
 ### `IngestionWorker`
 
-Single background thread that serializes ingestion and promotion jobs.
+Single background thread that serializes ingestion jobs.
 
 ---
 

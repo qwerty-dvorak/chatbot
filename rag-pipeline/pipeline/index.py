@@ -137,30 +137,6 @@ def _chunk_from_hit(hit: dict) -> Chunk:
     )
 
 
-def delete_chunks_by_source(source_path: str, collection_name: str) -> int:
-    """Delete all chunks for *source_path* from a Milvus collection.
-
-    Queries for matching IDs first (Milvus scalar-filter delete), then
-    deletes by primary key.  Returns the number of rows deleted.
-    """
-    client = get_client()
-    if not client.has_collection(collection_name):
-        return 0
-
-    hits = client.query(
-        collection_name=collection_name,
-        filter=f'source_path == "{source_path}"',
-        output_fields=["id"],
-        limit=16384,
-    )
-    if not hits:
-        return 0
-
-    ids = [h["id"] for h in hits]
-    client.delete(collection_name=collection_name, ids=ids)
-    return len(ids)
-
-
 def build_bm25_index(chunks: list[Chunk]) -> BM25Okapi:
     """Build BM25 index from chunk texts and persist it."""
     tokenized_corpus = [chunk.text.lower().split() for chunk in chunks]

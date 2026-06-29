@@ -1,4 +1,4 @@
-"""Three-tier ingestion system for the RAG pipeline.
+"""Two-tier ingestion system for the RAG pipeline.
 
 Tiers define the processing depth applied to a document at ingest time and
 the search quality used when retrieving against it.
@@ -12,28 +12,18 @@ the search quality used when retrieving against it.
 | slow    | Single-file deep processing.  Both text and multimodal  |
 |         | embedding.  Full OCR.  HyDE at search time.             |
 +---------+----------------------------------------------------------+
-| global  | Batch-mode global knowledge base.  Hierarchical chunks, |
-|         | hypothetical-question augmentation, all query           |
-|         | enhancements using the chatbot-service LLM.             |
-+---------+----------------------------------------------------------+
-
-Tier promotion
---------------
-A document ingested at instant can later be promoted to slow or global as a
-background process.  ``promote_document`` removes the old chunks from Milvus
-and re-ingests the file at the target tier.
 
 Usage
 -----
 ::
 
-    from pipeline.tiers import ingest_tier, promote_document, IngestionTier
+    from pipeline.tiers import ingest_tier, IngestionTier
 
     # Ingest a chat-upload immediately
     ingest_tier("/tmp/upload.pdf", tier=IngestionTier.INSTANT)
 
-    # Later, promote it to the global index in the background
-    promote_document("/tmp/upload.pdf", to_tier=IngestionTier.GLOBAL)
+    # Later, promote to SLOW
+    ingest_tier("/tmp/upload.pdf", tier=IngestionTier.SLOW)
 """
 
 from __future__ import annotations
@@ -59,7 +49,6 @@ from .index import (
     index_chunks,
     build_bm25_index,
     load_bm25_index,
-    delete_chunks_by_source,
 )
 from .query import hypothetical_questions_for_chunk
 
@@ -127,22 +116,9 @@ SLOW_OPTIONS = IngestOptions(
     use_reranker=True,
 )
 
-GLOBAL_OPTIONS = IngestOptions(
-    tier=IngestionTier.GLOBAL,
-    extract_pdf_text_directly=False,
-    ocr_dpi=200,                      # higher DPI for better OCR quality
-    use_text_embedding=True,
-    use_multimodal_embedding=True,
-    chunk_strategy="hierarchical",
-    hypothetical_questions_per_chunk=3,
-    query_enhancements=("hyde", "sub_queries", "stepback"),
-    use_reranker=True,
-)
-
 _TIER_MAP: dict[IngestionTier, IngestOptions] = {
     IngestionTier.INSTANT: INSTANT_OPTIONS,
     IngestionTier.SLOW:    SLOW_OPTIONS,
-    IngestionTier.GLOBAL:  GLOBAL_OPTIONS,
 }
 
 
@@ -335,8 +311,7 @@ def ingest_tier(
     path:
         File or directory to ingest.
     tier:
-        Processing depth.  One of ``IngestionTier.INSTANT``,
-        ``SLOW``, or ``GLOBAL``.
+        Processing depth.  One of ``IngestionTier.INSTANT`` or ``SLOW``.
     skip_duplicates:
         When True, skip files whose MD5 hash and tier match the registry.
 
@@ -433,67 +408,4 @@ def ingest_tier(
     }
 
 
-# ---------------------------------------------------------------------------
-# Tier promotion
-# ---------------------------------------------------------------------------
 
-def promote_document(
-    source_path: str,
-    to_tier: IngestionTier,
-    delete_old_chunks: bool = True,
-) -> dict:
-    """Re-ingest *source_path* at *to_tier*, optionally removing old chunks.
-
-    This is the primary mechanism for upgrading a document from a lower tier
-    (e.g. instant chat upload) to a higher tier (slow or global) as a
-    background process.
-
-    Parameters
-    ----------
-    source_path:
-        Absolute path to the original file.  Must still exist on disk.
-    to_tier:
-        Target :class:`IngestionTier`.
-    delete_old_chunks:
-        When True (default), delete existing Milvus vectors for this file
-        before re-ingesting at the new tier so duplicates do not accumulate.
-
-    Returns
-    -------
-    dict with ingestion stats plus ``deleted_text_chunks`` and
-    ``deleted_image_chunks`` counts.
-    """
-    p = Path(source_path)
-    if not p.exists():
-        raise FileNotFoundError(f"Source file not found: {source_path!r}")
-
-    connect_milvus()
-
-    deleted_text = 0
-    deleted_image = 0
-    if delete_old_chunks:
-        deleted_text  = delete_chunks_by_source(source_path, cfg.text_collection)
-        deleted_image = delete_chunks_by_source(source_path, cfg.image_collection)
-        try:
-            _, chunks = load_bm25_index()
-        except FileNotFoundError:
-            chunks = []
-        retained_chunks = [chunk for chunk in chunks if chunk.source_path != source_path]
-        if retained_chunks:
-            build_bm25_index(retained_chunks)
-        else:
-            try:
-                os.unlink(cfg.bm25_index_path)
-            except FileNotFoundError:
-                pass
-
-    # Remove registry entry so ingest_tier does not skip as duplicate
-    registry = _load_registry()
-    rkey = _registry_key(p)
-    registry.pop(rkey, None)
-    _save_registry(registry)
-
-    stats = ingest_tier(str(p), tier=to_tier, skip_duplicates=False)
-    stats["deleted_text_chunks"]  = deleted_text
-    stats["deleted_image_chunks"] = deleted_image
-    return stats
