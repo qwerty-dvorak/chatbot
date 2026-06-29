@@ -8,7 +8,7 @@ from django.core.files.storage import default_storage
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from apps.accounts.models import User
-from apps.chat.models import Chat, Message
+from apps.chat.models import Chat, Message, MessageEdit
 
 
 def _make_minimal_png(width: int = 1, height: int = 1) -> bytes:
@@ -99,9 +99,90 @@ class ChatAPITest(TestCase):
         self.assertEqual(len(msgs), 2)
         self.assertEqual(msgs[0].role, "user")
         self.assertEqual(msgs[0].content, "Hello world")
+        self.assertEqual(msgs[0].author, self.user)
         self.assertEqual(msgs[0].status, "completed")
         self.assertEqual(msgs[1].role, "assistant")
         self.assertEqual(msgs[1].status, "pending")
+
+    def test_edit_latest_user_message_replaces_assistant_turn(self):
+        chat = Chat.objects.create(user=self.user, title="Edit", path="edit")
+        user_msg = Message.objects.create(
+            chat=chat,
+            author=self.user,
+            role=Message.Role.USER,
+            content="Original question",
+            metadata={"thinking_mode": True, "rag_search_log": {"rag_used": True}},
+        )
+        old_assistant = Message.objects.create(
+            chat=chat,
+            role=Message.Role.ASSISTANT,
+            content="Old answer",
+            status=Message.Status.COMPLETED,
+        )
+
+        response = self.client.post(
+            reverse("chat:message-edit", args=[chat.id, user_msg.id]),
+            data=json.dumps({"content": "Updated question"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["status"], "edited")
+        user_msg.refresh_from_db()
+        self.assertEqual(user_msg.content, "Updated question")
+        self.assertEqual(user_msg.edit_count, 1)
+        self.assertIsNotNone(user_msg.edited_at)
+        self.assertTrue(user_msg.metadata["edited"])
+        self.assertNotIn("rag_search_log", user_msg.metadata)
+        self.assertFalse(Message.objects.filter(id=old_assistant.id).exists())
+
+        pending = Message.objects.get(chat=chat, role=Message.Role.ASSISTANT)
+        self.assertEqual(pending.status, Message.Status.PENDING)
+        self.assertTrue(pending.metadata["thinking_mode"])
+
+        edit = MessageEdit.objects.get(message=user_msg)
+        self.assertEqual(edit.editor, self.user)
+        self.assertEqual(edit.previous_content, "Original question")
+        self.assertEqual(edit.new_content, "Updated question")
+        self.assertEqual(edit.superseded_message_ids, [str(old_assistant.id)])
+
+    def test_edit_rejects_non_latest_user_message(self):
+        chat = Chat.objects.create(user=self.user, title="Edit", path="edit-non-latest")
+        first = Message.objects.create(chat=chat, role=Message.Role.USER, content="First")
+        Message.objects.create(chat=chat, role=Message.Role.ASSISTANT, content="Answer")
+        Message.objects.create(chat=chat, role=Message.Role.USER, content="Second")
+
+        response = self.client.post(
+            reverse("chat:message-edit", args=[chat.id, first.id]),
+            data=json.dumps({"content": "Changed"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 409)
+        first.refresh_from_db()
+        self.assertEqual(first.content, "First")
+        self.assertEqual(MessageEdit.objects.count(), 0)
+
+    def test_edit_rejects_while_assistant_response_in_flight(self):
+        chat = Chat.objects.create(user=self.user, title="Edit", path="edit-inflight")
+        user_msg = Message.objects.create(chat=chat, role=Message.Role.USER, content="Question")
+        Message.objects.create(
+            chat=chat,
+            role=Message.Role.ASSISTANT,
+            content="",
+            status=Message.Status.PENDING,
+        )
+
+        response = self.client.post(
+            reverse("chat:message-edit", args=[chat.id, user_msg.id]),
+            data=json.dumps({"content": "Changed"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 409)
+        user_msg.refresh_from_db()
+        self.assertEqual(user_msg.content, "Question")
 
     def test_post_empty_message_rejected(self):
         chat = Chat.objects.create(user=self.user, title="Empty", path="e1")
@@ -110,6 +191,15 @@ class ChatAPITest(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertIn("required", str(response.context["form"].errors))
+
+    def test_openapi_json_includes_web_rag_and_file_server_paths(self):
+        response = self.client.get(reverse("openapi-json"))
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["openapi"], "3.1.0")
+        self.assertIn("/chats/{chat_id}/messages/{message_id}/edit/", data["paths"])
+        self.assertIn("/v1/search", data["paths"])
+        self.assertIn("/upload", data["paths"])
 
     def test_message_accepts_multiple_attachments(self):
         chat = Chat.objects.create(user=self.user, title="Attachments", path="attachments")

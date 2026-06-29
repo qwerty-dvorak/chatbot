@@ -134,6 +134,8 @@ class Message(models.Model):
     tool_invocations = models.JSONField(default=dict, blank=True)
     attachments = models.JSONField(default=list, blank=True)
     metadata = models.JSONField(default=dict, blank=True)
+    edit_count = models.PositiveIntegerField(default=0)
+    edited_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     completed_at = models.DateTimeField(null=True, blank=True)
 
@@ -148,6 +150,36 @@ class Message(models.Model):
 
     def __str__(self):
         return f"[{self.role}] {self.content[:60]}"
+
+
+class MessageEdit(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    message = models.ForeignKey(
+        Message, on_delete=models.CASCADE, related_name="edits"
+    )
+    editor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="message_edits",
+    )
+    previous_content = models.TextField(default="")
+    new_content = models.TextField(default="")
+    previous_metadata = models.JSONField(default=dict, blank=True)
+    new_metadata = models.JSONField(default=dict, blank=True)
+    superseded_message_ids = models.JSONField(default=list, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "message_edits"
+        indexes = [
+            models.Index(fields=["message", "-created_at"]),
+            models.Index(fields=["editor", "-created_at"]),
+        ]
+
+    def __str__(self):
+        return f"Edit {self.id} on {self.message_id}"
 
 
 class MessageDelta(models.Model):

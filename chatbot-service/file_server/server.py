@@ -81,6 +81,96 @@ def _walk_tree(root: Path, base: Path):
     return entries
 
 
+def _openapi_spec():
+    server_url = os.environ.get("FILE_SERVER_BASE_URL", f"http://localhost:{PORT}").rstrip("/")
+    return {
+        "openapi": "3.1.0",
+        "info": {
+            "title": "BARC Local File Server API",
+            "version": "1.0.0",
+            "description": "Small HTTP API for storing, browsing, serving, and deleting local document files.",
+        },
+        "servers": [{"url": server_url}],
+        "paths": {
+            "/upload": {
+                "post": {
+                    "operationId": "uploadFile",
+                    "summary": "Store one uploaded file under DOCS_ROOT",
+                    "requestBody": {
+                        "required": True,
+                        "content": {
+                            "multipart/form-data": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": ["file"],
+                                    "properties": {
+                                        "file": {"type": "string", "format": "binary"},
+                                        "filename": {"type": "string"},
+                                        "user_id": {"type": "string", "default": "anonymous"},
+                                        "category": {"type": "string", "default": "misc"},
+                                        "date": {"type": "string", "format": "date"},
+                                    },
+                                }
+                            }
+                        },
+                    },
+                    "responses": {
+                        "200": {"description": "File stored", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/UploadResponse"}}}},
+                        "400": {"description": "Invalid upload"},
+                    },
+                }
+            },
+            "/browse": {
+                "get": {
+                    "operationId": "browseFiles",
+                    "summary": "Return a JSON tree of stored files",
+                    "parameters": [
+                        {"name": "user", "in": "query", "schema": {"type": "string"}},
+                        {"name": "date", "in": "query", "schema": {"type": "string", "format": "date"}},
+                    ],
+                    "responses": {"200": {"description": "File tree", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/BrowseResponse"}}}}},
+                }
+            },
+            "/files/{path}": {
+                "get": {
+                    "operationId": "getFile",
+                    "summary": "Serve one stored file",
+                    "parameters": [{"name": "path", "in": "path", "required": True, "schema": {"type": "string"}}],
+                    "responses": {"200": {"description": "File bytes"}, "404": {"description": "File not found"}},
+                },
+                "delete": {
+                    "operationId": "deleteFile",
+                    "summary": "Delete one stored file",
+                    "parameters": [{"name": "path", "in": "path", "required": True, "schema": {"type": "string"}}],
+                    "responses": {"200": {"description": "File deleted"}, "404": {"description": "File not found"}},
+                },
+            },
+        },
+        "components": {
+            "schemas": {
+                "UploadResponse": {
+                    "type": "object",
+                    "properties": {
+                        "ok": {"type": "boolean"},
+                        "path": {"type": "string"},
+                        "size": {"type": "integer"},
+                        "error": {"type": "string"},
+                    },
+                    "required": ["ok"],
+                },
+                "BrowseResponse": {
+                    "type": "object",
+                    "properties": {
+                        "ok": {"type": "boolean"},
+                        "tree": {"type": "array", "items": {"type": "object", "additionalProperties": True}},
+                    },
+                    "required": ["ok", "tree"],
+                },
+            }
+        },
+    }
+
+
 # ─── handler ──────────────────────────────────────────────────────────────────
 
 class Handler(BaseHTTPRequestHandler):
@@ -147,6 +237,10 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
         path   = parsed.path
+
+        if path == "/openapi.json":
+            _json(self, 200, _openapi_spec())
+            return
 
         if path == "/browse":
             qs = parse_qs(parsed.query)

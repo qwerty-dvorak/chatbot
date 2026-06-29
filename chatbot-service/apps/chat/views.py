@@ -1,15 +1,21 @@
+import json
+import logging
 import uuid
 
 from django.contrib import messages as flash_messages
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.db import transaction
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse
+from django.utils import timezone
 from django.views import View
 from django.views.generic import CreateView, DetailView, ListView, TemplateView
 
 from .forms import MessageForm
-from .models import Chat, ChatShare, Message
+from .models import Chat, ChatShare, Message, MessageEdit
+
+logger = logging.getLogger(__name__)
 
 
 class ChatListView(LoginRequiredMixin, ListView):
@@ -62,8 +68,24 @@ class ChatDetailView(LoginRequiredMixin, DetailView):
         for tc in tc_qs:
             tc_by_msg.setdefault(tc.message_id, []).append(tc)
 
+        inflight = any(
+            m.role == Message.Role.ASSISTANT
+            and m.status in (Message.Status.PENDING, Message.Status.STREAMING)
+            for m in chat_messages
+        )
+        last_user_message = next(
+            (m for m in reversed(chat_messages) if m.role == Message.Role.USER),
+            None,
+        )
+
         for msg in chat_messages:
             msg.tool_calls_data = tc_by_msg.get(msg.id, [])
+            msg.can_edit = (
+                last_user_message is not None
+                and msg.id == last_user_message.id
+                and not inflight
+                and not self.object.archived
+            )
 
         context["chat_messages"] = chat_messages
         context["form"] = MessageForm()
@@ -87,6 +109,7 @@ class ChatDetailView(LoginRequiredMixin, DetailView):
         if form.is_valid():
             user_message = Message.objects.create(
                 chat=self.object,
+                author=request.user,
                 role=Message.Role.USER,
                 content=form.cleaned_data.get("content", ""),
                 status=Message.Status.COMPLETED,
@@ -135,7 +158,6 @@ class ChatDetailView(LoginRequiredMixin, DetailView):
 
 def ingest_attachment(user, file, file_storage_path, sha256):
     """Create a DocumentReference + trigger RAG ingestion for a chat attachment."""
-    logger = logging.getLogger(__name__)
     try:
         from apps.documents.models import ContentBlob, ArtifactRevision, DocumentReference
         from apps.ingestion.models import IngestionJob
@@ -257,6 +279,126 @@ class ChatLoraView(LoginRequiredMixin, View):
         if request.headers.get("X-Requested-With") == "XMLHttpRequest":
             return JsonResponse({"status": "ok", "lora_adapter": lora or None})
         return redirect(request.POST.get("next") or reverse("chat:detail", args=[chat_id]))
+
+
+class ChatMessageEditView(LoginRequiredMixin, View):
+    """Rewrite the last user turn and queue a fresh assistant response."""
+
+    def post(self, request, chat_id, msg_id):
+        chat = get_object_or_404(Chat, id=chat_id, user=request.user)
+        if chat.archived:
+            return JsonResponse({"error": "Archived chats cannot be edited."}, status=409)
+
+        try:
+            if request.headers.get("Content-Type", "").startswith("application/json"):
+                data = json.loads(request.body or "{}")
+                content = data.get("content", "")
+            else:
+                content = request.POST.get("content", "")
+        except json.JSONDecodeError:
+            return JsonResponse({"error": "Invalid JSON body."}, status=400)
+
+        if not isinstance(content, str):
+            return JsonResponse({"error": "Message content must be a string."}, status=400)
+
+        with transaction.atomic():
+            message = get_object_or_404(
+                Message.objects.select_for_update(),
+                id=msg_id,
+                chat=chat,
+                role=Message.Role.USER,
+            )
+            last_user = (
+                Message.objects
+                .select_for_update()
+                .filter(chat=chat, role=Message.Role.USER)
+                .order_by("-created_at")
+                .first()
+            )
+            if not last_user or last_user.id != message.id:
+                return JsonResponse(
+                    {"error": "Only the latest user message can be edited."},
+                    status=409,
+                )
+
+            if Message.objects.filter(
+                chat=chat,
+                role=Message.Role.ASSISTANT,
+                status__in=[Message.Status.PENDING, Message.Status.STREAMING],
+            ).exists():
+                return JsonResponse(
+                    {"error": "Wait for the current response to finish before editing."},
+                    status=409,
+                )
+
+            if not content.strip() and not message.attachments:
+                return JsonResponse(
+                    {"error": "Message content or attachment is required."},
+                    status=400,
+                )
+
+            if content == message.content:
+                return JsonResponse({
+                    "status": "unchanged",
+                    "message_id": str(message.id),
+                    "content": message.content,
+                })
+
+            superseded = list(
+                Message.objects
+                .filter(chat=chat, created_at__gt=message.created_at)
+                .order_by("created_at")
+                .values_list("id", flat=True)
+            )
+            previous_metadata = dict(message.metadata or {})
+            new_metadata = dict(previous_metadata)
+            new_metadata.pop("rag_search_log", None)
+            new_metadata["edited"] = True
+            new_metadata["last_edit_at"] = timezone.now().isoformat()
+
+            edit = MessageEdit.objects.create(
+                message=message,
+                editor=request.user,
+                previous_content=message.content,
+                new_content=content,
+                previous_metadata=previous_metadata,
+                new_metadata=new_metadata,
+                superseded_message_ids=[str(item) for item in superseded],
+            )
+
+            if superseded:
+                Message.objects.filter(id__in=superseded).delete()
+
+            now = timezone.now()
+            message.content = content
+            message.metadata = new_metadata
+            message.edit_count = message.edit_count + 1
+            message.edited_at = now
+            message.status = Message.Status.COMPLETED
+            message.save(update_fields=["content", "metadata", "edit_count", "edited_at", "status"])
+
+            assistant = Message.objects.create(
+                chat=chat,
+                role=Message.Role.ASSISTANT,
+                content="",
+                status=Message.Status.PENDING,
+                metadata={
+                    "thinking_mode": bool(new_metadata.get("thinking_mode")),
+                    "regenerated_from_edit_id": str(edit.id),
+                },
+            )
+            chat.updated_at = now
+            chat.save(update_fields=["updated_at"])
+
+        return JsonResponse({
+            "status": "edited",
+            "message_id": str(message.id),
+            "assistant_message_id": str(assistant.id),
+            "content": message.content,
+            "edit_count": message.edit_count,
+            "edited_at": message.edited_at.isoformat() if message.edited_at else None,
+            "stream_url": reverse("chat:stream", args=[chat.id]),
+        })
 
 
 class ChatCompactView(LoginRequiredMixin, View):
@@ -478,7 +620,7 @@ class SharedChatContinueView(LoginRequiredMixin, View):
                 role=msg.role,
                 content=msg.content,
                 attachments=msg.attachments,
-                tool_calls_data=msg.tool_calls_data,
+                tool_invocations=msg.tool_invocations,
                 metadata=msg.metadata,
                 status=msg.status,
                 created_at=msg.created_at,

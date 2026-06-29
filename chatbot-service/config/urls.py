@@ -4,7 +4,7 @@ from django.shortcuts import redirect
 from django.urls import include, path
 
 from apps.accounts.views import SettingsView
-from apps.api import health_check, stats
+from apps.api import health_check, openapi_json, stats
 from apps.chat.views import SharedChatContinueView, SharedChatView
 
 urlpatterns = [
@@ -26,4 +26,5 @@ urlpatterns = [
     path("settings/", SettingsView.as_view(), name="settings"),
     path("api/health/", health_check, name="api-health"),
     path("api/stats/", stats, name="api-stats"),
+    path("openapi.json", openapi_json, name="openapi-json"),
 ]

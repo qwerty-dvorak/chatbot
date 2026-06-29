@@ -1924,6 +1924,131 @@ input[type=number]:focus, input[type=url]:focus, textarea:focus, select:focus {
   box-shadow: none;
 }
 
+.msg-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.msg-icon-btn {
+  width: 26px;
+  height: 26px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text3);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity .12s, background .12s, color .12s, border-color .12s;
+}
+
+.msg:hover .msg-icon-btn,
+.msg:focus-within .msg-icon-btn,
+.msg-icon-btn.copied {
+  opacity: 1;
+}
+
+.msg-icon-btn:hover,
+.msg-icon-btn.copied {
+  background: #f0f0f2;
+  border-color: #e2e2e7;
+  color: var(--text);
+}
+
+.msg-meta-row,
+.msg-bot-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 5px;
+}
+
+.msg-meta-row {
+  justify-content: flex-end;
+}
+
+.msg-bot-meta-row {
+  justify-content: space-between;
+}
+
+.msg-edited-label {
+  margin-left: 6px;
+  color: var(--text3);
+}
+
+.msg-edit-panel {
+  display: none;
+  width: min(680px, 82%);
+  margin-top: 6px;
+}
+
+.msg.editing .msg-bubble,
+.msg.editing .msg-meta-row {
+  display: none;
+}
+
+.msg.editing .msg-edit-panel {
+  display: block;
+}
+
+.msg-edit-input {
+  width: 100%;
+  min-height: 92px;
+  max-height: 220px;
+  resize: vertical;
+  border: 1px solid #d8d8df;
+  border-radius: 14px;
+  padding: 11px 13px;
+  background: #ffffff;
+  box-shadow: 0 6px 18px rgba(0,0,0,.06);
+  color: var(--text);
+  font: .98rem/1.5 var(--font);
+}
+
+.msg-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.msg-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid #d8d8df;
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--text2);
+  cursor: pointer;
+  font: 600 .78rem/1 var(--font);
+  padding: 7px 10px;
+}
+
+.msg-action-btn:hover {
+  background: #f5f5f7;
+  color: var(--text);
+}
+
+.msg-action-primary {
+  background: #111111;
+  border-color: #111111;
+  color: #ffffff;
+}
+
+.msg-action-primary:hover {
+  background: #303030;
+  color: #ffffff;
+}
+
+.msg-action-btn:disabled {
+  opacity: .55;
+  cursor: default;
+}
+
 .msg-user .msg-bubble:hover {
   box-shadow: none;
 }
@@ -2188,6 +2313,14 @@ input[type=number]:focus, input[type=url]:focus, textarea:focus, select:focus {
 
   .msg-user .msg-bubble {
     max-width: 92%;
+  }
+
+  .msg-edit-panel {
+    width: 92%;
+  }
+
+  .msg-icon-btn {
+    opacity: 1;
   }
 
   .input-area {

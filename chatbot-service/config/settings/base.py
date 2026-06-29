@@ -82,6 +82,7 @@ MEDIA_ROOT = os.environ.get("MEDIA_ROOT", str(BASE_DIR / "media"))
 
 # Local document storage root — organised as docs/<user_id>/<date>/<category>/<file>
 DOCS_ROOT = os.environ.get("DOCS_ROOT", str(BASE_DIR / "data" / "docs"))
+FILE_SERVER_BASE_URL = os.environ.get("FILE_SERVER_BASE_URL", "http://localhost:8888")
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 

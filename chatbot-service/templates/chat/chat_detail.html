@@ -77,11 +77,21 @@
 
       {% for msg in chat_messages %}
         {% if msg.role == 'user' %}
-          <div class="msg msg-user">
+          <div class="msg msg-user" data-message-id="{{ msg.id }}" data-message-role="user">
             {% if msg.metadata.thinking_mode %}
               <div class="msg-mode-label">Thinking enabled</div>
             {% endif %}
-            <div class="msg-bubble">{{ msg.content }}</div>
+            <div class="msg-bubble" data-message-content>{{ msg.content }}</div>
+            <div class="msg-edit-panel" data-edit-panel>
+              <textarea class="msg-edit-input" data-edit-input rows="3">{{ msg.content }}</textarea>
+              <div class="msg-edit-actions">
+                <button type="button" class="msg-action-btn msg-action-primary" onclick="saveMessageEdit(this, '{{ chat.id }}', '{{ msg.id }}')" title="Save edit">
+                  <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M13.78 3.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 8.28a.75.75 0 111.06-1.06L6 9.94l6.72-6.72a.75.75 0 011.06 0z"/></svg>
+                  Save
+                </button>
+                <button type="button" class="msg-action-btn" onclick="cancelMessageEdit(this)" title="Cancel edit">Cancel</button>
+              </div>
+            </div>
             {% if msg.attachments %}
               <div class="attach-cards">
                 {% for a in msg.attachments %}
@@ -193,7 +203,21 @@
                 </div>
               {% endif %}
             {% endwith %}
-            <div class="msg-time">{{ msg.created_at|time:"H:i" }}</div>
+            <div class="msg-meta-row">
+              <div class="msg-actions">
+                <button type="button" class="msg-icon-btn" onclick="copySingleMessage(this)" title="Copy message" aria-label="Copy message">
+                  <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M4.5 1A1.5 1.5 0 003 2.5V3H2.5A1.5 1.5 0 001 4.5v9A1.5 1.5 0 002.5 15h7A1.5 1.5 0 0011 13.5V13h.5A1.5 1.5 0 0013 11.5v-9A1.5 1.5 0 0011.5 1h-7zM11 12V4.5A1.5 1.5 0 009.5 3H4v-.5a.5.5 0 01.5-.5h7a.5.5 0 01.5.5v9a.5.5 0 01-.5.5H11zM2.5 4h7a.5.5 0 01.5.5v9a.5.5 0 01-.5.5h-7a.5.5 0 01-.5-.5v-9a.5.5 0 01.5-.5z"/></svg>
+                </button>
+                {% if msg.can_edit %}
+                  <button type="button" class="msg-icon-btn" onclick="startMessageEdit(this)" title="Edit last message" aria-label="Edit last message">
+                    <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M11.7 1.3a1 1 0 011.4 0l1.6 1.6a1 1 0 010 1.4l-8.9 8.9-3.5.7.7-3.5 8.7-9.1zM10.9 3.5l1.6 1.6 1.1-1.1-1.6-1.6-1.1 1.1zM10.1 4.3l-6.2 6.5-.3 1.5 1.5-.3 6.3-6.3-1.3-1.4z"/></svg>
+                  </button>
+                {% endif %}
+              </div>
+              <div class="msg-time">
+                {{ msg.created_at|time:"H:i" }}{% if msg.edit_count %}<span class="msg-edited-label">edited</span>{% endif %}
+              </div>
+            </div>
           </div>
 
         {% elif msg.role == 'assistant' %}
@@ -223,7 +247,7 @@
               </div>
             </div>
           {% elif msg.content or msg.tool_calls_data %}
-            <div class="msg msg-assistant">
+            <div class="msg msg-assistant" data-message-id="{{ msg.id }}" data-message-role="assistant">
               <div class="msg-bot-avatar">
                 <svg width="13" height="13" viewBox="0 0 20 20" fill="none">
                   <path d="M4 13.5l3.5-7 2.5 5 2-2.5 3.5 5" stroke="#fff" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
@@ -256,7 +280,14 @@
                 {% if msg.content %}
                   <div class="msg-content">{{ msg.content|format_content }}</div>
                 {% endif %}
-                <div class="msg-bot-time">{{ msg.created_at|time:"H:i" }}</div>
+                <div class="msg-bot-meta-row">
+                  <div class="msg-bot-time">{{ msg.created_at|time:"H:i" }}{% if msg.edit_count %}<span class="msg-edited-label">edited</span>{% endif %}</div>
+                  <div class="msg-actions">
+                    <button type="button" class="msg-icon-btn" onclick="copySingleMessage(this)" title="Copy message" aria-label="Copy message">
+                      <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M4.5 1A1.5 1.5 0 003 2.5V3H2.5A1.5 1.5 0 001 4.5v9A1.5 1.5 0 002.5 15h7A1.5 1.5 0 0011 13.5V13h.5A1.5 1.5 0 0013 11.5v-9A1.5 1.5 0 0011.5 1h-7zM11 12V4.5A1.5 1.5 0 009.5 3H4v-.5a.5.5 0 01.5-.5h7a.5.5 0 01.5.5v9a.5.5 0 01-.5.5H11zM2.5 4h7a.5.5 0 01.5.5v9a.5.5 0 01-.5.5h-7a.5.5 0 01-.5-.5v-9a.5.5 0 01.5-.5z"/></svg>
+                    </button>
+                  </div>
+                </div>
                 {% if msg.metadata.rag_used or msg.tool_calls_data %}
                   <div class="msg-footer-row">
                     {% if msg.metadata.rag_used %}
@@ -1312,6 +1343,96 @@ document.addEventListener('click', function(e) {
   if (e.target.classList.contains('share-modal-overlay')) closeShareModal();
 });
 
+/* ── Per-message copy/edit ───────────────────────────────── */
+function getMessageText(msg) {
+  if (!msg) return '';
+  var contentEl = msg.querySelector('[data-message-content]') || msg.querySelector('.msg-content');
+  if (!contentEl) return '';
+  return (contentEl.textContent || contentEl.innerText || '').trim();
+}
+function copySingleMessage(btn) {
+  var msg = btn.closest('.msg');
+  var text = getMessageText(msg);
+  if (!text) {
+    showToast('No message text to copy', 'info');
+    return;
+  }
+  navigator.clipboard.writeText(text).then(function() {
+    btn.classList.add('copied');
+    showToast('Message copied', 'success');
+    setTimeout(function() { btn.classList.remove('copied'); }, 1400);
+  }).catch(function() {
+    showToast('Failed to copy message', 'error');
+  });
+}
+function startMessageEdit(btn) {
+  var msg = btn.closest('.msg');
+  if (!msg) return;
+  msg.classList.add('editing');
+  var input = msg.querySelector('[data-edit-input]');
+  if (input) {
+    input.focus();
+    input.selectionStart = input.selectionEnd = input.value.length;
+    input.style.height = 'auto';
+    input.style.height = Math.min(input.scrollHeight, 220) + 'px';
+    if (!input.dataset.autosizeBound) {
+      input.addEventListener('input', function() {
+        this.style.height = 'auto';
+        this.style.height = Math.min(this.scrollHeight, 220) + 'px';
+      });
+      input.dataset.autosizeBound = '1';
+    }
+  }
+}
+function cancelMessageEdit(btn) {
+  var msg = btn.closest('.msg');
+  if (!msg) return;
+  var input = msg.querySelector('[data-edit-input]');
+  var content = msg.querySelector('[data-message-content]');
+  if (input && content) input.value = content.textContent || '';
+  msg.classList.remove('editing');
+}
+function saveMessageEdit(btn, chatId, msgId) {
+  var msg = btn.closest('.msg');
+  var input = msg ? msg.querySelector('[data-edit-input]') : null;
+  if (!input) return;
+  var content = input.value;
+  btn.disabled = true;
+  btn.dataset.originalText = btn.textContent;
+  btn.textContent = 'Saving...';
+  fetch('/chats/' + chatId + '/messages/' + msgId + '/edit/', {
+    method: 'POST',
+    headers: {
+      'X-CSRFToken': '{{ csrf_token }}',
+      'X-Requested-With': 'XMLHttpRequest',
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ content: content })
+  })
+  .then(function(r) {
+    return r.json().then(function(data) {
+      if (!r.ok) throw data;
+      return data;
+    });
+  })
+  .then(function(data) {
+    if (data.status === 'unchanged') {
+      msg.classList.remove('editing');
+      showToast('No changes to save', 'info');
+      btn.disabled = false;
+      btn.textContent = btn.dataset.originalText || 'Save';
+      return;
+    }
+    showToast('Message updated; regenerating response', 'success');
+    window.location.reload();
+  })
+  .catch(function(data) {
+    showToast((data && data.error) || 'Failed to edit message', 'error');
+    btn.disabled = false;
+    btn.textContent = btn.dataset.originalText || 'Save';
+  });
+}
+
 /* ── Copy conversation ──────────────────────────────────── */
 function copyConversation(format) {
   var msgs = document.querySelectorAll('.msg');
@@ -1320,10 +1441,7 @@ function copyConversation(format) {
   msgs.forEach(function(m) {
     var isUser = m.classList.contains('msg-user');
     var role = isUser ? 'You' : 'Assistant';
-    var contentEl = isUser ? m.querySelector('.msg-bubble') : m.querySelector('.msg-content');
-    if (!contentEl) return;
-    var text = contentEl.textContent || contentEl.innerText || '';
-    text = text.trim();
+    var text = getMessageText(m);
     if (!text) return;
     if (format === 'markdown') {
       lines.push('**' + role + ':** ' + text);
