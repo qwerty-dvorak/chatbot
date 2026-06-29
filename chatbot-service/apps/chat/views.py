@@ -68,9 +68,9 @@ class ChatDetailView(LoginRequiredMixin, DetailView):
         for tc in tc_qs:
             tc_by_msg.setdefault(tc.message_id, []).append(tc)
 
-        inflight = any(
+        active_streaming = any(
             m.role == Message.Role.ASSISTANT
-            and m.status in (Message.Status.PENDING, Message.Status.STREAMING)
+            and m.status == Message.Status.STREAMING
             for m in chat_messages
         )
         last_user_message = next(
@@ -83,7 +83,7 @@ class ChatDetailView(LoginRequiredMixin, DetailView):
             msg.can_edit = (
                 last_user_message is not None
                 and msg.id == last_user_message.id
-                and not inflight
+                and not active_streaming
                 and not self.object.archived
             )
 
@@ -324,7 +324,7 @@ class ChatMessageEditView(LoginRequiredMixin, View):
             if Message.objects.filter(
                 chat=chat,
                 role=Message.Role.ASSISTANT,
-                status__in=[Message.Status.PENDING, Message.Status.STREAMING],
+                status=Message.Status.STREAMING,
             ).exists():
                 return JsonResponse(
                     {"error": "Wait for the current response to finish before editing."},

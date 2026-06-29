@@ -1941,7 +1941,7 @@ input[type=number]:focus, input[type=url]:focus, textarea:focus, select:focus {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  opacity: 0;
+  opacity: .78;
   transition: opacity .12s, background .12s, color .12s, border-color .12s;
 }
 

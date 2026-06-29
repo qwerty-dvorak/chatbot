@@ -174,8 +174,14 @@ class MessageEdit(models.Model):
     class Meta:
         db_table = "message_edits"
         indexes = [
-            models.Index(fields=["message", "-created_at"]),
-            models.Index(fields=["editor", "-created_at"]),
+            models.Index(
+                fields=["message", "-created_at"],
+                name="message_edi_message_e057a3_idx",
+            ),
+            models.Index(
+                fields=["editor", "-created_at"],
+                name="message_edi_editor__07a020_idx",
+            ),
         ]
 
     def __str__(self):

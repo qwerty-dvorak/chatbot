@@ -164,14 +164,14 @@ class ChatAPITest(TestCase):
         self.assertEqual(first.content, "First")
         self.assertEqual(MessageEdit.objects.count(), 0)
 
-    def test_edit_rejects_while_assistant_response_in_flight(self):
-        chat = Chat.objects.create(user=self.user, title="Edit", path="edit-inflight")
+    def test_edit_rejects_while_assistant_response_streaming(self):
+        chat = Chat.objects.create(user=self.user, title="Edit", path="edit-streaming")
         user_msg = Message.objects.create(chat=chat, role=Message.Role.USER, content="Question")
         Message.objects.create(
             chat=chat,
             role=Message.Role.ASSISTANT,
             content="",
-            status=Message.Status.PENDING,
+            status=Message.Status.STREAMING,
         )
 
         response = self.client.post(
