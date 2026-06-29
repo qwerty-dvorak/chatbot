@@ -4,9 +4,6 @@
 {% block main_class %}full-h{% endblock %}
 {% block head %}
 {{ block.super }}
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-<script>document.addEventListener('DOMContentLoaded', function(){ hljs.highlightAll(); });</script>
 {% endblock %}
 
 {% block body %}
@@ -660,9 +657,7 @@ function openFilePreview(url, mime) {
     body.appendChild(pre);
     fetch(url).then(function(r) { return r.text(); }).then(function(t) {
       pre.textContent = t;
-      if (typeof hljs !== 'undefined') {
-        try { hljs.highlightElement(pre); } catch(e) {}
-      }
+      try { window.highlightElement(pre); } catch(e) {}
     }).catch(function() { pre.textContent = 'Failed to load file.'; });
   }
   container.appendChild(body);
@@ -994,8 +989,9 @@ function toggleKnowledge(btn, chatId, msgId, index) {
 
   /* ── after each text render, highlight code blocks ── */
   function highlightCodeBlocks(container) {
-    container.querySelectorAll('pre code').forEach(function(el) {
-      if (typeof hljs !== 'undefined') hljs.highlightElement(el);
+    container.querySelectorAll('pre code[data-highlighted]').forEach(function(el) {});
+    container.querySelectorAll('pre code:not([data-highlighted])').forEach(function(el) {
+      try { window.highlightElement(el); } catch(e) {}
     });
   }
 

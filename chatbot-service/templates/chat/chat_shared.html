@@ -6,9 +6,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{{ chat.title }} — Shared Chat</title>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-  <script>document.addEventListener('DOMContentLoaded', function(){ hljs.highlightAll(); });</script>
   <link rel="stylesheet" href="{% static 'css/app.css' %}">
   <style>
     .shared-page { background: var(--bg); min-height: 100vh; display: flex; flex-direction: column; }
@@ -83,6 +80,11 @@
       .shared-msg-wrap { padding: 20px 16px 40px; }
       .shared-chat-title { max-width: 160px; }
     }
+    .hl-kw  { color: #c792ea; }
+    .hl-str { color: #c3e88d; }
+    .hl-cm  { color: #676e95; }
+    .hl-num { color: #f78c6c; }
+    .hl-deco { color: #89ddff; }
   </style>
 </head>
 <body class="shared-page">
@@ -182,5 +184,6 @@
   {% endif %}
 </div>
 
+<script src="{% static 'js/app.js' %}"></script>
 </body>
 </html>

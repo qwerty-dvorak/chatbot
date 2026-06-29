@@ -2275,6 +2275,13 @@ input[type=number]:focus, input[type=url]:focus, textarea:focus, select:focus {
   border-radius: 18px;
 }
 
+/* ── Syntax highlighting (built-in, no CDN) ────────────────────────────── */
+.hl-kw  { color: #c792ea; }
+.hl-str { color: #c3e88d; }
+.hl-cm  { color: #676e95; }
+.hl-num { color: #f78c6c; }
+.hl-deco { color: #89ddff; }
+
 @media (max-width: 860px) {
   .app {
     height: auto;
