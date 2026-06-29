@@ -19,6 +19,8 @@ class PreparedImage:
 
 
 def preprocess_images(images: list[bytes], max_height: int | None = None) -> list[PreparedImage]:
+    if not all(isinstance(img, bytes) for img in images):
+        raise TypeError(f"preprocess_images expects list[bytes], got types: {[type(img).__name__ for img in images]}")
     limit = max_height or cfg.ocr_max_image_height
     prepared: list[PreparedImage] = []
     derived_index = 0

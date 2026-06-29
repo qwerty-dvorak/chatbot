@@ -41,7 +41,7 @@ class RawDocument:
     path: str
     content_type: ContentType
     text: str                              # full extracted text
-    images: list[tuple[bytes, str]] = field(default_factory=list)  # (raw bytes, page text)
+    images: list[bytes] = field(default_factory=list)  # raw PNG bytes
     metadata: dict = field(default_factory=dict)
 
 

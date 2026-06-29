@@ -31,15 +31,15 @@ def _extract_text(path: Path) -> RawDocument:
 def _extract_pdf_at_dpi(path: Path, dpi: int) -> RawDocument:
     """Render each PDF page as a PNG at the requested DPI."""
     doc = fitz.open(str(path))
-    images: list[tuple[bytes, str]] = []
+    images: list[bytes] = []
     matrix = fitz.Matrix(dpi / 72, dpi / 72)
 
     for page in doc:
         try:
             pix = page.get_pixmap(matrix=matrix, alpha=False)
-            images.append((pix.tobytes("png"), ""))
+            images.append(pix.tobytes("png"))
         except Exception:
-            images.append((b"", ""))
+            images.append(b"")
 
     page_count = doc.page_count
     doc.close()
@@ -83,7 +83,7 @@ def _extract_image(path: Path) -> RawDocument:
         path=str(path),
         content_type=ContentType.IMAGE,
         text="",
-        images=[(path.read_bytes(), "")],
+        images=[path.read_bytes()],
         metadata=_metadata(path),
     )
 

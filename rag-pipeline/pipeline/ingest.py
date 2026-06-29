@@ -152,13 +152,13 @@ def ingest_path(
             # --- Extract ---
             doc: RawDocument = extract(str(file_path))
 
-            page_images = [img for img, _ in doc.images] if doc.images else []
+            page_images = list(doc.images) if doc.images else []
             ocr_texts: list[str] = []
             image_chunks_placeholder: list[Chunk] = []
 
             if page_images:
                 # Track B placeholder chunks (filled after OCR)
-                for i, (img_bytes, _) in enumerate(doc.images):
+                for i, img_bytes in enumerate(doc.images):
                     image_chunks_placeholder.append(Chunk(
                         id=uuid.uuid4().hex,
                         source_path=doc.path,
