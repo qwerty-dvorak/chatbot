@@ -1,9 +1,12 @@
-"""Raw object store for the RAG pipeline.
+"""
+Raw object store for the RAG pipeline.
 
 Stores raw document bytes (PDF, text, images) on the filesystem, keyed by
 a content-hash.  The live server only ever references objects by their store
 key — the raw bytes live on disk.
 """
+
+from __future__ import annotations
 
 import hashlib
 import os
@@ -14,17 +17,20 @@ from .config import cfg
 
 
 def _store_root() -> Path:
+    """Return the store root directory, creating it if needed."""
     root = Path(cfg.object_store_path)
     root.mkdir(parents=True, exist_ok=True)
     return root
 
 
 def _content_key(data: bytes) -> str:
+    """Return the SHA-256 hex digest of data."""
     return hashlib.sha256(data).hexdigest()
 
 
 def store(data: bytes, suffix: str = "") -> str:
-    """Store raw bytes and return the content-addressed key.
+    """
+    Store raw bytes and return the content-addressed key.
 
     Args:
         data:   Raw bytes to store.
@@ -33,6 +39,7 @@ def store(data: bytes, suffix: str = "") -> str:
 
     Returns:
         The SHA-256 hex digest used as the storage key.
+
     """
     key = _content_key(data)
     root = _store_root()
@@ -47,7 +54,8 @@ def store(data: bytes, suffix: str = "") -> str:
 
 
 def retrieve(key: str) -> bytes:
-    """Retrieve raw bytes by store key.
+    """
+    Retrieve raw bytes by store key.
 
     Args:
         key: The SHA-256 hex digest returned by :func:`store`.
@@ -57,31 +65,31 @@ def retrieve(key: str) -> bytes:
 
     Raises:
         FileNotFoundError: If *key* does not exist in the store.
+
     """
     root = _store_root()
     prefix_dir = root / key[:2]
     for f in prefix_dir.iterdir():
         if f.stem == key:
             return f.read_bytes()
-    raise FileNotFoundError(f"Object not found in store: {key}")
+    msg = f"Object not found in store: {key}"
+    raise FileNotFoundError(msg)
 
 
 def store_file(source_path: str) -> str:
-    """Convenience: read a file from disk and store its bytes.
-
-    Returns:
-        The SHA-256 key.
-    """
+    """Read a file from disk and store its bytes, returning the SHA-256 key."""
     data = Path(source_path).read_bytes()
     ext = Path(source_path).suffix.lower()
     return store(data, suffix=ext)
 
 
 def delete(key: str) -> bool:
-    """Delete an object from the store by key.
+    """
+    Delete an object from the store by key.
 
     Returns:
         True if the object was found and deleted, False otherwise.
+
     """
     root = _store_root()
     prefix_dir = root / key[:2]

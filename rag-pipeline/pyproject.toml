@@ -8,7 +8,6 @@ dependencies = [
     "click>=8.0.0",
     "fastapi>=0.119.1,<0.120",
     "httpx>=0.27.0",
-    "litellm>=1.78.7",
     "numpy>=1.24.0",
     "openai>=1.0.0",
     "paddleocr>=3.3.0",
@@ -29,11 +28,49 @@ dependencies = [
 
 [tool.uv]
 exclude-newer = "2025-10-23T12:36:00Z"
+
 [dependency-groups]
-dev = []
+dev = ["ruff>=0.11,<1"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["pipeline"]
+
+[tool.ruff]
+line-length = 150
+target-version = "py312"
+fix = true
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+    # Incompatible: these pairs conflict with each other
+    "D203",
+    "D212",
+    "COM812", # Conflicts with formatter
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = [
+    "S101",   # assert allowed in tests
+    "D40",    # docstrings in tests
+    "D41",    # docstrings in tests
+    "D",      # all docstrings in tests
+    "ANN",    # type annotations in tests
+    "PLR2004",# magic value comparison
+    "PLR0913",# too many arguments
+    "T201",   # print allowed
+    "ARG001", # unused function arg
+    "ARG002", # unused method arg
+]
+"pipeline/__init__.py" = [
+    "D",      # no docstrings in __init__
+    "RUF012", # mutable class defaults
+]
+"mock_server/*" = [
+    "S101",   # assert
+    "ANN",    # type annotations
+    "D",      # docstrings
+]
 
 [build-system]
 requires = ["hatchling"]

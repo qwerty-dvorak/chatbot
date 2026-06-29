@@ -1,4 +1,5 @@
-"""Step-level progress tracker for pipeline jobs.
+"""
+Step-level progress tracker for pipeline jobs.
 
 Each job progresses through defined steps (e.g. extract, store, chunk, hyde,
 embed, index).  Progress is persisted in the SQLite job store so the API can
@@ -7,17 +8,21 @@ expose it to frontends in real time.
 
 from __future__ import annotations
 
-import json
 import logging
 import time
-from dataclasses import dataclass, field
-from typing import Callable, Optional
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class Step:
+    """A single step in a pipeline job's progress."""
+
     name: str
     status: str = "pending"  # pending | running | completed | failed
     started_at: float = 0.0
@@ -27,7 +32,8 @@ class Step:
 
 
 class ProgressTracker:
-    """Tracks step-level progress for a single pipeline job.
+    """
+    Tracks step-level progress for a single pipeline job.
 
     Usage::
 
@@ -48,17 +54,17 @@ class ProgressTracker:
         self,
         job_id: str,
         step_names: list[str],
-        persist_fn: Optional[Callable[[str, list[dict]], None]] = None,
-    ):
+        persist_fn: Callable[[str, list[dict]], None] | None = None,
+    ) -> None:
+        """Initialize tracker for a job with named steps."""
         self.job_id = job_id
         self._persist_fn = persist_fn
-        self.steps: dict[str, Step] = {
-            name: Step(name=name) for name in step_names
-        }
+        self.steps: dict[str, Step] = {name: Step(name=name) for name in step_names}
         self._order = step_names
 
     @property
-    def current_step(self) -> Optional[str]:
+    def current_step(self) -> str | None:
+        """Return the name of the currently running step, if any."""
         for name in self._order:
             if self.steps[name].status == "running":
                 return name
@@ -66,6 +72,7 @@ class ProgressTracker:
 
     @property
     def summary(self) -> dict:
+        """Return a summary of step completion counts."""
         completed = sum(1 for s in self.steps.values() if s.status == "completed")
         failed = sum(1 for s in self.steps.values() if s.status == "failed")
         running = sum(1 for s in self.steps.values() if s.status == "running")
@@ -79,6 +86,7 @@ class ProgressTracker:
         }
 
     def to_dict(self) -> list[dict]:
+        """Serialize steps to a list of dicts."""
         return [
             {
                 "name": s.name,
@@ -96,45 +104,42 @@ class ProgressTracker:
             self._persist_fn(self.job_id, self.to_dict())
 
     def start(self, name: str, detail: str = "") -> None:
+        """Mark a step as running and persist."""
         step = self.steps.get(name)
         if step is None:
-            raise ValueError(f"Unknown step {name!r}")
+            msg = f"Unknown step {name!r}"
+            raise ValueError(msg)
         step.status = "running"
         step.started_at = time.time()
         step.detail = detail
         log_line = f"[job {self.job_id[:8]}] step={name}  status=running  {detail}"
-        print(log_line)
         logger.info(log_line)
         self._persist()
 
     def complete(self, name: str, detail: str = "") -> None:
+        """Mark a step as completed and persist."""
         step = self.steps.get(name)
         if step is None:
-            raise ValueError(f"Unknown step {name!r}")
+            msg = f"Unknown step {name!r}"
+            raise ValueError(msg)
         step.status = "completed"
         step.completed_at = time.time()
         elapsed = step.completed_at - step.started_at if step.started_at else 0
         step.detail = detail
-        log_line = (
-            f"[job {self.job_id[:8]}] step={name}  status=completed  "
-            f"elapsed={elapsed:.2f}s  {detail}"
-        )
-        print(log_line)
+        log_line = f"[job {self.job_id[:8]}] step={name}  status=completed  elapsed={elapsed:.2f}s  {detail}"
         logger.info(log_line)
         self._persist()
 
     def fail(self, name: str, error: str, detail: str = "") -> None:
+        """Mark a step as failed and persist."""
         step = self.steps.get(name)
         if step is None:
-            raise ValueError(f"Unknown step {name!r}")
+            msg = f"Unknown step {name!r}"
+            raise ValueError(msg)
         step.status = "failed"
         step.completed_at = time.time()
         step.error = error
         step.detail = detail
-        log_line = (
-            f"[job {self.job_id[:8]}] step={name}  status=failed  "
-            f"error={error}  {detail}"
-        )
-        print(log_line)
+        log_line = f"[job {self.job_id[:8]}] step={name}  status=failed  error={error}  {detail}"
         logger.error(log_line)
         self._persist()

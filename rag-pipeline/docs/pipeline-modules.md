@@ -127,15 +127,12 @@ Key fields and their env vars:
 
 ## `pipeline/extract.py`
 
-### `extract(path: str) -> RawDocument`
+### `extract(path: str, *, fast: bool = False) -> RawDocument`
 
 Extract plain text, PDF text and extractable embedded images, or standalone image
-bytes. PDF extraction uses pypdf and does not render every page.
-
-### `extract_fast(path: str) -> RawDocument`
-
-For PDFs, extracts only the text layer and does not enumerate embedded images.
-Instant-tier ingestion uses this path to avoid image extraction overhead.
+bytes. PDF extraction uses pypdf and does not render every page. When `fast=True`,
+only the PDF text layer is extracted without enumerating embedded images.
+Instant-tier ingestion uses this fast path to avoid image extraction overhead.
 
 ---
 
@@ -184,7 +181,7 @@ Filters out any chunks with `image_data` set. Returns `EmbeddedChunk` with
 
 This function handles both document chunks and HYPOTHETICAL_QUESTION chunks
 (they are both text-only, no image_data). The caller
-(`text_pipeline.py`) passes all chunks — document + hypothetical questions —
+(`process.py`) passes all chunks — document + hypothetical questions —
 to this single function.
 
 ### `embed_multimodal(chunks: list[Chunk]) -> list[EmbeddedChunk]`
@@ -200,13 +197,13 @@ Route text chunks to `embed_text`, image chunks to `embed_multimodal`.
 
 ---
 
-## `pipeline/index.py`
+## `pipeline/milvus.py`
 
 ### `connect_milvus() -> None`
 
 Initialise the `MilvusClient` singleton. Idempotent.
 
-### `_ensure_collection(name: str, dim: int) -> None`
+### `ensure_collection(name: str, dim: int) -> None`
 
 Create + load a Milvus collection if it doesn't exist. Schema: 8 fields
 (`id`, `source_path`, `text`, `chunk_type`, `parent_id`, `window_text`,
@@ -221,11 +218,11 @@ Insert embedded chunks into Milvus. Routes by `is_multimodal`:
 Document chunks and hypothetical question chunks both go to `text_collection`
 with their respective `chunk_type` values.
 
-### `_chunk_from_hit(hit: dict) -> Chunk`
+### `chunk_from_hit(hit: dict) -> Chunk`
 
 Reconstruct a `Chunk` from a MilvusClient search result dict. Handles all
 `chunk_type` values including `hypothetical_question`. Used in both
-`retrieve.py` (search results) and `search.py` (query-to-query resolution).
+`retrieve.py` (search results) and `milvus.py` (query-to-query resolution).
 
 ### `delete_chunks_by_source(source_path: str, collection_name: str) -> int`
 
@@ -233,11 +230,15 @@ Delete all chunks for a file using a Milvus scalar filter. Returns deleted
 count. This deletes both document chunks and hypothetical question chunks
 (since they share the same `source_path`).
 
-### `build_bm25_index(chunks: list[Chunk]) -> BM25Okapi`
+---
+
+## `pipeline/bm25.py`
+
+### `build_index(chunks: list[Chunk]) -> BM25Okapi`
 
 Build BM25 index from chunk texts and save to `cfg.bm25_index_path`.
 
-### `load_bm25_index() -> tuple[BM25Okapi, list[Chunk]]`
+### `load_index() -> tuple[BM25Okapi, list[Chunk]]`
 
 Load BM25 index from disk. Raises `FileNotFoundError` if absent.
 
@@ -306,7 +307,7 @@ Generate a broader reformulation (query-time).
 ### `hypothetical_questions_for_chunk(chunk_text, n=None) -> list[str]`
 
 Generate N questions that the chunk would answer (index-time). These strings
-are consumed by `text_pipeline.py`, which wraps each into a `Chunk` object
+are consumed by `process.py`, which wraps each into a `Chunk` object
 with `chunk_type=HYPOTHETICAL_QUESTION`.
 
 ---
@@ -379,16 +380,9 @@ Single background thread that serializes ingestion jobs.
 
 ---
 
-## `pipeline/text_pipeline.py`
+## `pipeline/process.py`
 
-### `TextPipelineParams`
-
-Dataclass holding all configurable pipeline parameters:
-`chunk_strategy`, `chunk_size`, `chunk_overlap`, `parent_chunk_size`,
-`sentence_window_size`, `embedding_model`, `embedding_dim`,
-`generate_hyde`, `hyde_per_chunk`, `milvus_collection`.
-
-### `process_document(doc, params=None, progress=None) -> dict`
+### `process_text(doc, params=None, progress=None) -> dict`
 
 Full text ingestion pipeline. Steps:
 
@@ -409,10 +403,24 @@ Full text ingestion pipeline. Steps:
 
 Returns stats dict with `document_id`, `chunks_created`, `embeddings_indexed`,
 `hyde_generated`, `question_chunks_indexed`, `object_key`.
+
+## `pipeline/ingest.py`
+
+### `ingest_path(path, strategy=None, add_hypothetical_questions=False) -> dict`
+
+Orchestrator for document ingestion. Handles file or directory processing,
+delegating to `process.py` for text documents and to the image pipeline for
+image-bearing documents. Returns aggregate stats.
+
+### `promote(source_path: str, to_tier: str) -> dict`
+
+Re-ingest a previously ingested document at a higher tier. This allows
+`instant` uploads to be upgraded to `slow` or `global` later.
+
 ## Image preprocessing and OCR
 
 `image_preprocess.py` normalizes orientation/color and splits tall images.
 `ocr.py` selects no OCR, basic Tesseract, or PaddleOCR. RunPod mode uses the
 PaddleOCR-VL OpenAI-compatible endpoint; local mode can use in-process
-PaddleOCR. `image_pipeline.py` persists every derived image and sends the
-combined OCR/native text to `text_pipeline.py`.
+PaddleOCR. Derived images are persisted and their combined OCR/native text is
+sent to the text pipeline.

@@ -1,10 +1,9 @@
 """Query enhancement strategies for the RAG pipeline."""
 
-import json
 import logging
 import time
-import urllib.error
-import urllib.request
+
+import httpx
 
 from .config import cfg
 
@@ -12,46 +11,45 @@ logger = logging.getLogger(__name__)
 
 
 def _chat(system: str, user: str) -> str:
-    """Call the default chat model and return the non-streaming response text."""
+    """Call the chat LLM with system and user messages."""
     model = cfg.chat_model
     for prefix in ("openai/", "azure/", "bedrock/", "vertex_ai/"):
         if model.startswith(prefix):
             model = model.removeprefix(prefix)
             break
-
     url = f"{cfg.chat_base_url.rstrip('/')}/chat/completions"
-    body = json.dumps({
-        "model": model,
-        "messages": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-        "stream": False,
-    }).encode()
     headers = {"Content-Type": "application/json", "User-Agent": "opencode/1.0"}
     if cfg.chat_api_key:
         headers["Authorization"] = f"Bearer {cfg.chat_api_key}"
-
     t0 = time.time()
     try:
-        req = urllib.request.Request(url, data=body, headers=headers, method="POST")
-        resp = urllib.request.urlopen(req, timeout=120)
-        data = json.loads(resp.read().decode())
-    except urllib.error.HTTPError as exc:
-        raise RuntimeError(f"_chat HTTP {exc.code}: {exc.read().decode()}") from exc
-    except urllib.error.URLError as exc:
-        raise RuntimeError(f"_chat connection error: {exc}") from exc
-
+        resp = httpx.post(
+            url,
+            json={
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                "stream": False,
+            },
+            headers=headers,
+            timeout=120,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except httpx.HTTPStatusError as exc:
+        msg = f"_chat HTTP {exc.response.status_code}: {exc.response.text}"
+        raise RuntimeError(msg) from exc
+    except httpx.RequestError as exc:
+        msg = f"_chat connection error: {exc}"
+        raise RuntimeError(msg) from exc
     duration = round(time.time() - t0, 4)
     choice = data["choices"][0]
     content = choice["message"].get("content", "") or ""
     usage = data.get("usage", {})
     logger.info(
-        "[TIMING] _chat %.3fs %d+%d tokens model=%s",
-        duration,
-        usage.get("prompt_tokens", 0),
-        usage.get("completion_tokens", 0),
-        cfg.chat_model,
+        "[TIMING] _chat %.3fs %d+%d tokens model=%s", duration, usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0), cfg.chat_model
     )
     return content
 
@@ -74,6 +72,7 @@ def _parse_bulleted_lines(raw: str) -> list[str]:
 
 
 def hyde(query: str, n: int | None = None) -> list[str]:
+    """Generate hypothetical documents for a query."""
     if n is None:
         n = cfg.hyde_n_documents
     system = (
@@ -88,6 +87,7 @@ def hyde(query: str, n: int | None = None) -> list[str]:
 
 
 def sub_queries(query: str, n: int | None = None) -> list[str]:
+    """Decompose a complex query into sub-queries."""
     if n is None:
         n = cfg.sub_queries_count
     system = (
@@ -105,6 +105,7 @@ def sub_queries(query: str, n: int | None = None) -> list[str]:
 
 
 def stepback(query: str) -> str:
+    """Abstract a specific query into a broader stepback question."""
     system = (
         "You are an expert at the stepback prompting technique. "
         "Given a highly specific question, abstract it into a broader, "
@@ -116,10 +117,9 @@ def stepback(query: str) -> str:
 
 
 def hypothetical_questions_for_chunk(chunk_text: str, n: int | None = None) -> list[str]:
-    """Generate N index-time hypothetical questions that a chunk would answer."""
+    """Generate hypothetical questions that a chunk answers."""
     if n is None:
         n = cfg.hypothetical_questions_per_chunk
-
     system = (
         f"You are an expert at generating questions from text. "
         f"Given a passage, generate exactly {n} distinct questions that the "
@@ -129,16 +129,13 @@ def hypothetical_questions_for_chunk(chunk_text: str, n: int | None = None) -> l
     return _parse_bulleted_lines(_chat(system, f"Passage:\n{chunk_text}"))[:n]
 
 
-def enhance_query(
-    query: str,
-    enhancements: str | list[str] | tuple[str, ...] | None = None,
-) -> list[str]:
+def enhance_query(query: str, enhancements: str | list[str] | tuple[str, ...] | None = None) -> list[str]:
+    """Apply configured query enhancements and return deduplicated queries."""
     configured = cfg.query_enhancements if enhancements is None else enhancements
     if isinstance(configured, str):
         enabled = {item.strip() for item in configured.split(",") if item.strip()}
     else:
         enabled = {item.strip() for item in configured if item.strip()}
-
     collected: list[str] = []
     if "hyde" in enabled:
         collected.extend(hyde(query))
@@ -150,10 +147,8 @@ def enhance_query(
         if stepback_query:
             collected.append(stepback_query)
         collected.append(query)
-
     if not collected:
         return [query]
-
     seen: set[str] = set()
     result: list[str] = []
     for item in collected:

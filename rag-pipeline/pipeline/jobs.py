@@ -7,27 +7,31 @@ import sqlite3
 import threading
 import traceback
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Callable
+from typing import TYPE_CHECKING
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 TERMINAL_STATUSES = {"succeeded", "failed", "cancelled"}
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 class JobStore:
     """SQLite job repository safe for use by API and worker threads."""
 
-    def __init__(self, data_dir: str):
+    def __init__(self, data_dir: str) -> None:
+        """Initialize the job store with a data directory."""
         self.data_dir = Path(data_dir).resolve()
         self.upload_dir = self.data_dir / "uploads"
         self.database_path = self.data_dir / "jobs.sqlite3"
 
     def initialize(self) -> None:
+        """Create tables and reset stale running jobs."""
         self.upload_dir.mkdir(parents=True, exist_ok=True)
         with self._connect() as connection:
             connection.execute(
@@ -45,11 +49,10 @@ class JobStore:
                     started_at TEXT,
                     completed_at TEXT
                 )
-                """
+                """,
             )
             connection.execute(
-                "CREATE INDEX IF NOT EXISTS ingestion_jobs_status_created "
-                "ON ingestion_jobs(status, created_at)"
+                "CREATE INDEX IF NOT EXISTS ingestion_jobs_status_created ON ingestion_jobs(status, created_at)",
             )
             connection.execute(
                 """
@@ -57,7 +60,7 @@ class JobStore:
                 SET status = 'queued', started_at = NULL,
                     error = 'Worker stopped while this job was running; job requeued.'
                 WHERE status = 'running'
-                """
+                """,
             )
 
     def create(
@@ -67,6 +70,7 @@ class JobStore:
         filenames: list[str],
         job_id: str | None = None,
     ) -> dict:
+        """Create a new job and return it."""
         job_id = job_id or uuid.uuid4().hex
         created_at = _utc_now()
         with self._connect() as connection:
@@ -87,13 +91,16 @@ class JobStore:
         return self.get(job_id)
 
     def get(self, job_id: str) -> dict | None:
+        """Get a job by ID."""
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT * FROM ingestion_jobs WHERE id = ?", (job_id,)
+                "SELECT * FROM ingestion_jobs WHERE id = ?",
+                (job_id,),
             ).fetchone()
         return self._deserialize(row) if row else None
 
     def list(self, status: str | None = None, limit: int = 50) -> list[dict]:
+        """List jobs, optionally filtered by status."""
         query = "SELECT * FROM ingestion_jobs"
         parameters: list[object] = []
         if status:
@@ -106,6 +113,7 @@ class JobStore:
         return [self._deserialize(row) for row in rows]
 
     def claim_next(self) -> dict | None:
+        """Claim the next queued job (atomic)."""
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
@@ -114,7 +122,7 @@ class JobStore:
                 WHERE status = 'queued'
                 ORDER BY created_at ASC
                 LIMIT 1
-                """
+                """,
             ).fetchone()
             if row is None:
                 connection.commit()
@@ -132,12 +140,15 @@ class JobStore:
         return self.get(row["id"])
 
     def succeed(self, job_id: str, result: dict) -> None:
+        """Mark a job as succeeded."""
         self._finish(job_id, "succeeded", result=result)
 
     def fail(self, job_id: str, error: str) -> None:
+        """Mark a job as failed."""
         self._finish(job_id, "failed", error=error)
 
     def cancel(self, job_id: str) -> bool:
+        """Cancel a queued job."""
         with self._connect() as connection:
             cursor = connection.execute(
                 """
@@ -150,16 +161,18 @@ class JobStore:
         return cursor.rowcount == 1
 
     def counts(self) -> dict[str, int]:
+        """Return counts per status."""
         counts = {"queued": 0, "running": 0, "succeeded": 0, "failed": 0, "cancelled": 0}
         with self._connect() as connection:
             rows = connection.execute(
-                "SELECT status, COUNT(*) AS count FROM ingestion_jobs GROUP BY status"
+                "SELECT status, COUNT(*) AS count FROM ingestion_jobs GROUP BY status",
             ).fetchall()
         for row in rows:
             counts[row["status"]] = row["count"]
         return counts
 
     def update_steps(self, job_id: str, steps: list[dict]) -> None:
+        """Persist step-level progress."""
         with self._connect() as connection:
             connection.execute(
                 "UPDATE ingestion_jobs SET steps_json = ? WHERE id = ?",
@@ -216,7 +229,8 @@ class IngestionWorker:
         store: JobStore,
         handler: Callable[[dict], dict],
         poll_interval: float = 0.5,
-    ):
+    ) -> None:
+        """Initialize the worker with a store and handler."""
         self.store = store
         self.handler = handler
         self.poll_interval = poll_interval
@@ -226,9 +240,11 @@ class IngestionWorker:
 
     @property
     def running(self) -> bool:
+        """Whether the worker thread is alive."""
         return self._thread is not None and self._thread.is_alive()
 
     def start(self) -> None:
+        """Start the background worker thread."""
         if self.running:
             return
         self._stop.clear()
@@ -240,15 +256,18 @@ class IngestionWorker:
         self._thread.start()
 
     def notify(self) -> None:
+        """Wake the worker to check for new jobs."""
         self._wake.set()
 
     def stop(self, timeout: float = 10) -> None:
+        """Stop the worker and wait for the thread to finish."""
         self._stop.set()
         self._wake.set()
         if self._thread:
             self._thread.join(timeout=timeout)
 
     def _run(self) -> None:
+        """Worker loop: claim and process jobs."""
         while not self._stop.is_set():
             job = self.store.claim_next()
             if job is None:
@@ -257,5 +276,5 @@ class IngestionWorker:
                 continue
             try:
                 self.store.succeed(job["id"], self.handler(job))
-            except Exception:
+            except BaseException:  # noqa: BLE001
                 self.store.fail(job["id"], traceback.format_exc(limit=20))

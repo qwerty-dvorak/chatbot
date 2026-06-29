@@ -1,12 +1,14 @@
-"""Search orchestrator for the RAG pipeline."""
+"""Search orchestrator — tier-aware, with query-to-query resolution."""
 
+import logging
 import re
 import time
 import uuid
 
 from .config import cfg
 from .embed import embed_text
-from .index import _chunk_from_hit, _ensure_collection, connect_milvus, get_client
+from .milvus import chunk_from_hit, connect_milvus, get_client
+from .milvus import ensure_collection as _ensure_collection
 from .models import Chunk, ChunkType, SearchResult
 from .query import enhance_query
 from .retrieve import (
@@ -14,9 +16,90 @@ from .retrieve import (
     bm25_search,
     hybrid_search,
     rerank,
-    scoped_lexical_search,
     vector_search,
 )
+
+logger = logging.getLogger(__name__)
+
+_LEXICAL_STOPWORDS = {
+    "a",
+    "an",
+    "and",
+    "are",
+    "as",
+    "at",
+    "be",
+    "by",
+    "for",
+    "from",
+    "explain",
+    "give",
+    "in",
+    "is",
+    "it",
+    "me",
+    "mentioned",
+    "of",
+    "on",
+    "please",
+    "summarize",
+    "tell",
+    "that",
+    "the",
+    "this",
+    "to",
+    "was",
+    "what",
+    "with",
+}
+
+
+def scoped_lexical_search(
+    query: str,
+    source_paths: list[str] | set[str],
+    top_k: int = 8,
+) -> list[SearchResult]:
+    """Lexical search scoped to specific source paths."""
+    paths = list(dict.fromkeys(source_paths))
+    if not paths:
+        return []
+    terms = list(
+        dict.fromkeys(
+            token for token in re.findall(r"[a-z0-9]+", query.casefold()) if token not in _LEXICAL_STOPWORDS and (len(token) > 1 or token.isdigit())
+        )
+    )
+    if not terms:
+        return []
+    escaped = [path.replace("\\", "\\\\").replace('"', '\\"') for path in paths]
+    path_list = "[" + ", ".join(f'"{path}"' for path in escaped) + "]"
+    hits = get_client().query(
+        collection_name=cfg.text_collection,
+        filter=f"source_path in {path_list}",
+        output_fields=["id", "source_path", "text", "chunk_type", "parent_id", "window_text", "metadata_json"],
+        limit=10000,
+    )
+    candidates: list[tuple[float, int, int, Chunk]] = []
+    minimum_matches = 1 if len(terms) == 1 else 2
+    phrase = " ".join(terms)
+    for hit in hits:
+        chunk = chunk_from_hit(hit)
+        if chunk.chunk_type in {ChunkType.SUMMARY, ChunkType.HYPOTHETICAL_QUESTION}:
+            continue
+        text = chunk.text.casefold()
+        text_tokens = set(re.findall(r"[a-z0-9]+", text))
+        matched = sum(term in text_tokens for term in terms)
+        if matched < minimum_matches:
+            continue
+        phrase_bonus = 2 if phrase and phrase in text else 0
+        non_parent_bonus = 1 if chunk.chunk_type != ChunkType.PARENT else 0
+        first_match = min((text.find(term) for term in terms if term in text), default=len(text))
+        score = float(matched * 10 + phrase_bonus + non_parent_bonus)
+        candidates.append((score, non_parent_bonus, -first_match, chunk))
+    candidates.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
+    return [
+        SearchResult(chunk=chunk, score=score, rank=rank, retrieval_method="scoped_lexical")
+        for rank, (score, _, _, chunk) in enumerate(candidates[:top_k])
+    ]
 
 
 def _paths_filter(paths: list[str]) -> str:
@@ -26,89 +109,67 @@ def _paths_filter(paths: list[str]) -> str:
 
 def _artifact_paths(artifact_sources: list[str], timing: dict[str, float | str]) -> list[str]:
     t0 = time.time()
-    _ensure_collection(cfg.text_collection, cfg.text_embedding_dim)
-    hits = get_client().query(
-        collection_name=cfg.text_collection,
-        output_fields=["source_path"],
-        limit=10000,
-    )
+    hits = get_client().query(collection_name=cfg.text_collection, output_fields=["source_path"], limit=10000)
     requested_names = {source.casefold() for source in artifact_sources}
-    paths = list({
-        hit["source_path"]
-        for hit in hits
-        if hit.get("source_path", "").replace("\\", "/").rsplit("/", 1)[-1].casefold()
-        in requested_names
-    })
+    paths = list(
+        {hit["source_path"] for hit in hits if hit.get("source_path", "").replace("\\", "/").rsplit("/", 1)[-1].casefold() in requested_names}
+    )
     timing["artifact_filter"] = round(time.time() - t0, 4)
     return paths
 
 
 def _resolve_hypothetical_hit(result: SearchResult) -> SearchResult:
     chunk = result.chunk
-    is_hypothetical = (
-        chunk.chunk_type == ChunkType.HYPOTHETICAL_QUESTION
-        or chunk.metadata.get("is_hypothetical_question") is True
-    )
+    is_hypothetical = chunk.chunk_type == ChunkType.HYPOTHETICAL_QUESTION or chunk.metadata.get("is_hypothetical_question") is True
     if not is_hypothetical or not chunk.parent_id:
         return result
-
     try:
         _ensure_collection(cfg.text_collection, cfg.text_embedding_dim)
-        hits = list(get_client().query(
-            collection_name=cfg.text_collection,
-            filter=f'id == "{chunk.parent_id}"',
-            output_fields=[
-                "id", "text", "source_path", "chunk_type",
-                "parent_id", "window_text", "metadata_json",
-            ],
-            limit=1,
-        ))
-    except Exception:
+        hits = list(
+            get_client().query(
+                collection_name=cfg.text_collection,
+                filter=f'id == "{chunk.parent_id}"',
+                output_fields=["id", "text", "source_path", "chunk_type", "parent_id", "window_text", "metadata_json"],
+                limit=1,
+            )
+        )
+    except BaseException:  # noqa: BLE001
         return result
-
     if hits:
-        result.chunk = _chunk_from_hit(hits[0])
+        result.chunk = chunk_from_hit(hits[0])
         result.retrieval_method = "query_to_query"
     return result
 
 
-def search(
+def search(  # noqa: C901, PLR0912, PLR0913, PLR0915
     query: str,
     top_k: int | None = None,
-    use_reranker: bool = True,
+    use_reranker: bool | None = None,  # noqa: FBT001
     retrieval_mode: str = "hybrid",
     enhancements: str | list[str] | tuple[str, ...] | None = None,
-    hierarchical: bool | None = None,
+    hierarchical: bool | None = None,  # noqa: FBT001
     artifact_sources: list[str] | None = None,
     pre_enhanced_queries: list[str] | None = None,
 ) -> tuple[list[SearchResult], dict[str, float | str]]:
-    """Run query enhancement, retrieval, fusion, optional reranking, and context fetch."""
+    """Run a full search pipeline with enhancements, retrieval, fusion, and reranking."""
     timing: dict[str, float | str] = {}
     clock = time.time
-
     connect_milvus()
-
     try:
         _ensure_collection(cfg.text_collection, cfg.text_embedding_dim)
-        total_vectors = len(get_client().query(
-            collection_name=cfg.text_collection,
-            output_fields=["id"],
-            limit=10000,
-        ))
-    except Exception:
+        total_vectors = len(get_client().query(collection_name=cfg.text_collection, output_fields=["id"], limit=10000))
+    except BaseException:  # noqa: BLE001
         total_vectors = 0
     if total_vectors == 0:
-        return [], {
-            "empty_store": 0.001,
-            "total": 0.001,
-            "message": "Vector store is empty - ingest documents first",
-        }
+        return [], {"empty_store": 0.001, "total": 0.001, "message": "Vector store is empty - ingest documents first"}
 
+    effective_reranker = use_reranker if use_reranker is not None else True
     effective_top_k = top_k if top_k is not None else cfg.rerank_top_k
     retrieval_k = cfg.retrieval_top_k
     mode = retrieval_mode.lower()
     if mode not in {"vector", "bm25", "hybrid"}:
-        raise ValueError("retrieval_mode must be one of: vector, bm25, hybrid")
+        msg = "retrieval_mode must be one of: vector, bm25, hybrid"
+        raise ValueError(msg)
     if hierarchical is None:
         hierarchical = cfg.hierarchical_mode
 
@@ -135,11 +196,7 @@ def search(
             stem = source.rsplit(".", 1)[0]
             lexical_query = re.sub(re.escape(source), " ", lexical_query, flags=re.IGNORECASE)
             lexical_query = re.sub(re.escape(stem), " ", lexical_query, flags=re.IGNORECASE)
-        lexical_results = scoped_lexical_search(
-            " ".join(lexical_query.split()),
-            artifact_paths,
-            top_k=max(effective_top_k, 8),
-        )
+        lexical_results = scoped_lexical_search(" ".join(lexical_query.split()), artifact_paths, top_k=max(effective_top_k, 8))
         timing["scoped_lexical"] = round(clock() - t0, 4)
 
     t_embed_total = 0.0
@@ -147,42 +204,26 @@ def search(
     all_result_lists: list[list[SearchResult]] = []
 
     for query_text in enhanced_queries:
-        query_chunk = Chunk(
-            id=uuid.uuid4().hex,
-            source_path="__query__",
-            text=query_text,
-            chunk_type=ChunkType.TEXT,
-        )
+        query_chunk = Chunk(id=uuid.uuid4().hex, source_path="__query__", text=query_text, chunk_type=ChunkType.TEXT)
         t0 = clock()
         embedded = embed_text([query_chunk])
         t_embed_total += clock() - t0
         if not embedded:
             continue
         embedding = embedded[0].embedding
-
         artifact_filter = _paths_filter(artifact_paths) if artifact_paths else None
         t0 = clock()
         if hierarchical and artifact_filter is None:
-            summary_hits = vector_search(
-                embedding,
-                top_k=cfg.summary_top_k,
-                extra_filter='chunk_type == "summary"',
-            )
+            summary_hits = vector_search(embedding, top_k=cfg.summary_top_k, extra_filter='chunk_type == "summary"')
             matched_paths = list({hit.chunk.source_path for hit in summary_hits})
             if matched_paths:
-                extra = f"{_paths_filter(matched_paths)} and chunk_type != \"summary\""
+                extra = f'{_paths_filter(matched_paths)} and chunk_type != "summary"'
                 if mode == "vector":
                     results = vector_search(embedding, retrieval_k, extra_filter=extra)
                 elif mode == "bm25":
                     results = bm25_search(query_text, retrieval_k, source_paths=matched_paths)
                 else:
-                    results = hybrid_search(
-                        query_text,
-                        embedding,
-                        retrieval_k,
-                        extra_filter=extra,
-                        source_paths=matched_paths,
-                    )
+                    results = hybrid_search(query_text, embedding, retrieval_k, extra_filter=extra, source_paths=matched_paths)
             else:
                 results = []
         elif mode == "vector":
@@ -190,15 +231,8 @@ def search(
         elif mode == "bm25":
             results = bm25_search(query_text, retrieval_k, source_paths=artifact_paths)
         else:
-            results = hybrid_search(
-                query_text,
-                embedding,
-                retrieval_k,
-                extra_filter=artifact_filter,
-                source_paths=artifact_paths,
-            )
+            results = hybrid_search(query_text, embedding, retrieval_k, extra_filter=artifact_filter, source_paths=artifact_paths)
         t_search_total += clock() - t0
-
         if results:
             all_result_lists.append(results)
 
@@ -215,17 +249,17 @@ def search(
 
     t0 = clock()
     seen: dict[str, SearchResult] = {}
-    for result in merged:
-        result = _resolve_hypothetical_hit(result)
-        chunk_id = result.chunk.id
-        if chunk_id not in seen or result.score > seen[chunk_id].score:
-            seen[chunk_id] = result
+    for merged_result in merged:
+        resolved = _resolve_hypothetical_hit(merged_result)
+        chunk_id = resolved.chunk.id
+        if chunk_id not in seen or resolved.score > seen[chunk_id].score:
+            seen[chunk_id] = resolved
     deduped = sorted(seen.values(), key=lambda item: item.score, reverse=True)
     for rank, result in enumerate(deduped):
         result.rank = rank
     timing["dedup"] = round(clock() - t0, 4)
 
-    if use_reranker and deduped:
+    if effective_reranker and deduped:
         t0 = clock()
         deduped = rerank(query, deduped, top_k=effective_top_k)
         timing["rerank"] = round(clock() - t0, 4)
@@ -237,56 +271,25 @@ def search(
             continue
         try:
             _ensure_collection(cfg.text_collection, cfg.text_embedding_dim)
-            hits = list(get_client().query(
-                collection_name=cfg.text_collection,
-                filter=f'id == "{chunk.parent_id}"',
-                output_fields=[
-                    "id", "text", "source_path", "chunk_type",
-                    "parent_id", "window_text", "metadata_json",
-                ],
-                limit=1,
-            ))
+            hits = list(
+                get_client().query(
+                    collection_name=cfg.text_collection,
+                    filter=f'id == "{chunk.parent_id}"',
+                    output_fields=["id", "text", "source_path", "chunk_type", "parent_id", "window_text", "metadata_json"],
+                    limit=1,
+                )
+            )
             if hits and hits[0].get("text"):
                 chunk.window_text = hits[0]["text"]
-        except Exception:
-            pass
+        except BaseException:  # noqa: BLE001
+            logger.warning("Failed to fetch parent context for chunk %s", chunk.id)
     timing["parent_fetch"] = round(clock() - t0, 4)
 
     if lexical_results:
         lexical_ids = {result.chunk.id for result in lexical_results}
-        deduped = lexical_results + [
-            result for result in deduped if result.chunk.id not in lexical_ids
-        ]
+        deduped = lexical_results + [result for result in deduped if result.chunk.id not in lexical_ids]
         for rank, result in enumerate(deduped):
             result.rank = rank
 
     timing["total"] = round(sum(v for v in timing.values() if isinstance(v, float)), 4)
     return deduped[:effective_top_k], timing
-
-
-def format_results(results: list[SearchResult]) -> str:
-    """Format search results for CLI display."""
-    if not results:
-        return "No results found."
-
-    lines: list[str] = []
-    separator = "-" * 60
-    for result in results:
-        chunk = result.chunk
-        display_text = (chunk.window_text or chunk.text).strip()
-        if len(display_text) > 500:
-            display_text = display_text[:500] + "..."
-
-        lines.append(separator)
-        lines.append(
-            f"[{result.rank + 1}] score={result.score:.4f}  method={result.retrieval_method}"
-        )
-        lines.append(f"    source: {chunk.source_path}")
-        lines.append(f"    type:   {chunk.chunk_type.value}")
-        if chunk.parent_id:
-            lines.append(f"    parent: {chunk.parent_id}")
-        lines.append("")
-        lines.append(display_text)
-
-    lines.append(separator)
-    return "\n".join(lines)

@@ -1,5 +1,10 @@
+"""Global configuration loaded from environment variables."""
+
+from __future__ import annotations
+
 import os
 from dataclasses import dataclass, field
+
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -7,6 +12,8 @@ load_dotenv()
 
 @dataclass
 class Config:
+    """Application configuration sourced from environment variables."""
+
     # Chat endpoint
     chat_base_url: str = field(default_factory=lambda: os.getenv("CHAT_BASE_URL", "http://localhost:9000/v1"))
     chat_api_key: str = field(default_factory=lambda: os.getenv("CHAT_API_KEY", "mock"))
@@ -72,8 +79,7 @@ class Config:
     summary_top_k: int = field(default_factory=lambda: int(os.getenv("SUMMARY_TOP_K", "3")))
     generate_summary: bool = field(default_factory=lambda: os.getenv("GENERATE_SUMMARY", "true").lower() in ("1", "true", "yes"))
 
-    # PostgreSQL knowledge store — connects to the *chatbot-service* database.
-    # Uses the same env var names and defaults as chatbot-service.
+    # PostgreSQL knowledge store
     postgres_db: str = field(default_factory=lambda: os.getenv("POSTGRES_DB", "chatbot"))
     postgres_user: str = field(default_factory=lambda: os.getenv("POSTGRES_USER", "chatbot"))
     postgres_password: str = field(default_factory=lambda: os.getenv("POSTGRES_PASSWORD", "chatbot"))
@@ -84,32 +90,38 @@ class Config:
     # Object store (local file-system, content-addressed)
     object_store_path: str = field(default_factory=lambda: os.getenv("OBJECT_STORE_PATH", "./data/object_store"))
 
-    def __post_init__(self) -> None:
-        # Validate numeric bounds that would cause confusing downstream errors
+    def __post_init__(self) -> None:  # noqa: C901
+        """Validate configuration values."""
         if self.text_embedding_dim <= 0:
-            raise ValueError(f"TEXT_EMBEDDING_DIM must be positive, got {self.text_embedding_dim}")
+            msg = "TEXT_EMBEDDING_DIM must be positive, got %s"
+            raise ValueError(msg % self.text_embedding_dim)
         if self.multimodal_embedding_dim <= 0:
-            raise ValueError(f"MULTIMODAL_EMBEDDING_DIM must be positive, got {self.multimodal_embedding_dim}")
+            msg = "MULTIMODAL_EMBEDDING_DIM must be positive, got %s"
+            raise ValueError(msg % self.multimodal_embedding_dim)
         if self.ocr_pdf_dpi <= 0:
-            raise ValueError(f"OCR_PDF_DPI must be positive, got {self.ocr_pdf_dpi}")
+            msg = "OCR_PDF_DPI must be positive, got %s"
+            raise ValueError(msg % self.ocr_pdf_dpi)
         if self.ocr_mode not in {"none", "basic", "paddleocr"}:
-            raise ValueError("OCR_MODE must be one of: none, basic, paddleocr")
+            msg = "OCR_MODE must be one of: none, basic, paddleocr"
+            raise ValueError(msg)
         if self.ocr_max_image_height <= 0:
-            raise ValueError("OCR_MAX_IMAGE_HEIGHT must be positive")
+            msg = "OCR_MAX_IMAGE_HEIGHT must be positive"
+            raise ValueError(msg)
         if self.ingestion_poll_interval <= 0:
-            raise ValueError(
-                f"INGESTION_POLL_INTERVAL must be positive, got {self.ingestion_poll_interval}"
-            )
+            msg = "INGESTION_POLL_INTERVAL must be positive, got %s"
+            raise ValueError(msg % self.ingestion_poll_interval)
         if self.chunk_size <= 0:
-            raise ValueError(f"CHUNK_SIZE must be positive, got {self.chunk_size}")
+            msg = "CHUNK_SIZE must be positive, got %s"
+            raise ValueError(msg % self.chunk_size)
         if self.chunk_overlap < 0:
-            raise ValueError(f"CHUNK_OVERLAP must be non-negative, got {self.chunk_overlap}")
+            msg = "CHUNK_OVERLAP must be non-negative, got %s"
+            raise ValueError(msg % self.chunk_overlap)
         if self.chunk_overlap >= self.chunk_size:
-            raise ValueError(
-                f"CHUNK_OVERLAP ({self.chunk_overlap}) must be less than CHUNK_SIZE ({self.chunk_size})"
-            )
+            msg = "CHUNK_OVERLAP (%s) must be less than CHUNK_SIZE (%s)"
+            raise ValueError(msg % (self.chunk_overlap, self.chunk_size))
         if not (0.0 <= self.hybrid_alpha <= 1.0):
-            raise ValueError(f"HYBRID_ALPHA must be between 0.0 and 1.0, got {self.hybrid_alpha}")
+            msg = "HYBRID_ALPHA must be between 0.0 and 1.0, got %s"
+            raise ValueError(msg % self.hybrid_alpha)
 
 
 cfg = Config()

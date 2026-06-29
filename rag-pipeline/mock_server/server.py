@@ -1,5 +1,4 @@
-"""
-Stdlib-only OpenAI-compatible mock server for RAG pipeline local development.
+"""Stdlib-only OpenAI-compatible mock server for RAG pipeline local development.
 
 Runs 5 HTTP servers in separate threads:
   9000 — chat completions
@@ -18,14 +17,14 @@ import time
 import uuid
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _fake_embedding(text: str, dim: int) -> list[float]:
     """Return a deterministic unit-normalized Gaussian vector for *text*."""
-    rng = random.Random(hash(text) & 0x7FFFFFFF)
+    rng = random.Random(hash(text) & 0x7FFFFFFF)  # noqa: S311
     vec = [rng.gauss(0.0, 1.0) for _ in range(dim)]
     magnitude = math.sqrt(sum(v * v for v in vec)) or 1.0
     return [v / magnitude for v in vec]
@@ -69,6 +68,7 @@ def _send_sse_headers(handler: BaseHTTPRequestHandler) -> None:
 # Chat completions handler
 # ---------------------------------------------------------------------------
 
+
 class ChatHandler(BaseHTTPRequestHandler):
     model_name: str = "mock-chat"
 
@@ -77,14 +77,17 @@ class ChatHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/v1/models":
-            _send_json(self, {
-                "object": "list",
-                "data": [{"id": self.model_name, "object": "model"}],
-            })
+            _send_json(
+                self,
+                {
+                    "object": "list",
+                    "data": [{"id": self.model_name, "object": "model"}],
+                },
+            )
         else:
             _send_json(self, {"error": "not found"}, 404)
 
-    def do_POST(self):
+    def do_POST(self):  # noqa: C901, PLR0912
         if self.path != "/v1/chat/completions":
             _send_json(self, {"error": "not found"}, 404)
             return
@@ -110,9 +113,7 @@ class ChatHandler(BaseHTTPRequestHandler):
 
         # Decide whether to emit a tool call
         search_keywords = {"search", "find", "retrieve", "lookup", "query"}
-        use_tool_call = bool(tools) and any(
-            kw in last_user.lower() for kw in search_keywords
-        )
+        use_tool_call = bool(tools) and any(kw in last_user.lower() for kw in search_keywords)
 
         call_id = "call_" + uuid.uuid4().hex[:16]
         tool_name = tools[0]["function"]["name"] if tools else "search"
@@ -125,62 +126,112 @@ class ChatHandler(BaseHTTPRequestHandler):
 
             if use_tool_call:
                 # First delta: role + tool_call header (id + name, empty args)
-                self.wfile.write(_sse({
-                    "id": chunk_id, "object": "chat.completion.chunk",
-                    "created": ts, "model": self.model_name,
-                    "choices": [{
-                        "index": 0, "delta": {
-                            "role": "assistant",
-                            "tool_calls": [{
-                                "index": 0, "id": call_id, "type": "function",
-                                "function": {"name": tool_name, "arguments": ""},
-                            }],
-                        }, "finish_reason": None,
-                    }],
-                }))
-                # Subsequent deltas: argument chunks
-                for chunk in [tool_args[:len(tool_args)//2], tool_args[len(tool_args)//2:]]:
-                    self.wfile.write(_sse({
-                        "id": chunk_id, "object": "chat.completion.chunk",
-                        "created": ts, "model": self.model_name,
-                        "choices": [{
-                            "index": 0, "delta": {
-                                "tool_calls": [{
+                self.wfile.write(
+                    _sse(
+                        {
+                            "id": chunk_id,
+                            "object": "chat.completion.chunk",
+                            "created": ts,
+                            "model": self.model_name,
+                            "choices": [
+                                {
                                     "index": 0,
-                                    "function": {"arguments": chunk},
-                                }],
-                            }, "finish_reason": None,
-                        }],
-                    }))
+                                    "delta": {
+                                        "role": "assistant",
+                                        "tool_calls": [
+                                            {
+                                                "index": 0,
+                                                "id": call_id,
+                                                "type": "function",
+                                                "function": {"name": tool_name, "arguments": ""},
+                                            }
+                                        ],
+                                    },
+                                    "finish_reason": None,
+                                }
+                            ],
+                        }
+                    )
+                )
+                # Subsequent deltas: argument chunks
+                for chunk in [tool_args[: len(tool_args) // 2], tool_args[len(tool_args) // 2 :]]:
+                    self.wfile.write(
+                        _sse(
+                            {
+                                "id": chunk_id,
+                                "object": "chat.completion.chunk",
+                                "created": ts,
+                                "model": self.model_name,
+                                "choices": [
+                                    {
+                                        "index": 0,
+                                        "delta": {
+                                            "tool_calls": [
+                                                {
+                                                    "index": 0,
+                                                    "function": {"arguments": chunk},
+                                                }
+                                            ],
+                                        },
+                                        "finish_reason": None,
+                                    }
+                                ],
+                            }
+                        )
+                    )
                 # Final delta: finish_reason
-                self.wfile.write(_sse({
-                    "id": chunk_id, "object": "chat.completion.chunk",
-                    "created": ts, "model": self.model_name,
-                    "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}],
-                }))
+                self.wfile.write(
+                    _sse(
+                        {
+                            "id": chunk_id,
+                            "object": "chat.completion.chunk",
+                            "created": ts,
+                            "model": self.model_name,
+                            "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}],
+                        }
+                    )
+                )
             else:
                 reply = f"Mock reply to: {last_user[:80]}" if last_user else "Mock reply."
                 words = reply.split()
                 # Role delta
-                self.wfile.write(_sse({
-                    "id": chunk_id, "object": "chat.completion.chunk",
-                    "created": ts, "model": self.model_name,
-                    "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
-                }))
+                self.wfile.write(
+                    _sse(
+                        {
+                            "id": chunk_id,
+                            "object": "chat.completion.chunk",
+                            "created": ts,
+                            "model": self.model_name,
+                            "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
+                        }
+                    )
+                )
                 # Content deltas (word by word)
                 for i, word in enumerate(words):
                     text = word if i == 0 else " " + word
-                    self.wfile.write(_sse({
-                        "id": chunk_id, "object": "chat.completion.chunk",
-                        "created": ts, "model": self.model_name,
-                        "choices": [{"index": 0, "delta": {"content": text}, "finish_reason": None}],
-                    }))
+                    self.wfile.write(
+                        _sse(
+                            {
+                                "id": chunk_id,
+                                "object": "chat.completion.chunk",
+                                "created": ts,
+                                "model": self.model_name,
+                                "choices": [{"index": 0, "delta": {"content": text}, "finish_reason": None}],
+                            }
+                        )
+                    )
                 # Final delta
-                self.wfile.write(_sse({
-                    "id": chunk_id, "object": "chat.completion.chunk",
-                    "created": ts, "model": self.model_name,
-                    "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
-                }))
+                self.wfile.write(
+                    _sse(
+                        {
+                            "id": chunk_id,
+                            "object": "chat.completion.chunk",
+                            "created": ts,
+                            "model": self.model_name,
+                            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                        }
+                    )
+                )
 
             self.wfile.write(b"data: [DONE]\n\n")
             self.wfile.flush()
@@ -188,42 +239,58 @@ class ChatHandler(BaseHTTPRequestHandler):
         else:
             ts = int(time.time())
             if use_tool_call:
-                _send_json(self, {
-                    "id": "chatcmpl-" + uuid.uuid4().hex[:20],
-                    "object": "chat.completion",
-                    "created": ts, "model": self.model_name,
-                    "choices": [{
-                        "index": 0,
-                        "message": {
-                            "role": "assistant",
-                            "content": None,
-                            "tool_calls": [{
-                                "id": call_id, "type": "function",
-                                "function": {"name": tool_name, "arguments": tool_args},
-                            }],
-                        },
-                        "finish_reason": "tool_calls",
-                    }],
-                    "usage": {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
-                })
+                _send_json(
+                    self,
+                    {
+                        "id": "chatcmpl-" + uuid.uuid4().hex[:20],
+                        "object": "chat.completion",
+                        "created": ts,
+                        "model": self.model_name,
+                        "choices": [
+                            {
+                                "index": 0,
+                                "message": {
+                                    "role": "assistant",
+                                    "content": None,
+                                    "tool_calls": [
+                                        {
+                                            "id": call_id,
+                                            "type": "function",
+                                            "function": {"name": tool_name, "arguments": tool_args},
+                                        }
+                                    ],
+                                },
+                                "finish_reason": "tool_calls",
+                            }
+                        ],
+                        "usage": {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
+                    },
+                )
             else:
                 reply = f"Mock reply to: {last_user[:80]}" if last_user else "Mock reply."
-                _send_json(self, {
-                    "id": "chatcmpl-" + uuid.uuid4().hex[:20],
-                    "object": "chat.completion",
-                    "created": ts, "model": self.model_name,
-                    "choices": [{
-                        "index": 0,
-                        "message": {"role": "assistant", "content": reply},
-                        "finish_reason": "stop",
-                    }],
-                    "usage": {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
-                })
+                _send_json(
+                    self,
+                    {
+                        "id": "chatcmpl-" + uuid.uuid4().hex[:20],
+                        "object": "chat.completion",
+                        "created": ts,
+                        "model": self.model_name,
+                        "choices": [
+                            {
+                                "index": 0,
+                                "message": {"role": "assistant", "content": reply},
+                                "finish_reason": "stop",
+                            }
+                        ],
+                        "usage": {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
+                    },
+                )
 
 
 # ---------------------------------------------------------------------------
 # Embeddings handler
 # ---------------------------------------------------------------------------
+
 
 class EmbeddingsHandler(BaseHTTPRequestHandler):
     model_name: str = "mock-text-embed"
@@ -234,10 +301,13 @@ class EmbeddingsHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/v1/models":
-            _send_json(self, {
-                "object": "list",
-                "data": [{"id": self.model_name, "object": "model"}],
-            })
+            _send_json(
+                self,
+                {
+                    "object": "list",
+                    "data": [{"id": self.model_name, "object": "model"}],
+                },
+            )
         else:
             _send_json(self, {"error": "not found"}, 404)
 
@@ -262,12 +332,15 @@ class EmbeddingsHandler(BaseHTTPRequestHandler):
             data.append({"object": "embedding", "index": i, "embedding": embedding})
             total_tokens += max(1, len(text.split()))
 
-        _send_json(self, {
-            "object": "list",
-            "data": data,
-            "model": self.model_name,
-            "usage": {"prompt_tokens": total_tokens, "total_tokens": total_tokens},
-        })
+        _send_json(
+            self,
+            {
+                "object": "list",
+                "data": data,
+                "model": self.model_name,
+                "usage": {"prompt_tokens": total_tokens, "total_tokens": total_tokens},
+            },
+        )
 
     def _handle_pooling(self) -> None:
         body = _read_body(self)
@@ -282,18 +355,22 @@ class EmbeddingsHandler(BaseHTTPRequestHandler):
         tok_count = max(2, len(str(inp).split()))
         vectors = [_fake_embedding(str(inp), self.dim) for _ in range(tok_count)]
 
-        _send_json(self, {
-            "id": "pool-mock",
-            "object": "list",
-            "data": [{"index": 0, "object": "pooling", "data": vectors}],
-            "model": self.model_name,
-            "usage": {"prompt_tokens": tok_count, "total_tokens": tok_count},
-        })
+        _send_json(
+            self,
+            {
+                "id": "pool-mock",
+                "object": "list",
+                "data": [{"index": 0, "object": "pooling", "data": vectors}],
+                "model": self.model_name,
+                "usage": {"prompt_tokens": tok_count, "total_tokens": tok_count},
+            },
+        )
 
 
 # ---------------------------------------------------------------------------
 # Reranker handler
 # ---------------------------------------------------------------------------
+
 
 class RerankerHandler(BaseHTTPRequestHandler):
     model_name: str = "mock-reranker"
@@ -323,23 +400,27 @@ class RerankerHandler(BaseHTTPRequestHandler):
 
         data = []
         total_tokens = 0
-        for i, (q, doc) in enumerate(zip(queries or [], documents or [])):
+        for i, (q, doc) in enumerate(zip(queries or [], documents or [], strict=False)):
             score = _fake_rerank_score(q, doc)
             data.append({"index": i, "object": "score", "score": score})
             total_tokens += max(1, len(q.split())) + max(1, len(doc.split()))
 
-        _send_json(self, {
-            "id": "score-mock",
-            "object": "list",
-            "data": data,
-            "model": self.model_name,
-            "usage": {"prompt_tokens": total_tokens, "total_tokens": total_tokens},
-        })
+        _send_json(
+            self,
+            {
+                "id": "score-mock",
+                "object": "list",
+                "data": data,
+                "model": self.model_name,
+                "usage": {"prompt_tokens": total_tokens, "total_tokens": total_tokens},
+            },
+        )
 
 
 # ---------------------------------------------------------------------------
 # OCR handler (PaddleOCR-VL mock — returns placeholder text from image)
 # ---------------------------------------------------------------------------
+
 
 class OCRHandler(BaseHTTPRequestHandler):
     model_name: str = "PaddlePaddle/PaddleOCR-VL-1.6"
@@ -365,18 +446,23 @@ class OCRHandler(BaseHTTPRequestHandler):
                     image_count += sum(1 for p in content if isinstance(p, dict) and p.get("type") == "image_url")
             reply = f"[mock OCR output — {image_count} image(s) received. This is placeholder extracted text.]"
             ts = int(time.time())
-            _send_json(self, {
-                "id": "chatcmpl-" + uuid.uuid4().hex[:20],
-                "object": "chat.completion",
-                "created": ts,
-                "model": self.model_name,
-                "choices": [{
-                    "index": 0,
-                    "message": {"role": "assistant", "content": reply},
-                    "finish_reason": "stop",
-                }],
-                "usage": {"prompt_tokens": 256, "completion_tokens": len(reply.split()), "total_tokens": 256 + len(reply.split())},
-            })
+            _send_json(
+                self,
+                {
+                    "id": "chatcmpl-" + uuid.uuid4().hex[:20],
+                    "object": "chat.completion",
+                    "created": ts,
+                    "model": self.model_name,
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {"role": "assistant", "content": reply},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {"prompt_tokens": 256, "completion_tokens": len(reply.split()), "total_tokens": 256 + len(reply.split())},
+                },
+            )
         else:
             _send_json(self, {"error": "not found"}, 404)
 
@@ -384,6 +470,7 @@ class OCRHandler(BaseHTTPRequestHandler):
 # ---------------------------------------------------------------------------
 # Server factory
 # ---------------------------------------------------------------------------
+
 
 def _make_chat_handler(model_name: str) -> type:
     return type("_ChatHandler", (ChatHandler,), {"model_name": model_name})
@@ -409,6 +496,7 @@ def _start_server(handler_class: type, port: int) -> None:
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Stdlib-only mock OpenAI server for RAG pipeline")
@@ -438,12 +526,12 @@ def main() -> None:
         t = threading.Thread(target=_start_server, args=(handler_cls, port), daemon=True)
         t.start()
 
-    print(f"Chat completions  → http://localhost:{args.chat_port}/v1/chat/completions")
-    print(f"Text embeddings   → http://localhost:{args.embed_port}/v1/embeddings")
-    print(f"Multimodal embed  → http://localhost:{args.multimodal_port}/pooling")
-    print(f"Reranker          → http://localhost:{args.rerank_port}/score")
-    print(f"OCR               → http://localhost:{args.ocr_port}/v1/chat/completions")
-    print("Press Ctrl+C to stop.")
+    print(f"Chat completions  → http://localhost:{args.chat_port}/v1/chat/completions")  # noqa: T201
+    print(f"Text embeddings   → http://localhost:{args.embed_port}/v1/embeddings")  # noqa: T201
+    print(f"Multimodal embed  → http://localhost:{args.multimodal_port}/pooling")  # noqa: T201
+    print(f"Reranker          → http://localhost:{args.rerank_port}/score")  # noqa: T201
+    print(f"OCR               → http://localhost:{args.ocr_port}/v1/chat/completions")  # noqa: T201
+    print("Press Ctrl+C to stop.")  # noqa: T201
 
     threading.Event().wait()
 

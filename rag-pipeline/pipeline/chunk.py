@@ -1,23 +1,23 @@
-"""Chunking strategies for the RAG pipeline.
+"""
+Chunking strategies for the RAG pipeline.
 
 Three strategies are supported, selected by cfg.chunk_strategy or the
 optional *strategy* argument to :func:`chunk`:
 
-* ``recursive``        – parent/child two-level split
-* ``sentence_window``  – per-sentence chunks with surrounding window text
-* ``hierarchical``     – paragraph-grouped summary + fine-grained children
+* ``recursive``        - parent/child two-level split
+* ``sentence_window``  - per-sentence chunks with surrounding window text
+* ``hierarchical``     - paragraph-grouped summary + fine-grained children
 """
 
 import uuid
-from typing import Optional
 
 from .config import cfg
 from .models import Chunk, ChunkType, RawDocument
 
-
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
 
 def _new_id() -> str:
     return uuid.uuid4().hex
@@ -34,7 +34,8 @@ def _split_text(text: str, size: int, overlap: int) -> list[str]:
 
 
 def _split_sentences(text: str) -> list[str]:
-    """Split *text* into sentences on '. ', '? ', '! ' boundaries.
+    """
+    Split *text* into sentences on '. ', '? ', '! ' boundaries.
 
     The terminating punctuation is kept with the sentence that ends with it.
     """
@@ -65,6 +66,7 @@ def _split_sentences(text: str) -> list[str]:
 # ---------------------------------------------------------------------------
 # Chunking strategies
 # ---------------------------------------------------------------------------
+
 
 def _chunk_recursive(doc: RawDocument) -> list[Chunk]:
     """Two-level parent → child chunking."""
@@ -187,26 +189,6 @@ def _chunk_hierarchical(doc: RawDocument) -> list[Chunk]:
 
 
 # ---------------------------------------------------------------------------
-# Image chunks
-# ---------------------------------------------------------------------------
-
-def _image_chunks(doc: RawDocument) -> list[Chunk]:
-    """Create one chunk per image in *doc.images*, using the page text as embedding context."""
-    chunks: list[Chunk] = []
-    for i, (image_bytes, page_text) in enumerate(doc.images):
-        chunk = Chunk(
-            id=_new_id(),
-            source_path=doc.path,
-            text=page_text,
-            chunk_type=ChunkType.IMAGE,
-            metadata={**doc.metadata, "image_index": i},
-            image_data=image_bytes,
-        )
-        chunks.append(chunk)
-    return chunks
-
-
-# ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
 
@@ -217,8 +199,9 @@ _STRATEGIES = {
 }
 
 
-def chunk(doc: RawDocument, strategy: Optional[str] = None) -> list[Chunk]:
-    """Chunk a RawDocument using the configured strategy.
+def chunk(doc: RawDocument, strategy: str | None = None) -> list[Chunk]:
+    """
+    Chunk a RawDocument using the configured strategy.
 
     Args:
         doc:      The document to chunk.
@@ -227,21 +210,18 @@ def chunk(doc: RawDocument, strategy: Optional[str] = None) -> list[Chunk]:
                   ``"hierarchical"``.
 
     Returns:
-        All chunks (text chunks produced by the strategy) combined with one
-        image chunk per entry in ``doc.images``.
+        All chunks (text chunks produced by the strategy). Image chunks are
+        created separately in the ingestion layer.
 
     Raises:
         ValueError: If *strategy* (or ``cfg.chunk_strategy``) is not
                     a recognised strategy name.
+
     """
     resolved = strategy if strategy is not None else cfg.chunk_strategy
     strategy_fn = _STRATEGIES.get(resolved)
     if strategy_fn is None:
-        raise ValueError(
-            f"Unknown chunking strategy {resolved!r}. "
-            f"Choose from: {list(_STRATEGIES)}"
-        )
+        msg = f"Unknown chunking strategy {resolved!r}. Choose from: {list(_STRATEGIES)}"
+        raise ValueError(msg)
 
-    text_chunks = strategy_fn(doc)
-    image_chunks = _image_chunks(doc)
-    return text_chunks + image_chunks
+    return strategy_fn(doc)

@@ -228,7 +228,7 @@ chunk.py
   `-- image chunks → embed.py /pooling
   |
   v
-index.py
+milvus.py + bm25.py
   |-- rag_text_chunks in Milvus
   |   Contains both document chunks (text/parent/child/sentence_window)
   |   and hypothetical question vectors (HYPOTHETICAL_QUESTION type with
@@ -341,7 +341,7 @@ SearchResponse
 | HyDE | Query-time | LLM writes a hypothetical *document* from user query; embed that doc → search against chunk vectors | `query.py:hyde()` |
 | Sub-queries | Query-time | Decompose complex query into 2-4 simpler sub-questions | `query.py:sub_queries()` |
 | Stepback | Query-time | Broader reformulation for recall | `query.py:stepback()` |
-| Hypothetical Questions | **Index-time** | LLM generates questions per chunk → each question embedded as separate vector in Milvus → query-to-query search resolves back to source chunks | `query.py:hypothetical_questions_for_chunk()` + `text_pipeline.py` embed/index + `search.py` resolution |
+| Hypothetical Questions | **Index-time** | LLM generates questions per chunk → each question embedded as separate vector in Milvus → query-to-query search resolves back to source chunks | `query.py:hypothetical_questions_for_chunk()` + `process.py` embed/index + `milvus.py` resolution |
 
 The key distinction: **HyDE** is a query-time embedding-space trick (replace
 query → search doc vectors). **Hypothetical Questions** is an index-time
@@ -386,12 +386,14 @@ Same schema but `embedding` uses `MULTIMODAL_EMBEDDING_DIM`.
 | `pipeline/ocr.py` | Concurrent calls to the local OCR endpoint |
 | `pipeline/chunk.py` | Chunking strategies |
 | `pipeline/embed.py` | Text and multimodal model adapters |
-| `pipeline/index.py` | Milvus schema/writes and atomic BM25 persistence |
+| `pipeline/milvus.py` | Milvus schema, writes, chunk reconstruction from hits |
+| `pipeline/bm25.py` | BM25 index build, load, and search |
 | `pipeline/query.py` | Query-time enhancements (HyDE/sub-queries/stepback) AND index-time hypothetical question generation |
 | `pipeline/retrieve.py` | Vector, BM25, hybrid fusion, reranking |
 | `pipeline/search.py` | End-to-end synchronous retrieval including query-to-query resolution |
-| `pipeline/text_pipeline.py` | Document ingest orchestration: chunk → hyde → persist → embed → index (including hypothetical question chunks) |
-| `pipeline/image_pipeline.py` | Image-only document ingest orchestration |
+| `pipeline/ingest.py` | Ingestion orchestrator for files and directories |
+| `pipeline/process.py` | Document processing: chunk → hyde → persist → embed → index (including hypothetical question chunks) |
+| `pipeline/image_preprocess.py` | EXIF normalization, PNG conversion, vertical splitting |
 | `mock_server/server.py` | Deterministic local model API substitutes |
 
 ## Deployment And Persistence
@@ -723,6 +725,6 @@ Image-bearing inputs use linked image and text tracks. Raw uploads and every
 normalized/split PNG are content-addressed. PostgreSQL stores one
 `DocumentAsset` per derived image with indices, dimensions, hashes,
 preprocessing, OCR backend/status/error, and text. The image is embedded into
-`rag_image_chunks`; combined native and OCR text is passed to the existing text
-pipeline and indexed into `rag_text_chunks`. `OCR_MODE` selects `none`,
+`rag_image_chunks`; combined native and OCR text is passed to `process.py`
+and indexed into `rag_text_chunks`. `OCR_MODE` selects `none`,
 `basic`, or `paddleocr`.

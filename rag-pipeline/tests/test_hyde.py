@@ -9,21 +9,20 @@ Requires the RunPod Gemma chat endpoint to be active (.env has CHAT_BASE_URL).
 Skips if the endpoint is unreachable, so safe to run in CI.
 """
 
-import json
-import os
 import sys
+from pathlib import Path
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from pipeline.query import enhance_query, hyde, sub_queries, stepback
 from pipeline.config import cfg
+from pipeline.query import enhance_query, hyde, stepback, sub_queries
 
 
-def check(condition: bool, message: str) -> None:
+def check(condition: bool, message: str) -> None:  # noqa: FBT001
     status = "PASS" if condition else "FAIL"
     print(f"  [{status}] {message}")
     if not condition:
-        global _failures
+        global _failures  # noqa: PLW0603
         _failures += 1
 
 
@@ -45,9 +44,9 @@ try:
     check(len(docs) > 0, f"hyde() returned {len(docs)} document(s)")
     for i, d in enumerate(docs):
         print(f"    doc[{i}]: {d[:120]}...")
-except Exception as e:
-    check(False, f"hyde() raised: {e}")
-    print(f"    (endpoint may be down — skipping remaining tests)")
+except Exception as e:  # noqa: BLE001
+    check(False, f"hyde() raised: {e}")  # noqa: FBT003
+    print("    (endpoint may be down — skipping remaining tests)")
     print(f"\nResults: {0 if _failures == 0 else 1} failed, {0 if _failures > 0 else 1} passed")
     sys.exit(1 if _failures else 0)
 
@@ -73,15 +72,14 @@ print()
 # ── Test 3: Documents are distinct ─────────────────────
 print("§4  hyde() documents are distinct...")
 unique = set(docs)
-check(len(unique) == len(docs), f"{len(unique)} unique / {len(docs)} total — "
-      f"{'all distinct' if len(unique) == len(docs) else 'DUPES FOUND'}")
+check(len(unique) == len(docs), f"{len(unique)} unique / {len(docs)} total — {'all distinct' if len(unique) == len(docs) else 'DUPES FOUND'}")
 print()
 
 # ── Test 4: enhance_query includes original query ──────
 print("§5  enhance_query(query, enhancements='hyde') includes original query...")
 enhanced = enhance_query(QUERY, enhancements="hyde")
 check(len(enhanced) >= 1, f"returned {len(enhanced)} query strings (≥1)")
-check(QUERY in enhanced, f"original query present in enhance_query output")
+check(QUERY in enhanced, "original query present in enhance_query output")
 for i, q in enumerate(enhanced):
     print(f"    query[{i}]: {q[:100]}...")
 print()
@@ -141,11 +139,12 @@ print("§10 sub-queries are distinct from each other (if multiple)...")
 sqs_no_orig = [q for q in sqs if q != QUERY]
 if len(sqs_no_orig) > 1:
     unique = set(sqs_no_orig)
-    check(len(unique) == len(sqs_no_orig),
-          f"{len(unique)} unique / {len(sqs_no_orig)} sub-queries — "
-          f"{'all distinct' if len(unique) == len(sqs_no_orig) else 'DUPES FOUND'}")
+    check(
+        len(unique) == len(sqs_no_orig),
+        f"{len(unique)} unique / {len(sqs_no_orig)} sub-queries — {'all distinct' if len(unique) == len(sqs_no_orig) else 'DUPES FOUND'}",
+    )
 else:
-    check(True, f"skipped — only {len(sqs_no_orig)} sub-query (no comparison needed)")
+    check(True, f"skipped — only {len(sqs_no_orig)} sub-query (no comparison needed)")  # noqa: FBT003
 print()
 
 # ── Test 11: enhance_query with sub_queries only ─────────
@@ -160,8 +159,7 @@ print()
 # ── Test 12: enhance_query with sub_queries+hyde ─────────
 print("§12 enhance_query with sub_queries+hyde combines all strategies...")
 enhanced = enhance_query(QUERY, enhancements="sub_queries,hyde")
-check(len(enhanced) >= 2,
-      f"returned {len(enhanced)} query strings (≥2: hyde docs + sub-queries + original)")
+check(len(enhanced) >= 2, f"returned {len(enhanced)} query strings (≥2: hyde docs + sub-queries + original)")
 check(QUERY in enhanced, "original query present")
 for i, q in enumerate(enhanced):
     print(f"    query[{i}]: {q[:100]}...")
@@ -191,14 +189,11 @@ print("§14 stepback question is broader in scope...")
 sb_words = set(sb.lower().split())
 q_words = set(QUERY.lower().split())
 is_longer = len(sb) >= len(QUERY) * 0.5  # rough: shouldn't be much shorter
-check(is_longer, f"stepback ({len(sb)} chars) not drastically shorter than "
-      f"original ({len(QUERY)} chars)")
+check(is_longer, f"stepback ({len(sb)} chars) not drastically shorter than original ({len(QUERY)} chars)")
 # Stepback should mention general concepts like "research", "expedition",
 # "exploration" rather than the specific "Acheron Trough"
-has_general_term = any(t in sb.lower() for t in
-                       ["research", "expedition", "exploration", "geological",
-                        "scientific", "study", "mission", "survey"])
-check(has_general_term, f"stepback contains a general-scope term")
+has_general_term = any(t in sb.lower() for t in ["research", "expedition", "exploration", "geological", "scientific", "study", "mission", "survey"])
+check(has_general_term, "stepback contains a general-scope term")
 print()
 
 # ── Test 15: enhance_query with stepback includes both ──
@@ -215,8 +210,7 @@ print()
 # ── Test 16: enhance_query with stepback+hyde+sub_queries ─
 print("§16 enhance_query with stepback+hyde+sub_queries combines all...")
 enhanced = enhance_query(QUERY, enhancements="stepback,hyde,sub_queries")
-check(len(enhanced) >= 3,
-      f"returned {len(enhanced)} query strings (≥3)")
+check(len(enhanced) >= 3, f"returned {len(enhanced)} query strings (≥3)")
 check(QUERY in enhanced, "original query present")
 for i, q in enumerate(enhanced):
     print(f"    query[{i}]: {q[:100]}...")

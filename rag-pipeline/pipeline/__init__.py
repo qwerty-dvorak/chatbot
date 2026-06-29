@@ -14,29 +14,28 @@ from .models import (
 )
 
 __all__ = [
-    "RawDocument",
     "Chunk",
-    "EmbeddedChunk",
-    "SearchResult",
     "ChunkType",
     "ContentType",
+    "EmbeddedChunk",
     "IngestionTier",
+    "RawDocument",
+    "SearchResult",
     "cfg",
-    "ingest_path",
-    "search",
-    "format_results",
     "db",
+    "format_results",
+    "ingest_path",
     "object_store",
-    "text_pipeline",
-    "image_pipeline",
+    "search",
 ]
 
 
-def __getattr__(name: str):
+def __getattr__(name: str) -> object:
     if name in {"ingest_path", "search", "format_results"}:
-        _lazy = {"ingest_path": ".ingest", "search": ".search", "format_results": ".search"}
-        mod = importlib.import_module(_lazy[name], __package__)
+        mappings = {"ingest_path": ".ingest", "search": ".search", "format_results": ".search"}
+        mod = importlib.import_module(mappings[name], __package__)
         return getattr(mod, name if name != "format_results" else "format_results")
-    if name in {"db", "object_store", "text_pipeline", "image_pipeline"}:
+    if name in {"db", "object_store"}:
         return importlib.import_module(f".{name}", __package__)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    msg = f"module {__name__!r} has no attribute {name!r}"
+    raise AttributeError(msg)

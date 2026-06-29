@@ -1,6 +1,10 @@
+"""File extraction — text, PDF, and image document parsing."""
+
+from __future__ import annotations
+
 from pathlib import Path
 
-import fitz  # PyMuPDF
+import fitz
 
 from .config import cfg
 from .models import ContentType, RawDocument
@@ -9,106 +13,82 @@ _TEXT_EXTENSIONS = {".txt", ".md", ".rst"}
 _IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"}
 
 
-def _metadata(path: Path, **extra: object) -> dict:
-    return {
-        "filename": path.name,
-        "extension": path.suffix.lower(),
-        "size_bytes": path.stat().st_size,
-        **extra,
-    }
-
-
-def _extract_text(path: Path) -> RawDocument:
+def _text(path: Path) -> RawDocument:
+    """Extract text from a plain-text file."""
     return RawDocument(
         path=str(path),
         content_type=ContentType.TEXT,
         text=path.read_text(encoding="utf-8", errors="replace"),
         images=[],
-        metadata=_metadata(path),
+        metadata={"filename": path.name, "extension": path.suffix.lower(), "size_bytes": path.stat().st_size},
     )
 
 
-def _extract_pdf_at_dpi(path: Path, dpi: int) -> RawDocument:
-    """Render each PDF page as a PNG at the requested DPI."""
+def _pdf_at_dpi(path: Path, dpi: int) -> RawDocument:
+    """Extract PDF pages as images at the given DPI."""
     doc = fitz.open(str(path))
-    images: list[bytes] = []
-    matrix = fitz.Matrix(dpi / 72, dpi / 72)
-
+    images = []
     for page in doc:
         try:
-            pix = page.get_pixmap(matrix=matrix, alpha=False)
-            images.append(pix.tobytes("png"))
-        except Exception:
+            images.append(page.get_pixmap(matrix=fitz.Matrix(dpi / 72, dpi / 72), alpha=False).tobytes("png"))
+        except RuntimeError:
             images.append(b"")
-
-    page_count = doc.page_count
+    count = doc.page_count
     doc.close()
     return RawDocument(
         path=str(path),
         content_type=ContentType.PDF,
         text="",
         images=images,
-        metadata=_metadata(path, page_count=page_count),
+        metadata={"filename": path.name, "extension": ".pdf", "size_bytes": path.stat().st_size, "page_count": count},
     )
 
 
-def _extract_pdf(path: Path) -> RawDocument:
-    """Render PDF pages for OCR-based ingestion."""
-    return _extract_pdf_at_dpi(path, cfg.ocr_pdf_dpi)
-
-
-def _extract_pdf_fast(path: Path) -> RawDocument:
-    """Extract PDF text layer without rendering images or OCR."""
+def _pdf_fast(path: Path) -> RawDocument:
+    """Extract PDF text directly via PyMuPDF (no OCR)."""
     doc = fitz.open(str(path))
-    pages_text: list[str] = []
+    pages = []
     for page in doc:
         try:
-            pages_text.append(page.get_text("text") or "")
-        except Exception:
-            pages_text.append("")
-
-    page_count = doc.page_count
+            pages.append(page.get_text("text") or "")
+        except RuntimeError:
+            pages.append("")
+    count = doc.page_count
     doc.close()
     return RawDocument(
         path=str(path),
         content_type=ContentType.PDF,
-        text="\n\n".join(text for text in pages_text if text.strip()),
+        text="\n\n".join(t for t in pages if t.strip()),
         images=[],
-        metadata=_metadata(path, page_count=page_count, extraction_method="pymupdf_text"),
+        metadata={
+            "filename": path.name,
+            "extension": ".pdf",
+            "size_bytes": path.stat().st_size,
+            "page_count": count,
+            "extraction_method": "pymupdf_text",
+        },
     )
 
 
-def _extract_image(path: Path) -> RawDocument:
+def _image(path: Path) -> RawDocument:
+    """Extract an image file."""
     return RawDocument(
         path=str(path),
         content_type=ContentType.IMAGE,
         text="",
         images=[path.read_bytes()],
-        metadata=_metadata(path),
+        metadata={"filename": path.name, "extension": path.suffix.lower(), "size_bytes": path.stat().st_size},
     )
 
 
-def extract(path: str) -> RawDocument:
-    """Detect file type and extract content for full-quality ingestion."""
+def extract(path: str, *, fast: bool = False) -> RawDocument:
+    """Extract a document from a file path."""
     p = Path(path)
     ext = p.suffix.lower()
     if ext in _TEXT_EXTENSIONS:
-        return _extract_text(p)
+        return _text(p)
     if ext == ".pdf":
-        return _extract_pdf(p)
+        return _pdf_fast(p) if fast else _pdf_at_dpi(p, cfg.ocr_pdf_dpi)
     if ext in _IMAGE_EXTENSIONS:
-        return _extract_image(p)
-    return _extract_text(p)
-
-
-def extract_fast(path: str) -> RawDocument:
-    """Extract content with minimal latency for instant-tier ingestion."""
-    p = Path(path)
-    ext = p.suffix.lower()
-    if ext in _TEXT_EXTENSIONS:
-        return _extract_text(p)
-    if ext == ".pdf":
-        return _extract_pdf_fast(p)
-    if ext in _IMAGE_EXTENSIONS:
-        return _extract_image(p)
-    return _extract_text(p)
+        return _image(p)
+    return _text(p)

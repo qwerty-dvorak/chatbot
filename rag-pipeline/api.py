@@ -1,167 +1,117 @@
+# ruff: noqa: D100, D101, D103
 import logging
 import shutil
+import time
 import uuid
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 import aiofiles
-from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile, status
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
 from pipeline.config import cfg
-from pipeline.extract import extract, extract_fast
-from pipeline.index import _ensure_collection, connect_milvus, get_client
+from pipeline.extract import extract
 from pipeline.jobs import TERMINAL_STATUSES, IngestionWorker, JobStore
+from pipeline.milvus import connect_milvus, ensure_collection, get_client
 from pipeline.models import IngestionTier
-from pipeline.progress import ProgressTracker
+from pipeline.process import process_image, process_text
 from pipeline.query import enhance_query
 from pipeline.search import search
 from pipeline.tiers import options_for_tier, tier_from_str
 
 logger = logging.getLogger(__name__)
-
 job_store = JobStore(cfg.ingestion_data_dir)
 
 
 def _execute_job(job: dict) -> dict:
     payload = job["payload"]
-    job_id = job["id"]
+    if job["kind"] != "ingest":
+        msg = "Unsupported job kind"
+        raise ValueError(msg)
 
-    if job["kind"] == "ingest":
-        step_names = [
-            "extract", "store_raw", "ocr", "db_insert", "chunk", "text_pipeline",
-            "summary", "hyde", "persist", "embed", "index",
-        ]
-        tracker = ProgressTracker(
-            job_id,
-            step_names,
-            persist_fn=lambda jid, steps: job_store.update_steps(jid, steps),
-        )
+    tier = tier_from_str(payload.get("tier", IngestionTier.SLOW.value))
+    options = options_for_tier(tier)
+    upload_dir = Path(payload["path"])
+    file_paths = sorted(path for path in upload_dir.iterdir() if path.is_file())
+    results: list[dict] = []
+    errors: list[dict[str, str]] = []
 
-        from pipeline.image_pipeline import process_document as image_process
-        from pipeline.text_pipeline import process_document as text_process
-
-        tier = tier_from_str(payload.get("tier", IngestionTier.SLOW.value))
-        options = options_for_tier(tier)
-        upload_dir = Path(payload["path"])
-        file_paths = sorted(path for path in upload_dir.iterdir() if path.is_file())
-        results: list[dict] = []
-        errors: list[dict[str, str]] = []
-
-        for file_path in file_paths:
-            source_name = file_path.name
-            try:
-                tracker.start("extract", f"extracting {source_name}")
-                doc = extract_fast(str(file_path)) if tier == IngestionTier.INSTANT else extract(str(file_path))
-                tracker.complete("extract", f"{source_name} ({doc.content_type.value})")
-
-                existing_doc_id = payload.get("document_id")
-                chunk_strategy = payload.get("strategy") or options.chunk_strategy
-                generate_hyde = (
-                    payload["hypothetical_questions"]
-                    if payload.get("hypothetical_questions") is not None
-                    else options.hypothetical_questions_per_chunk > 0
+    for file_path in file_paths:
+        source_name = file_path.name
+        try:
+            doc = extract(str(file_path), fast=tier == IngestionTier.INSTANT)
+            existing_doc_id = payload.get("document_id")
+            chunk_strategy = payload.get("strategy") or options.chunk_strategy
+            generate_hyde = (
+                payload["hypothetical_questions"]
+                if payload.get("hypothetical_questions") is not None
+                else options.hypothetical_questions_per_chunk > 0
+            )
+            if doc.images:
+                use_multimodal = options.use_multimodal_embedding or (tier == IngestionTier.INSTANT and not doc.text.strip())
+                result = process_image(
+                    doc,
+                    params={
+                        "existing_document_id": existing_doc_id,
+                        "embedding_model": cfg.multimodal_embedding_model,
+                        "embedding_dim": cfg.multimodal_embedding_dim,
+                        "ocr_mode": payload.get("ocr_mode") or ("none" if tier == IngestionTier.INSTANT else cfg.ocr_mode),
+                        "use_multimodal_embedding": use_multimodal,
+                        "use_text_embedding": options.use_text_embedding,
+                        "chunk_strategy": chunk_strategy,
+                        "generate_hyde": generate_hyde,
+                    },
                 )
+            else:
+                result = process_text(
+                    doc,
+                    params={
+                        "existing_document_id": existing_doc_id,
+                        "chunk_strategy": chunk_strategy,
+                        "generate_hyde": generate_hyde,
+                        "hyde_per_chunk": options.hypothetical_questions_per_chunk,
+                        "generate_summary": True,
+                    },
+                )
+            results.append(result)
+        except Exception as exc:
+            logger.exception("Failed to process %s", source_name)
+            errors.append({"file": source_name, "error": str(exc)})
 
-                if doc.images:
-                    result = image_process(
-                        doc,
-                        params={
-                            "existing_document_id": existing_doc_id,
-                            "embedding_model": cfg.multimodal_embedding_model,
-                            "embedding_dim": cfg.multimodal_embedding_dim,
-                            "ocr_mode": payload.get("ocr_mode") or (
-                                "none" if tier == IngestionTier.INSTANT else cfg.ocr_mode
-                            ),
-                            "use_multimodal_embedding": options.use_multimodal_embedding,
-                            "use_text_embedding": options.use_text_embedding,
-                            "chunk_strategy": chunk_strategy,
-                            "generate_hyde": generate_hyde,
-                        },
-                        progress=tracker,
-                    )
-                else:
-                    result = text_process(
-                        doc,
-                        params={
-                            "existing_document_id": existing_doc_id,
-                            "chunk_strategy": chunk_strategy,
-                            "generate_hyde": generate_hyde,
-                            "hyde_per_chunk": options.hypothetical_questions_per_chunk,
-                            "generate_summary": True,
-                        },
-                        progress=tracker,
-                    )
-                results.append(result)
-            except Exception as exc:
-                logger.exception("Failed to process %s", source_name)
-                if tracker.current_step:
-                    tracker.fail(tracker.current_step, str(exc), f"{source_name} failed")
-                errors.append({"file": source_name, "error": str(exc)})
+    if errors and not results:
+        msg = "All uploaded files failed ingestion"
+        raise RuntimeError(msg)
 
-        if errors and not results:
-            messages = "; ".join(item["error"] for item in errors)
-            raise RuntimeError(f"All uploaded files failed ingestion: {messages}")
-
-        return {
-            "tier": tier.value,
-            "files_processed": len(results),
-            "files_failed": len(errors),
-            "results": results,
-            "errors": errors,
-        }
-
-    raise ValueError(f"Unsupported job kind: {job['kind']}")
+    return {"tier": tier.value, "files_processed": len(results), "files_failed": len(errors), "results": results, "errors": errors}
 
 
-ingestion_worker = IngestionWorker(
-    job_store,
-    handler=_execute_job,
-    poll_interval=cfg.ingestion_poll_interval,
-)
+ingestion_worker = IngestionWorker(job_store, handler=_execute_job, poll_interval=cfg.ingestion_poll_interval)
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     job_store.initialize()
     ingestion_worker.start()
     try:
         connect_milvus()
-    except Exception as exc:
-        print(f"[api] WARNING: Could not connect to Milvus on startup: {exc}")
-        print("[api] Service will start; readiness reports the connection failure.")
+    except Exception:  # noqa: BLE001
+        logger.warning("Could not connect to Milvus on startup")
     yield
     ingestion_worker.stop()
 
 
-app = FastAPI(
-    title="RAG Pipeline API",
-    description=(
-        "Local document ingestion and retrieval service. Ingestion is durable, "
-        "queued, and processed by a single background worker. Documents are "
-        "ingested at instant or slow tier."
-    ),
-    version="2.0.0",
-    lifespan=lifespan,
-)
+app = FastAPI(title="RAG Pipeline API", description="Document ingestion and retrieval service.", version="2.0.0", lifespan=lifespan)
 
 
 @app.middleware("http")
-async def timing_middleware(request, call_next):
-    import time
-
+async def timing_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
     start = time.time()
     response = await call_next(request)
-    duration = time.time() - start
-    logger.info(
-        "[TIMING] %.3fs %s %s %s",
-        duration,
-        request.method,
-        request.url.path,
-        response.status_code,
-    )
+    logger.info("[TIMING] %.3fs %s %s %s", time.time() - start, request.method, request.url.path, response.status_code)
     return response
 
 
@@ -192,15 +142,15 @@ class SearchResponse(BaseModel):
 
 def _public_job(job: dict) -> dict:
     payload = job["payload"]
-    request = {key: value for key, value in payload.items() if key != "path"}
+    request = {k: v for k, v in payload.items() if k != "path"}
     steps = job.get("steps") or []
     step_summary = {}
     if steps:
-        running = next((step for step in steps if step["status"] == "running"), None)
+        running = next((s for s in steps if s["status"] == "running"), None)
         step_summary = {
             "total": len(steps),
-            "completed": sum(1 for step in steps if step["status"] == "completed"),
-            "failed": sum(1 for step in steps if step["status"] == "failed"),
+            "completed": sum(1 for s in steps if s["status"] == "completed"),
+            "failed": sum(1 for s in steps if s["status"] == "failed"),
             "current_step": running["name"] if running else None,
         }
     return {
@@ -216,10 +166,7 @@ def _public_job(job: dict) -> dict:
         "created_at": job["created_at"],
         "started_at": job["started_at"],
         "completed_at": job["completed_at"],
-        "links": {
-            "self": f"/v1/ingestions/{job['id']}",
-            "collection": "/v1/ingestions",
-        },
+        "links": {"self": f"/v1/ingestions/{job['id']}", "collection": "/v1/ingestions"},
     }
 
 
@@ -237,34 +184,29 @@ def _safe_upload_name(filename: str | None, used: set[str]) -> str:
     original = candidate
     counter = 2
     while candidate in used:
-        path = Path(original)
-        candidate = f"{path.stem}-{counter}{path.suffix}"
+        p = Path(original)
+        candidate = f"{p.stem}-{counter}{p.suffix}"
         counter += 1
     used.add(candidate)
     return candidate
 
 
 @app.get("/health/live")
-async def liveness():
+async def liveness() -> dict:
     return {"status": "ok"}
 
 
 @app.get("/health/ready")
-async def readiness():
+async def readiness() -> dict:
     try:
         collections = get_client().list_collections()
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"Milvus unavailable: {exc}") from exc
-    return {
-        "status": "ready",
-        "worker_running": ingestion_worker.running,
-        "queue": job_store.counts(),
-        "collections": len(collections),
-    }
+        raise HTTPException(status_code=503, detail="Milvus unavailable") from exc
+    return {"status": "ready", "worker_running": ingestion_worker.running, "queue": job_store.counts(), "collections": len(collections)}
 
 
 @app.get("/health")
-async def health():
+async def health() -> dict:
     return {
         "status": "ok",
         "milvus_host": cfg.milvus_host,
@@ -275,29 +217,26 @@ async def health():
 
 
 @app.get("/")
-async def root():
+async def root() -> RedirectResponse:
     return RedirectResponse(url="/docs")
 
 
 @app.post("/v1/ingest", status_code=status.HTTP_202_ACCEPTED)
-async def enqueue_ingestion(
-    files: list[UploadFile] = File(...),
-    tier: IngestionTier = Form(IngestionTier.SLOW),
-    strategy: Literal["recursive", "sentence_window", "hierarchical"] | None = Form(None),
-    hypothetical_questions: bool | None = Form(None),
-    ocr_mode: Literal["none", "basic", "paddleocr"] | None = Form(None),
-    document_id: str | None = Form(None),
-):
-    """Persist uploaded files and enqueue a long-running ingestion job."""
+async def enqueue_ingestion(  # noqa: PLR0913
+    files: Annotated[list[UploadFile], File()],
+    tier: Annotated[IngestionTier, Form(IngestionTier.SLOW)],
+    strategy: Annotated[Literal["recursive", "sentence_window", "hierarchical"] | None, Form(None)] = None,
+    hypothetical_questions: Annotated[bool | None, Form(None)] = None,
+    ocr_mode: Annotated[Literal["none", "basic", "paddleocr"] | None, Form(None)] = None,
+    document_id: Annotated[str | None, Form(None)] = None,
+) -> dict:
     if not files:
         raise HTTPException(status_code=422, detail="At least one file is required")
-
     job_id = uuid.uuid4().hex
     upload_dir = job_store.upload_dir / job_id
     upload_dir.mkdir(parents=True, exist_ok=False)
     filenames: list[str] = []
     used_names: set[str] = set()
-
     try:
         for upload in files:
             filename = _safe_upload_name(upload.filename, used_names)
@@ -307,7 +246,6 @@ async def enqueue_ingestion(
                     await output.write(chunk)
             await upload.close()
             filenames.append(filename)
-
         job = job_store.create(
             kind="ingest",
             payload={
@@ -330,29 +268,23 @@ async def enqueue_ingestion(
 
 @app.get("/v1/ingestions")
 async def list_ingestions(
-    job_status: Literal["queued", "running", "succeeded", "failed", "cancelled"] | None = Query(
-        default=None,
-        alias="status",
-    ),
-    limit: int = Query(default=50, ge=1, le=200),
-):
+    job_status: Annotated[Literal["queued", "running", "succeeded", "failed", "cancelled"] | None, Query(alias="status")] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+) -> dict:
     jobs = job_store.list(status=job_status, limit=limit)
     return {"jobs": [_public_job(job) for job in jobs], "total": len(jobs)}
 
 
 @app.get("/v1/ingestions/{job_id}")
-async def get_ingestion(job_id: str):
+async def get_ingestion(job_id: str) -> dict:
     return _public_job(_get_job_or_404(job_id))
 
 
 @app.delete("/v1/ingestions/{job_id}")
-async def cancel_ingestion(job_id: str):
+async def cancel_ingestion(job_id: str) -> dict:
     job = _get_job_or_404(job_id)
     if job["status"] in TERMINAL_STATUSES:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Job is already {job['status']} and cannot be cancelled",
-        )
+        raise HTTPException(status_code=409, detail=f"Job is already {job['status']} and cannot be cancelled")
     if job["status"] == "running":
         raise HTTPException(status_code=409, detail="Running ingestion cannot be interrupted safely")
     job_store.cancel(job_id)
@@ -361,30 +293,19 @@ async def cancel_ingestion(job_id: str):
 
 def _search_options(body: SearchRequest) -> tuple[str | tuple[str, ...], bool]:
     use_reranker = body.use_reranker
-
     if body.tier is not None:
         tier_options = options_for_tier(body.tier)
         use_reranker = tier_options.use_reranker
-
     if body.enhancements is not None:
-        enhancements: str | tuple[str, ...] = body.enhancements
-    elif body.tier is not None:
-        enhancements = options_for_tier(body.tier).query_enhancements
-    else:
-        enabled: list[str] = []
-        if body.hyde:
-            enabled.append("hyde")
-        if body.sub_queries:
-            enabled.append("sub_queries")
-        if body.stepback:
-            enabled.append("stepback")
-        enhancements = tuple(enabled)
-
-    return enhancements, use_reranker
+        return body.enhancements, use_reranker
+    if body.tier is not None:
+        return options_for_tier(body.tier).query_enhancements, use_reranker
+    enabled = [k for k in ("hyde", "sub_queries", "stepback") if getattr(body, k)]
+    return tuple(enabled), use_reranker
 
 
-@app.post("/v1/search", response_model=SearchResponse)
-async def search_endpoint(body: SearchRequest):
+@app.post("/v1/search")
+async def search_endpoint(body: SearchRequest) -> SearchResponse:
     try:
         enhancements, use_reranker = _search_options(body)
         enhanced_queries = enhance_query(body.query, enhancements=enhancements)
@@ -400,16 +321,16 @@ async def search_endpoint(body: SearchRequest):
         )
         formatted = [
             {
-                "rank": result.rank + 1,
-                "score": result.score,
-                "method": result.retrieval_method,
-                "source": result.chunk.source_path,
-                "chunk_type": result.chunk.chunk_type.value,
-                "text": (result.chunk.window_text or result.chunk.text)[:1000],
-                "has_image": result.chunk.image_data is not None,
-                "metadata": result.chunk.metadata,
+                "rank": i + 1,
+                "score": r.score,
+                "method": r.retrieval_method,
+                "source": r.chunk.source_path,
+                "chunk_type": r.chunk.chunk_type.value,
+                "text": (r.chunk.window_text or r.chunk.text)[:1000],
+                "has_image": r.chunk.image_data is not None,
+                "metadata": r.chunk.metadata,
             }
-            for result in results
+            for i, r in enumerate(results)
         ]
         return SearchResponse(
             query=body.query,
@@ -423,41 +344,42 @@ async def search_endpoint(body: SearchRequest):
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.get("/v1/collections")
-async def list_collections():
+async def list_collections() -> dict:
     try:
         collections = get_client().list_collections()
         result = []
-        for collection in collections:
-            name = collection.get("name", "") if isinstance(collection, dict) else str(collection)
-            result.append({
-                "name": name,
-                "embedding_model": cfg.text_embedding_model,
-                "embedding_dim": cfg.text_embedding_dim,
-                "collection_name": cfg.text_collection if name == cfg.text_collection else name,
-            })
-        return {"collections": result}
+        for c in collections:
+            name = c.get("name", "") if isinstance(c, dict) else str(c)
+            result.append(
+                {
+                    "name": name,
+                    "embedding_model": cfg.text_embedding_model,
+                    "embedding_dim": cfg.text_embedding_dim,
+                    "collection_name": cfg.text_collection if name == cfg.text_collection else name,
+                }
+            )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+    else:
+        return {"collections": result}
 
 
 @app.get("/v1/collections/{name}/stats")
-async def collection_stats(name: str):
+async def collection_stats(name: str) -> dict:
     try:
-        _ensure_collection(name, cfg.text_embedding_dim)
+        ensure_collection(name, cfg.text_embedding_dim)
         client = get_client()
-        if hasattr(client, "count"):
-            count = client.count(collection_name=name)
-        else:
-            count = len(list(client.query(
-                collection_name=name,
-                output_fields=["id"],
-                limit=10000,
-            )))
+        count = (
+            client.count(collection_name=name)
+            if hasattr(client, "count")
+            else len(list(client.query(collection_name=name, output_fields=["id"], limit=10000)))
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    else:
         return {
             "name": name,
             "embedding_model": cfg.text_embedding_model,
@@ -466,14 +388,13 @@ async def collection_stats(name: str):
             "milvus_port": cfg.milvus_port,
             "count": count,
         }
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.delete("/v1/collections/{name}")
-async def drop_collection(name: str):
+async def drop_collection(name: str) -> dict:
     try:
         get_client().drop_collection(name)
-        return {"dropped": name}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+    else:
+        return {"dropped": name}
