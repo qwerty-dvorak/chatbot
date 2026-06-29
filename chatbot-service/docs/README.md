@@ -10,7 +10,7 @@ This folder defines the planned architecture and file structure for a local Djan
 - Multimodal ingestion and analysis
 - PostgreSQL for relational data
 - Milvus vector store for embeddings
-- LiteLLM connected to local model endpoints
+- OpenAI-compatible client connected to local model endpoints
 - First-class tool calling with durable call/result records
 - Streaming responses
 - Docker Compose local runtime
@@ -41,7 +41,7 @@ These are planning documents only. They intentionally do not add application cod
 - Multimodal embedding model: `nvidia/nemotron-colembed-vl-8b-v2` (dim: 4096).
 - Reranker: `Qwen3-VL-Reranker-2B`.
 - Vector store: Milvus (two collections: document_chunks, user_memories).
-- All models will be reached through LiteLLM using local OpenAI-compatible endpoints.
+- All models will be reached via local OpenAI-compatible endpoints.
 - The first frontend should be Django server-rendered HTML using forms and standard browser navigation.
 - Streaming is required. Implement it with Django `StreamingHttpResponse` or Server-Sent Events using plain browser APIs and no npm packages.
 - Uploaded knowledge is private to the uploading user by default.
@@ -55,7 +55,7 @@ These are planning documents only. They intentionally do not add application cod
 2. Configure PostgreSQL, Milvus, and custom email auth.
 3. Implement chat, messages, votes, shares, token usage, and security logs.
 4. Implement tool registry, tool call execution, and durable tool call records.
-5. Implement streaming chat generation through LiteLLM.
+5. Implement streaming chat generation.
 6. Implement document ingestion models and background processing.
 7. Implement embeddings, Milvus collections, chunks, and retrieval.
 8. Add user memory and chat compaction.

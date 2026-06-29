@@ -1,9 +1,10 @@
-import json
 import logging
-from urllib.request import Request, urlopen
 
 from django.conf import settings
 from django.core.cache import cache
+
+from .endpoints import models_url, normalize_url
+from .http_client import json_request
 
 logger = logging.getLogger(__name__)
 
@@ -26,15 +27,8 @@ def get_model_context_limit() -> dict:
         "source": "configured fallback",
     }
     try:
-        headers = {"Accept": "application/json", "User-Agent": "chatbot-service/1.0"}
-        if settings.CHAT_API_KEY not in {"", "dummy", "local-placeholder"}:
-            headers["Authorization"] = f"Bearer {settings.CHAT_API_KEY}"
-        request = Request(
-            f"{settings.CHAT_BASE_URL.rstrip('/')}/models",
-            headers=headers,
-        )
-        with urlopen(request, timeout=5) as response:
-            payload = json.load(response)
+        url = models_url(settings.CHAT_BASE_URL)
+        payload = json_request(url, method="GET", api_key=settings.CHAT_API_KEY)
 
         wanted = _model_id(settings.CHAT_MODEL)
         models = payload.get("data", [])

@@ -121,9 +121,9 @@ def compact_chat(chat):
         f"{prior_context}Conversation to compact:\n{transcript}"
     )
 
-    from apps.llm.clients import LiteLLMClient
+    from apps.llm.clients import ChatClient
 
-    response = LiteLLMClient().chat_completion(
+    response = ChatClient().chat_completion(
         messages=[
             {
                 "role": "system",

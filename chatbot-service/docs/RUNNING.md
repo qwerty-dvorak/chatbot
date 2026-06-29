@@ -29,7 +29,7 @@ TEXT_EMBEDDING_MODEL=openai/mock-embed
 RAG_ENABLED=false
 ```
 
-> **Note:** LiteLLM requires model names to be prefixed with `openai/` when pointing at a custom OpenAI-compatible endpoint.
+> **Note:** Model names may need to be prefixed with `openai/` when pointing at a custom OpenAI-compatible endpoint.
 
 ### 2. Start PostgreSQL
 

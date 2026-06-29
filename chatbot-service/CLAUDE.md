@@ -56,7 +56,7 @@ No npm/Node.js — pure Django templates with server-rendered HTML and native `E
 
 **Vector storage**: Milvus for user memory embeddings; PostgreSQL for relational data (shared with rag-pipeline).
 
-**LLM abstraction**: All model calls via LiteLLM in `apps/llm/clients.py`. Three endpoint pairs:
+**LLM abstraction**: All model calls via `ChatClient` in `apps/llm/clients.py`. Three endpoint pairs:
 `CHAT_BASE_URL/CHAT_API_KEY`, `EMBEDDING_BASE_URL/EMBEDDING_API_KEY`, `RERANKER_BASE_URL/RERANKER_API_KEY`.
 
 ### Django Apps
@@ -68,7 +68,7 @@ No npm/Node.js — pure Django templates with server-rendered HTML and native `E
 | `memory` | Per-user Memory facts with Milvus embeddings |
 | `knowledge` | KnowledgeSource, Document, DocumentChunk, hybrid search |
 | `ingestion` | IngestionJob queue, file extraction, chunking, embedding |
-| `llm` | LiteLLM client, embeddings, Milvus vector store, SSE streaming |
+| `llm` | Chat client, embeddings, Milvus vector store, SSE streaming |
 | `tools` | ToolDefinition registry, ToolCall/ToolExecution audit trail |
 | `compaction` | Summarizes old messages when context exceeds threshold |
 

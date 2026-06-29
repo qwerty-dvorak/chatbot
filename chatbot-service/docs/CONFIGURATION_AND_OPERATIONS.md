@@ -9,7 +9,7 @@ The current `pyproject.toml` contains:
 requires-python = ">=3.12"
 dependencies = [
     "django>=5.1.2",
-    "litellm==1.40.0",
+
 ]
 ```
 
@@ -24,7 +24,7 @@ Do not introduce `pip`, `poetry`, npm, yarn, pnpm, or Node-based build steps.
 
 Expected dependency groups:
 
-- runtime: Django, psycopg, LiteLLM, pymilvus, file parsing libraries.
+- runtime: Django, psycopg, pymilvus, file parsing libraries.
 - dev: pytest, pytest-django, ruff or equivalent if allowed.
 - optional OCR/PDF/image dependencies based on accepted file formats.
 
@@ -44,7 +44,7 @@ minio           Milvus object storage
 web             Django ASGI/WSGI app, started with uv
 worker          Python background worker, started with uv
 scheduler       optional periodic worker, started with uv
-litellm         optional LiteLLM proxy if not embedded in web/worker
+
 ```
 
 Compose requirements:
@@ -71,9 +71,9 @@ DATABASE_URL=postgresql://chatbot:chatbot@localhost:5433/chatbot
 MEDIA_ROOT=./media
 STATIC_ROOT=./staticfiles
 
-# Model endpoints (via LiteLLM)
-LITELLM_BASE_URL=http://localhost:8000/v1
-LITELLM_API_KEY=local-placeholder
+# Model endpoints
+CHAT_BASE_URL=http://localhost:8000/v1
+CHAT_API_KEY=local-placeholder
 
 # Chat model: Gemma 4 26B A4B IT
 CHAT_MODEL=gemma-4-26b-a4b-it
@@ -171,9 +171,9 @@ directory read-only. `LORA_ADAPTERS` is the comma-separated list of vLLM module
 names exposed in the chat UI. Module names are derived by removing the
 `-gemma-4-*` suffix from repository directory names.
 
-## LiteLLM And Local Gemma 4
+## Local Gemma 4
 
-LiteLLM should be wrapped behind local project code instead of called directly from views.
+The LLM client wraps the model endpoint behind local project code instead of calling it directly from views.
 
 Recommended wrapper responsibilities:
 
@@ -249,7 +249,7 @@ Minimum tests:
 - vector retrieval access control,
 - ingestion failure and retry,
 - compaction does not delete messages,
-- LiteLLM wrapper handles provider errors.
+- The LLM client handles provider errors.
 - streaming stores deltas and finalizes messages correctly.
 - tool calls are validated, permission checked, executed, and recorded.
 - public share links do not expose private knowledge sources.

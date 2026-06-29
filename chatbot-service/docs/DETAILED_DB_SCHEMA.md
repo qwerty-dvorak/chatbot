@@ -146,7 +146,7 @@ Persisted streaming chunks.
 | `sequence` | integer | no | none | Monotonic per message |
 | `delta_type` | varchar(30) | no | `text` | `text`, `tool_call`, `tool_result`, `error`, `done` |
 | `content` | text | no | empty | Stream text or compact event text |
-| `raw_event` | jsonb | no | `{}` | Raw LiteLLM/provider event |
+| `raw_event` | jsonb | no | `{}` | Raw provider event |
 | `created_at` | timestamptz | no | now | Event time |
 
 Constraints:
@@ -668,7 +668,7 @@ Token accounting across chat, embeddings, tools, memory, and compaction.
 | `message_id` | uuid | yes | null | FK to `messages` |
 | `tool_call_id` | uuid | yes | null | FK to `tool_calls` |
 | `operation` | varchar(50) | no | none | `chat`, `embedding`, `vision_analysis`, `compaction`, `memory`, `tool_call` |
-| `provider` | varchar(100) | no | `litellm` | Provider/wrapper |
+| `provider` | varchar(100) | no | `openai` | Provider/wrapper |
 | `model` | varchar(255) | yes | null | Model name |
 | `request_id` | varchar(255) | yes | null | Provider request ID |
 | `step_index` | integer | yes | null | Multi-step call index |

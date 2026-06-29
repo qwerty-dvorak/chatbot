@@ -124,7 +124,7 @@ chatbot/
       token_usage.py
       tests/
         __init__.py
-        test_litellm_client.py
+        test_chat_client.py
 
     tools/
       __init__.py
@@ -191,7 +191,7 @@ chatbot/
 - No npm build step is required.
 - Any browser JavaScript must be hand-written and small, mainly for streaming display.
 - `templates/` should stay server-rendered.
-- `apps/llm` should isolate LiteLLM usage so model providers can change without touching chat and ingestion logic.
+- `apps/llm` should isolate LLM client usage so model providers can change without touching chat and ingestion logic.
 - `apps/tools` should own tool schemas, permission checks, execution, and durable audit records.
 - `apps/knowledge` should own retrieval; `apps/ingestion` should own extraction and chunk creation.
 - Docker Compose should run web, worker, PostgreSQL, and optional model-facing services.

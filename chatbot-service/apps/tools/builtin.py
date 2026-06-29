@@ -98,7 +98,7 @@ def memory_aggregate(arguments: dict[str, Any], context: dict = {}) -> dict:
     try:
         from apps.chat.models import Message
         from apps.memory.services import save_memory
-        from apps.llm.clients import LiteLLMClient
+        from apps.llm.clients import ChatClient
 
         recent = Message.objects.filter(
             chat__user=user, role=Message.Role.USER,
@@ -112,7 +112,7 @@ def memory_aggregate(arguments: dict[str, Any], context: dict = {}) -> dict:
             f"User: {m.content[:500]}" for m in reversed(recent)
         )
 
-        client = LiteLLMClient()
+        client = ChatClient()
         response = client.chat_completion(
             messages=[{"role": "user", "content": (
                 "Extract factual statements about the user from this chat history. "

@@ -3,13 +3,13 @@ import urllib.request
 
 from django.test import TestCase, override_settings
 
-from apps.llm.clients import LiteLLMClient, _discover_lora_via_api
+from apps.llm.clients import ChatClient, _discover_lora_via_api
 from apps.llm.errors import LLMConnectionError, LLMError, LLMProviderError, LLMTimeoutError
 
 
-class LiteLLMClientChatCompletionTest(TestCase):
+class ChatClientChatCompletionTest(TestCase):
     def setUp(self):
-        self.client = LiteLLMClient()
+        self.client = ChatClient()
 
     def test_chat_completion_returns_content(self):
         result = self.client.chat_completion([{"role": "user", "content": "Say exactly: hello world"}])
@@ -54,20 +54,20 @@ class LiteLLMClientChatCompletionTest(TestCase):
         self.assertEqual(model, self.client.chat_model)
 
 
-class LiteLLMClientErrorTest(TestCase):
+class ChatClientErrorTest(TestCase):
     def test_client_raises_connection_error(self):
-        client = LiteLLMClient()
+        client = ChatClient()
         client.base_url = "http://localhost:1"
         with self.assertRaises((LLMConnectionError, LLMTimeoutError)):
             client.chat_completion([{"role": "user", "content": "hi"}])
 
 
-class LiteLLMClientLoRATest(TestCase):
+class ChatClientLoRATest(TestCase):
     """LoRA adapter tests. Adapter names come from the LORA_ADAPTERS env var
     (set by deploy scripts from folder discovery), falling back to empty list."""
 
     def setUp(self):
-        self.client = LiteLLMClient()
+        self.client = ChatClient()
 
     def _get_lora_adapters(self):
         adapters = _discover_lora_via_api(self.client.base_url)

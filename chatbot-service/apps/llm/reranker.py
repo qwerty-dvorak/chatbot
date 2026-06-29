@@ -1,11 +1,10 @@
-import json
 import logging
 import time
-import urllib.error
-import urllib.request
 
 from django.conf import settings
 
+from .endpoints import score_url, rerank_url
+from .http_client import json_request
 from .errors import LLMProviderError
 
 logger = logging.getLogger(__name__)
@@ -19,14 +18,6 @@ class RerankerClient:
 
     def rerank(self, query: str, documents: list[str], top_k: int = None) -> list[dict]:
         top_k = top_k or len(documents)
-        headers = {
-            "Content-Type": "application/json",
-            "User-Agent": "opencode/1.0",
-        }
-        if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
-
-        base = self.base_url.rstrip("/")
 
         # Try /score (vLLM native) first, fall back to /v1/rerank (Cohere-compatible)
         score_payload = {
@@ -44,23 +35,17 @@ class RerankerClient:
         start = time.time()
         try:
             try:
-                url = f"{base}/score"
-                body = json.dumps(score_payload).encode()
-                req = urllib.request.Request(url, data=body, headers=headers, method="POST")
-                resp = urllib.request.urlopen(req, timeout=120)
-                data = json.loads(resp.read().decode())
+                url = score_url(self.base_url)
+                data = json_request(url, score_payload, api_key=self.api_key)
                 scored_items = [
                     (item["index"], item.get("score", 0.0))
                     for item in data.get("data", [])
                 ]
-            except urllib.error.HTTPError as e:
-                if e.code != 404:
+            except LLMProviderError as e:
+                if getattr(e, "status_code", None) != 404:
                     raise
-                url = f"{base}/v1/rerank"
-                body = json.dumps(rerank_payload).encode()
-                req = urllib.request.Request(url, data=body, headers=headers, method="POST")
-                resp = urllib.request.urlopen(req, timeout=120)
-                data = json.loads(resp.read().decode())
+                url = rerank_url(self.base_url)
+                data = json_request(url, rerank_payload, api_key=self.api_key)
                 scored_items = [
                     (item["index"], item.get("relevance_score", 0.0))
                     for item in data.get("results", [])
@@ -77,13 +62,8 @@ class RerankerClient:
                     "document": documents[idx],
                 })
             return results
-        except urllib.error.HTTPError as e:
-            detail = e.read().decode()
-            logger.error("Rerank HTTP %d: %s", e.code, detail)
-            raise LLMProviderError(detail, provider="openai", status_code=e.code)
-        except urllib.error.URLError as e:
-            logger.error("Rerank connection error: %s", e)
-            raise LLMProviderError(str(e))
+        except LLMProviderError:
+            raise
         except Exception as e:
             duration = time.time() - start
             logger.error("Rerank failed after %.3fs: %s", duration, e)

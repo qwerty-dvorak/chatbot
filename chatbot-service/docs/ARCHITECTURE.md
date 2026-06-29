@@ -11,7 +11,7 @@ The system should replace the JavaScript/Prisma/Node shape from the reference sc
 - Backend: Django.
 - Relational database: PostgreSQL.
 - Vector store: Milvus.
-- LLM access: LiteLLM.
+- LLM access: OpenAI-compatible API.
 - Chat/vision model: Gemma 4 26B A4B IT.
 - Text embeddings: nvidia/llama-embed-nemotron-8b (dim: 4096).
 - Multimodal embeddings: nvidia/nemotron-colembed-vl-8b-v2 (dim: 4096).
@@ -42,7 +42,7 @@ Django web container
   |-- memory: user memories, memory settings, context assembly
   |-- knowledge: documents, assets, chunks, retrieval
   |-- ingestion: file parsing, OCR, image analysis, indexing jobs
-  |-- llm: LiteLLM client, model routing, token accounting, Milvus store
+  |-- llm: Chat client, model routing, token accounting, Milvus store
   |-- tools: tool registry, permissions, execution, audit trail
   |-- compaction: chat summarization and context compression
   |
@@ -56,9 +56,9 @@ Python worker container(s)
   |
   | ingestion, compaction, memory extraction, tool jobs
   v
-LiteLLM / local model runtime
+OpenAI-compatible model runtime
   |
-  | OpenAI-compatible API or LiteLLM provider adapter
+  | OpenAI-compatible API
   v
 Gemma 4 26B A4B IT chat/vision + NVIDIA embedding models + Qwen reranker
 ```
@@ -76,7 +76,7 @@ Gemma 4 26B A4B IT chat/vision + NVIDIA embedding models + Qwen reranker
    - relevant RAG chunks,
    - uploaded attachments linked to the current message.
 4. Tool policy selects available tools for the user, chat, and current prompt.
-5. LiteLLM calls Gemma 4 (via local GGUF server) in streaming mode.
+5. The LLM client calls Gemma 4 (via local GGUF server) in streaming mode.
 6. Streaming deltas are written to `chat.MessageDelta` and sent to the browser.
 7. If the model requests a tool call, Django records `tools.ToolCall`, validates permission, runs the tool, records `tools.ToolResult`, and resumes generation with the tool result.
 8. The final assistant response is stored as `chat.Message`.
@@ -193,7 +193,7 @@ Owns file processing jobs and parsers. This app should be operationally isolated
 
 ### `llm`
 
-Owns LiteLLM wrapper code, prompt assembly helpers, model policy, retries, token accounting, and Milvus vector store client.
+Owns LLM client code, prompt assembly helpers, model policy, retries, token accounting, and Milvus vector store client.
 
 ### `compaction`
 

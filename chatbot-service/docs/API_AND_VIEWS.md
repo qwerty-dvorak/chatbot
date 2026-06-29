@@ -64,13 +64,13 @@ Custom registration is needed because email is the login identifier.
 - Displays uploaded attachments for each message.
 - Shows message form.
 - On POST, stores user message and creates a pending assistant message.
-- For non-stream fallback, builds context, calls LiteLLM, stores assistant response, redirects back.
+- For non-stream fallback, builds context, calls the LLM, stores assistant response, redirects back.
 
 `ChatStreamView`
 
 - Authenticates the user and chat ownership.
 - Builds context and allowed tool list.
-- Calls LiteLLM in streaming mode.
+- Calls the LLM in streaming mode.
 - Emits token deltas as SSE events.
 - Persists deltas into `chat.MessageDelta`.
 - Records tool calls, tool executions, and tool results as they happen.

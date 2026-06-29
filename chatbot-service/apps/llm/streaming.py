@@ -83,7 +83,7 @@ class ChannelContentParser:
 
 class StreamHandler:
     """
-    Processes LiteLLM streaming chunks and converts them to SSE events.
+    Processes streaming chunks from the chat completion API and converts them to SSE events.
 
     Supports:
       - Text deltas (choices[0].delta.content)

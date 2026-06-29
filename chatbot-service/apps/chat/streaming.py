@@ -5,7 +5,7 @@ import time
 from django.http import StreamingHttpResponse
 
 from apps.chat.models import Message, MessageDelta
-from apps.llm.clients import LiteLLMClient
+from apps.llm.clients import ChatClient
 from apps.llm.streaming import StreamHandler
 from apps.tools.registry import registry
 
@@ -36,7 +36,7 @@ def stream_chat_response(message: Message, user) -> StreamingHttpResponse:
             message.metadata["rag_used"] = True
             message.save(update_fields=["metadata"])
 
-    client      = LiteLLMClient()
+    client      = ChatClient()
     tool_schemas = registry.get_schemas(user)
     thinking_mode = bool((message.metadata or {}).get("thinking_mode"))
     lora_adapter = (message.metadata or {}).get("lora_adapter") or (chat.metadata or {}).get("lora_adapter") or ""

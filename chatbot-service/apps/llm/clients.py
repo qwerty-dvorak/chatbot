@@ -1,11 +1,20 @@
+"""
+Chat completion client.
+
+Pure urllib — no external LLM SDK dependency.  Uses the shared endpoint helpers and HTTP
+client from this package so URL building and error handling are consistent across
+all LLM API clients.
+"""
+
 import json
 import logging
 import time
-import urllib.request
 from typing import Any
 
 from django.conf import settings
 
+from .endpoints import chat_completions_url, models_url, normalize_url
+from .http_client import json_request, json_stream_request
 from .errors import LLMConnectionError, LLMProviderError, LLMRateLimitError, LLMTimeoutError
 
 logger = logging.getLogger(__name__)
@@ -24,11 +33,9 @@ def _discover_lora_via_api(base_url: str | None = None) -> list[str] | None:
     Returns a list of adapter names (e.g. ['taboo-ship', 'taboo-book']),
     or None if the endpoint cannot be reached (caller should fall back to env var).
     """
-    url = (base_url or settings.CHAT_BASE_URL).rstrip("/v1").rstrip("/") + "/v1/models"
-    import urllib.request, json
-    req = urllib.request.Request(url, headers={"User-Agent": "opencode/1.0"})
+    url = models_url(base_url or settings.CHAT_BASE_URL)
     try:
-        resp = json.loads(urllib.request.urlopen(req, timeout=5).read())
+        resp = json_request(url, method="GET")
         models = [m["id"] for m in resp.get("data", [])]
         base = settings.CHAT_MODEL.removeprefix("openai/")
         return [m for m in models if m != base and "/" not in m]
@@ -63,9 +70,15 @@ def _debug_log(messages: list, model: str, kwargs: dict):
     )
 
 
-class LiteLLMClient:
+class ChatClient:
+    """Chat completion client backed by raw urllib requests.
+
+    Talks to any OpenAI-compatible chat endpoint.  Supports streaming, tool
+    calling, LoRA adapters, thinking mode, and multimodal messages.
+    """
+
     def __init__(self):
-        self.base_url = settings.CHAT_BASE_URL.rstrip("/v1").rstrip("/")
+        self.base_url = normalize_url(settings.CHAT_BASE_URL)
         self.api_key = settings.CHAT_API_KEY
         self.chat_model = settings.CHAT_MODEL.removeprefix("openai/")
         self.vision_model = settings.VISION_MODEL.removeprefix("openai/")
@@ -116,32 +129,6 @@ class LiteLLMClient:
             body["add_lora"] = lora_adapter
         return body
 
-    def _request(self, body: dict, stream: bool = False):
-        url = f"{self.base_url}/v1/chat/completions"
-        data = json.dumps(body).encode()
-        req = urllib.request.Request(
-            url, data=data,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.api_key}",
-                "User-Agent": "opencode/1.0",
-            },
-        )
-        try:
-            return urllib.request.urlopen(req, timeout=120)
-        except urllib.error.HTTPError as e:
-            status = e.code
-            detail = e.read().decode()
-            if status == 401:
-                raise LLMProviderError(detail, provider="openai", status_code=401)
-            elif status == 429:
-                raise LLMRateLimitError(detail)
-            elif status == 408 or status == 504:
-                raise LLMTimeoutError(detail)
-            raise LLMProviderError(detail, provider="openai", status_code=status)
-        except urllib.error.URLError as e:
-            raise LLMConnectionError(str(e.reason))
-
     def chat_completion(self, messages: list[dict[str, str]], **kwargs) -> dict[str, Any]:
         lora_adapter = kwargs.get("lora_adapter")
         model = self._select_model(messages, lora_adapter=lora_adapter)
@@ -149,8 +136,8 @@ class LiteLLMClient:
         start = time.time()
         try:
             body = self._build_body(model, messages, stream=False, **kwargs)
-            resp = self._request(body)
-            data = json.loads(resp.read().decode())
+            url = chat_completions_url(self.base_url)
+            data = json_request(url, body, api_key=self.api_key)
             choice = data["choices"][0]
             msg = choice["message"]
             result = {
@@ -173,7 +160,8 @@ class LiteLLMClient:
         start = time.time()
         try:
             body = self._build_body(model, messages, stream=True, **kwargs)
-            resp = self._request(body, stream=True)
+            url = chat_completions_url(self.base_url)
+            resp = json_stream_request(url, body, api_key=self.api_key)
             last_chunk = None
             for line in resp:
                 line = line.decode().strip()
@@ -188,5 +176,3 @@ class LiteLLMClient:
             raise
         except Exception as e:
             raise LLMProviderError(str(e), provider="openai")
-
-

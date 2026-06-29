@@ -1,10 +1,10 @@
-import json
 import logging
 import time
-import urllib.request
 
 from django.conf import settings
 
+from .endpoints import embeddings_url
+from .http_client import json_request
 from .errors import LLMConnectionError, LLMProviderError
 
 logger = logging.getLogger(__name__)
@@ -33,32 +33,16 @@ class EmbeddingClient:
         return self.embed_text(text)
 
     def _embed(self, texts: list[str], model: str) -> list[list[float]]:
-        url = f"{self.base_url.rstrip('/')}/embeddings"
-        body = json.dumps({"model": model, "input": texts}).encode()
-        headers = {
-            "Content-Type": "application/json",
-            "User-Agent": "opencode/1.0",
-        }
-        if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
-
+        url = embeddings_url(self.base_url)
+        body = {"model": model, "input": texts}
         start = time.time()
         try:
-            req = urllib.request.Request(url, data=body, headers=headers, method="POST")
-            resp = urllib.request.urlopen(req, timeout=120)
-            data = json.loads(resp.read().decode())
+            data = json_request(url, body, api_key=self.api_key)
             duration = time.time() - start
             embeddings = [item["embedding"] for item in data["data"]]
             logger.info("[TIMING] _embed %.3fs model=%s texts=%d dim=%d",
                         duration, model, len(texts), len(embeddings[0]) if embeddings else 0)
             return embeddings
-        except urllib.error.HTTPError as e:
-            detail = e.read().decode()
-            logger.error("Embedding HTTP %d with %s: %s", e.code, model, detail)
-            raise LLMProviderError(detail, provider="openai", status_code=e.code)
-        except urllib.error.URLError as e:
-            logger.error("Embedding connection error with %s: %s", model, e)
-            raise LLMConnectionError(str(e))
         except (LLMConnectionError, LLMProviderError):
             raise
         except Exception as e:

@@ -358,8 +358,8 @@ class ContextBuilder:
             f"Summarize the requested document(s): {', '.join(mentions.selected_sources)}"
         )
         try:
-            from apps.llm.clients import LiteLLMClient
-            client = LiteLLMClient()
+            from apps.llm.clients import ChatClient
+            client = ChatClient()
             prompt = RETRIEVAL_ROUTER_PROMPT.format(
                 query=json.dumps(query),
                 sources=json.dumps(list(mentions.selected_sources)),
