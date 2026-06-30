@@ -23,6 +23,7 @@ class Migration(migrations.Migration):
                 ("attempts", models.IntegerField(default=0)),
                 ("error", models.TextField(default="")),
                 ("metadata", models.JSONField(blank=True, default=dict)),
+                ("queue_order", models.IntegerField(db_index=True, default=0)),
                 ("started_at", models.DateTimeField(blank=True, null=True)),
                 ("finished_at", models.DateTimeField(blank=True, null=True)),
                 ("created_at", models.DateTimeField(auto_now_add=True)),
