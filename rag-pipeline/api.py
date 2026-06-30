@@ -86,7 +86,7 @@ def _execute_job(job: dict) -> dict:
                         "chunk_strategy": chunk_strategy,
                         "generate_hyde": generate_hyde,
                         "hyde_per_chunk": options.hypothetical_questions_per_chunk,
-                        "generate_summary": True,
+                        "generate_summary": tier != IngestionTier.INSTANT,
                         "progress_tracker": tracker,
                     },
                 )

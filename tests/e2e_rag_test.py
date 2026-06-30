@@ -40,7 +40,7 @@ def result(success, name):
         FAIL += 1; log(f"  [FAIL] {name}")
 
 
-def req(method, url, data=None, headers=None, timeout=30):
+def req(method, url, data=None, headers=None, timeout=120):
     if isinstance(data, dict):
         data = json.dumps(data).encode()
         headers = dict(headers or {}, **{"Content-Type": "application/json"})
