@@ -27,7 +27,7 @@ class ContentBlob(models.Model):
             models.Index(fields=["storage_status"]),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"Blob {self.content_hash[:12]}... ({self.mime_type})"
 
 
@@ -65,14 +65,13 @@ class ArtifactRevision(models.Model):
             models.Index(fields=["pipeline_fingerprint"]),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"Revision {self.pipeline_fingerprint[:12]}... ({self.processing_status})"
 
 
 class DocumentReference(models.Model):
     class Kind(models.TextChoices):
         KNOWLEDGE = "knowledge", "Knowledge"
-        CHAT_ATTACHMENT = "chat_attachment", "Chat Attachment"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     owner = models.ForeignKey(
@@ -98,7 +97,7 @@ class DocumentReference(models.Model):
             models.Index(fields=["artifact_revision"]),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.title} ({self.kind})"
 
 
@@ -134,7 +133,7 @@ class DocumentGrant(models.Model):
             models.Index(fields=["user"]),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.user_id} ({self.role}) on {self.document_reference_id}"
 
 
@@ -168,5 +167,5 @@ class EmbeddingSet(models.Model):
             models.Index(fields=["model_name", "embedding_type"]),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.embedding_type} embed ({self.model_name})"

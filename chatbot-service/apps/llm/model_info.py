@@ -1,9 +1,11 @@
+"""Model context limit discovery via /v1/models."""
+
 import logging
 
 from django.conf import settings
 from django.core.cache import cache
 
-from .endpoints import models_url, normalize_url
+from .endpoints import models_url
 from .http_client import json_request
 
 logger = logging.getLogger(__name__)
@@ -55,7 +57,7 @@ def get_model_context_limit() -> dict:
                 }
                 cache.set(MODEL_INFO_CACHE_KEY, result, MODEL_INFO_CACHE_SECONDS)
                 return result
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         logger.warning("Could not load model context limit: %s", exc)
 
     cache.set(MODEL_INFO_CACHE_KEY, fallback, 30)

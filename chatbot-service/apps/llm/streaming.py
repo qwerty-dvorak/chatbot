@@ -1,6 +1,11 @@
+"""Streaming chunk processing and SSE event generation."""
+
 import json
 import logging
-from typing import Any, Generator
+from collections.abc import Generator
+from typing import Any
+
+from django.db.models import Max
 
 from apps.chat.models import Message, MessageDelta
 
@@ -14,7 +19,7 @@ class ChannelContentParser:
     THOUGHT_ENDS = ("<channel|>", "<|end|>")
     FINAL_STARTS = ("<|channel>final", "<|channel|>final")
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.mode = "text"
         self.buffer = ""
 
@@ -95,7 +100,7 @@ class StreamHandler:
     under the "reasoning" key when streaming completes.
     """
 
-    def __init__(self, message: Message):
+    def __init__(self, message: Message) -> None:
         self.message   = message
         self.accumulated_content = ""
         self.accumulated_reasoning = ""
@@ -103,7 +108,6 @@ class StreamHandler:
         self._tc_acc: dict[int, dict] = {}
         self.completed_tool_calls: list[dict] = []
 
-        from django.db.models import Max
         existing = MessageDelta.objects.filter(message=message).aggregate(
             mx=Max("sequence")
         )["mx"]

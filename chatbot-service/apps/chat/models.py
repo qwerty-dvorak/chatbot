@@ -27,7 +27,7 @@ class Chat(models.Model):
             models.Index(fields=["archived"]),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.title
 
 
@@ -58,7 +58,7 @@ class ChatGrant(models.Model):
             models.Index(fields=["user"]),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.user_id} ({self.role}) on {self.chat_id}"
 
 
@@ -96,7 +96,7 @@ class ChatBranch(models.Model):
             models.Index(fields=["chat", "is_active"]),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.name} ({self.chat_id})"
 
 
@@ -131,7 +131,6 @@ class Message(models.Model):
     role = models.CharField(max_length=30, choices=Role.choices)
     content = models.TextField(default="")
     status = models.CharField(max_length=30, choices=Status.choices, default=Status.COMPLETED)
-    tool_invocations = models.JSONField(default=dict, blank=True)
     attachments = models.JSONField(default=list, blank=True)
     metadata = models.JSONField(default=dict, blank=True)
     edit_count = models.PositiveIntegerField(default=0)
@@ -148,7 +147,7 @@ class Message(models.Model):
             models.Index(fields=["author"]),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"[{self.role}] {self.content[:60]}"
 
 
@@ -184,7 +183,7 @@ class MessageEdit(models.Model):
             ),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"Edit {self.id} on {self.message_id}"
 
 
@@ -203,7 +202,6 @@ class MessageDelta(models.Model):
     sequence = models.IntegerField()
     delta_type = models.CharField(max_length=30, choices=DeltaType.choices, default=DeltaType.TEXT)
     content = models.TextField(default="")
-    raw_event = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -215,7 +213,7 @@ class MessageDelta(models.Model):
             models.Index(fields=["message", "sequence"]),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"Delta {self.sequence} [{self.delta_type}]"
 
 
@@ -243,7 +241,7 @@ class MessageAttachment(models.Model):
             models.Index(fields=["document_reference"]),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.original_filename
 
 
@@ -269,7 +267,7 @@ class ChatShare(models.Model):
             models.Index(fields=["token"]),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"Share {self.token[:8]}..."
 
 
@@ -297,7 +295,7 @@ class Vote(models.Model):
             models.Index(fields=["message"]),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{'Up' if self.is_upvoted else 'Down'}vote by {self.user_id}"
 
 
@@ -343,7 +341,7 @@ class TurnRun(models.Model):
             models.Index(fields=["worker_id"]),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"TurnRun {self.id} ({self.status})"
 
 
@@ -380,5 +378,5 @@ class TurnEvent(models.Model):
             models.Index(fields=["turn_run", "event_type"]),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"Event {self.sequence} [{self.event_type}]"

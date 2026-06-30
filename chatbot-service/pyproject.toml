@@ -16,3 +16,300 @@ dependencies = [
 
 [tool.uv]
 exclude-newer = "2025-10-23T12:36:00Z"
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+    "D203",
+    "D212",
+    "COM812",
+    "E501",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"**/tests/**" = [
+    "S101",
+    "S105",
+    "S106",
+    "T201",
+    "PT009",
+    "PT027",
+    "EM",
+    "TRY",
+    "SIM105",
+    "PERF401",
+    "ANN",
+    "D",
+    "ARG",
+    "PLR2004",
+    "PLR0913",
+    "BLE001",
+    "F841",
+    "SLF001",
+    "RET504",
+]
+"**/migrations/**" = [
+    "E501",
+    "ANN",
+    "D",
+    "ARG",
+    "PLC0415",
+    "RUF012",
+    "N802",
+]
+"**/__init__.py" = [
+    "D104",
+    "ANN",
+    "D",
+    "RUF012",
+]
+"config/settings/*.py" = [
+    "D100",
+    "ANN",
+    "ARG",
+    "F405",
+]
+"config/asgi.py" = ["D100", "ANN"]
+"config/wsgi.py" = ["D100", "ANN"]
+"config/urls.py" = ["D100", "ANN", "ARG005"]
+"manage.py" = ["EXE001", "D100", "D103", "ANN", "PLC0415"]
+"config/middleware.py" = ["D", "ANN", "ARG"]
+"**/management/**" = [
+    "D",
+    "ANN",
+    "ARG",
+    "BLE001",
+    "PLC0415",
+]
+"**/admin.py" = [
+    "D",
+    "ANN",
+    "ARG",
+]
+"**/apps.py" = [
+    "D",
+    "ANN",
+    "ARG",
+]
+"**/models.py" = [
+    "D",
+    "ANN",
+    "ARG",
+    "RUF012",
+    "DJ001",
+    "DJ008",
+    "N802",
+    "N815",
+]
+"**/forms.py" = [
+    "D",
+    "ANN",
+    "ARG",
+]
+"**/views.py" = [
+    "D",
+    "ANN",
+    "ARG",
+    "PLC0415",
+]
+"**/urls.py" = [
+    "D",
+    "ANN",
+    "ARG",
+]
+"**/context_processors.py" = [
+    "D",
+    "ANN",
+    "ARG",
+]
+"file_server/server.py" = [
+    "EXE001",
+    "D",
+    "ANN",
+    "E701",
+    "S104",
+    "PLW1508",
+    "E501",
+    "S110",
+    "BLE001",
+    "DTZ011",
+    "ARG",
+]
+"apps/api.py" = [
+    "D",
+    "ANN",
+    "ARG",
+]
+"apps/chat/templatetags/chat_tags.py" = [
+    "E501",
+    "S308",
+    "D",
+    "ANN",
+    "ARG",
+]
+"apps/ingestion/management/commands/run_ingestion_worker.py" = [
+    "D",
+    "ANN",
+    "ARG",
+    "BLE001",
+]
+"apps/tools/builtin.py" = [
+    "S110",
+    "D",
+    "ANN",
+    "ARG",
+    "BLE001",
+    "B904",
+    "TRY300",
+    "PLC0415",
+    "C901",
+    "PLR091",
+]
+"apps/compaction/**" = [
+    "D",
+    "ANN",
+    "ARG",
+]
+"apps/documents/models.py" = ["N802", "N815"]
+"apps/knowledge/views.py" = [
+    "D",
+    "ANN",
+    "ARG",
+    "PTH",
+    "FBT",
+    "C901",
+    "PLR091",
+    "BLE001",
+    "TRY300",
+    "B904",
+]
+"apps/chat/views.py" = [
+    "D",
+    "ANN",
+    "ARG",
+    "PTH",
+    "FBT",
+    "C901",
+    "PLR091",
+    "BLE001",
+    "TRY300",
+    "B904",
+]
+"apps/ingestion/services.py" = [
+    "ANN",
+    "ARG",
+    "D",
+]
+"apps/knowledge/rag_client.py" = [
+    "ANN",
+    "D",
+    "FBT",
+    "PTH",
+    "C901",
+    "PLR091",
+    "BLE001",
+    "TRY300",
+]
+"apps/llm/clients.py" = [
+    "ARG",
+    "ANN",
+    "D",
+    "FBT",
+    "PTH",
+    "C901",
+    "PLR091",
+]
+"apps/llm/http_client.py" = [
+    "BLE001",
+    "B904",
+    "ANN",
+    "D",
+]
+"apps/llm/milvus_store.py" = [
+    "PLC0415",
+    "ANN",
+    "D",
+    "PTH",
+    "C901",
+    "PLR091",
+]
+"apps/llm/streaming.py" = [
+    "D",
+    "FBT",
+    "ANN",
+    "PTH",
+    "C901",
+    "PLR091",
+]
+"apps/chat/streaming.py" = [
+    "ANN",
+    "D",
+    "FBT",
+]
+"apps/chat/context.py" = [
+    "ANN",
+    "D",
+    "C901",
+    "PLR091",
+    "FBT",
+    "BLE001",
+]
+"apps/accounts/managers.py" = [
+    "ANN",
+    "D",
+]
+"apps/ingestion/chunking.py" = [
+    "ANN",
+    "D",
+]
+"apps/ingestion/extractors/image.py" = [
+    "ARG",
+    "D",
+]
+"apps/ingestion/extractors/pdf.py" = [
+    "ARG",
+    "D",
+]
+"apps/ingestion/extractors/text.py" = [
+    "ARG",
+    "D",
+]
+"apps/knowledge/services.py" = [
+    "ANN",
+    "ARG",
+    "D",
+]
+"apps/llm/embeddings.py" = [
+    "D",
+    "ANN",
+]
+"apps/llm/errors.py" = [
+    "ANN",
+    "D",
+]
+"apps/llm/lora.py" = [
+    "D",
+]
+"apps/llm/model_info.py" = [
+    "D",
+]
+"apps/llm/reranker.py" = [
+    "ANN",
+    "D",
+]
+"apps/memory/services.py" = [
+    "ANN",
+    "D",
+]
+"apps/tools/executor.py" = [
+    "ANN",
+    "D",
+]
+"apps/tools/permissions.py" = [
+    "ANN",
+    "D",
+]
+"apps/tools/registry.py" = [
+    "ANN",
+    "D",
+]

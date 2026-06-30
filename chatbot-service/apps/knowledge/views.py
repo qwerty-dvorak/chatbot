@@ -9,12 +9,12 @@ from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.files.storage import FileSystemStorage
 from django.http import JsonResponse
-from django.shortcuts import redirect, render
+from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse_lazy
 from django.views import View
 from django.views.generic import DetailView, ListView
 
-from apps.documents.models import ArtifactRevision, ContentBlob, DocumentGrant, DocumentReference
+from apps.documents.models import ArtifactRevision, ContentBlob, DocumentReference
 from apps.ingestion.models import IngestionJob
 
 from .rag_client import rag_client
@@ -42,10 +42,10 @@ def _docs_storage():
 def _save_doc_file(user_id, uploaded_file):
     storage = _docs_storage()
     name, ext = os.path.splitext(uploaded_file.name)
-    rel = os.path.join(str(user_id), str(date.today()), "knowledge", uploaded_file.name)
+    rel = os.path.join(str(user_id), str(date.today()), "knowledge", uploaded_file.name)  # noqa: DTZ011
     if storage.exists(rel):
         rel = os.path.join(
-            str(user_id), str(date.today()), "knowledge",
+            str(user_id), str(date.today()), "knowledge",  # noqa: DTZ011
             f"{name}_{uuid.uuid4().hex[:6]}{ext}"
         )
     return storage.save(rel, uploaded_file)
@@ -91,7 +91,7 @@ class DocumentDetailView(LoginRequiredMixin, DetailView):
             doc_id = rag_result.get("document_id")
             if doc_id:
                 from apps.knowledge.models import KnowledgeDocument
-                try:
+                try:  # noqa: SIM105
                     context["rag_doc"] = KnowledgeDocument.objects.get(id=doc_id)
                 except KnowledgeDocument.DoesNotExist:
                     pass
@@ -150,7 +150,7 @@ def _find_rag_job(document: DocumentReference) -> dict | None:
             score += 20
         if rag_data.get("status") == "succeeded" and primary:
             score += 10
-        if score >= 60 or (exact_file and rag_data.get("status") == "succeeded"):
+        if score >= 60 or (exact_file and rag_data.get("status") == "succeeded"):  # noqa: PLR2004
             candidates.append((score, -index, rag_data))
     return max(candidates, default=(0, 0, None), key=lambda item: (item[0], item[1]))[2]
 

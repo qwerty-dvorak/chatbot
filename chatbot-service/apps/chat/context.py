@@ -8,6 +8,12 @@ from dataclasses import dataclass
 from django.conf import settings
 from django.core.files.storage import default_storage
 
+from apps.chat.models import Message
+from apps.compaction.services import latest_compaction, messages_after_compaction
+from apps.documents.models import DocumentReference
+from apps.knowledge.models import KnowledgeDocument
+from apps.knowledge.rag_client import rag_client
+from apps.llm.clients import ChatClient
 from apps.llm.prompts import (
     COMPACTION_CONTEXT_PROMPT,
     DOCUMENT_SELECTION_CONTEXT_PROMPT,
@@ -16,6 +22,9 @@ from apps.llm.prompts import (
     RETRIEVAL_ROUTER_PROMPT,
     SYSTEM_PROMPT,
 )
+from apps.memory.models import MemorySettings
+from apps.memory.services import get_user_memories
+from apps.tools.builtin import _ingest_from_attachment
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +61,7 @@ def _parse_json_object(content: str) -> dict:
         parsed, _ = json.JSONDecoder().raw_decode(value[start:])
 
     if not isinstance(parsed, dict):
-        raise ValueError("LLM routing decision must be a JSON object")
+        raise ValueError("LLM routing decision must be a JSON object")  # noqa: TRY004, TRY003, EM101
     return parsed
 
 
@@ -60,7 +69,7 @@ def _normalise_rag_decision(content: str, fallback_query: str) -> dict:
     """Validate the LLM's retrieval decision instead of trusting truthy values."""
     raw = _parse_json_object(content)
     if not isinstance(raw.get("use_rag"), bool):
-        raise ValueError("LLM routing decision must contain boolean use_rag")
+        raise ValueError("LLM routing decision must contain boolean use_rag")  # noqa: TRY004, TRY003, EM101
 
     query = raw.get("search_query", "")
     if not isinstance(query, str) or not query.strip():
@@ -82,7 +91,8 @@ def _normalise_rag_decision(content: str, fallback_query: str) -> dict:
 
 
 def resolve_document_mentions(query: str, user) -> DocumentMentionResolution:
-    """Resolve @mentions against the user's document titles.
+    """
+    Resolve @mentions against the user's document titles.
 
     Known titles are matched longest-first, which supports filenames containing
     spaces. Unknown selectors are removed from the retrieval query but retained
@@ -91,8 +101,6 @@ def resolve_document_mentions(query: str, user) -> DocumentMentionResolution:
     mention_marker = re.compile(r"(?<![\w@])@")
     if not query or not mention_marker.search(query):
         return DocumentMentionResolution(clean_query=query)
-
-    from apps.documents.models import DocumentReference
 
     references = []
     if user and getattr(user, "is_authenticated", False):
@@ -308,7 +316,8 @@ class ContextBuilder:
         self,
         mentions: DocumentMentionResolution,
     ) -> DocumentMentionResolution:
-        """Carry an explicit document selection into follow-up turns.
+        """
+        Carry an explicit document selection into follow-up turns.
 
         An explicit selector on the current turn always wins, including an
         unresolved selector (which must not silently fall back to an older
@@ -317,8 +326,6 @@ class ContextBuilder:
         if mentions.had_mentions or mentions.selected_sources:
             return mentions
 
-        from apps.chat.models import Message
-        from apps.documents.models import DocumentReference
 
         recent = Message.objects.filter(
             chat=self.chat,
@@ -358,7 +365,6 @@ class ContextBuilder:
             f"Summarize the requested document(s): {', '.join(mentions.selected_sources)}"
         )
         try:
-            from apps.llm.clients import ChatClient
             client = ChatClient()
             prompt = RETRIEVAL_ROUTER_PROMPT.format(
                 query=json.dumps(query),
@@ -379,7 +385,7 @@ class ContextBuilder:
                 len(query),
                 result,
             )
-            return result
+            return result  # noqa: TRY300
         except Exception:
             duration = time.time() - start
             logger.exception("[TIMING] rag_decide=%.3fs FAILED, using safe fallback", duration)
@@ -412,53 +418,101 @@ class ContextBuilder:
         if not getattr(settings, "RAG_ENABLED", False):
             return None, None
         try:
-            from apps.knowledge.rag_client import rag_client
-            if not rag_client.is_enabled():
+            rag_api_available = rag_client.is_enabled()
+
+            # Auto-ingest mentioned documents not yet ready (needs RAG API).
+            # Skip auto-ingest when the RAG pipeline isn't running — the
+            # direct-text fallback below will still work for already-ingested docs.
+            if rag_api_available and mentions.selected_sources:
+                for source in list(mentions.selected_sources):
+                    doc_ready = DocumentReference.objects.filter(
+                        owner=self.user,
+                        title__iexact=source,
+                        artifact_revision__processing_status="ready",
+                    ).exists()
+                    if not doc_ready:
+                        ingested = _ingest_from_attachment(self.chat, source, self.user)
+                        if ingested:
+                            logger.info("Auto-ingested '%s' for RAG mention", source)
+
+            # For explicitly @mentioned documents inject extracted text directly
+            # from the DB — no LLM routing or vector search needed.
+            # Prefer KnowledgeDocument (RAG pipeline), fall back to
+            # ArtifactRevision.extracted_text (local pipeline).
+            if mentions.selected_sources:
+                direct_lines = []
+                for source in mentions.selected_sources:
+                    doc_ref = DocumentReference.objects.filter(
+                        owner=self.user,
+                        title__iexact=source,
+                        artifact_revision__processing_status="ready",
+                    ).select_related("artifact_revision__blob").first()
+                    if not doc_ref or not doc_ref.artifact_revision or not doc_ref.artifact_revision.blob:
+                        continue
+                    text = ""
+                    rag_doc = KnowledgeDocument.objects.filter(
+                        sha256=doc_ref.artifact_revision.blob.content_hash,
+                        status__in=("ready", "completed", "succeeded"),
+                    ).order_by("-created_at").first()
+                    if rag_doc:
+                        text = rag_doc.extracted_text or rag_doc.analysis_summary or ""
+                    if not text:
+                        text = doc_ref.artifact_revision.extracted_text or ""
+                    if text:
+                        direct_lines.append(f"[{source}]\n{text[:3000]}")
+                if direct_lines:
+                    total_time = time.time() - start
+                    return "\n\n".join(direct_lines), {
+                        "rag_used": True,
+                        "rag_needed": True,
+                        "retrieval_mode": "direct",
+                        "total_results": len(direct_lines),
+                        "result_sources": list(mentions.selected_sources),
+                        "mentioned_sources": list(mentions.selected_sources),
+                        "selection_origin": mentions.selection_origin,
+                        "search_query": mentions.clean_query,
+                        "timing": {"total": round(total_time, 3)},
+                    }
+
+            # A selector was supplied but did not resolve.
+            if mentions.had_mentions and not mentions.selected_sources:
+                return None, {
+                    "rag_used": False, "retrieval_mode": "blocked_unresolved_mentions",
+                    "error": "No requested document mention could be resolved",
+                    "mentioned_sources": [], "unresolved_mentions": list(mentions.unresolved_mentions),
+                    "timing": {"total": round(time.time() - start, 3)},
+                }
+
+            # Vector search requires RAG API — nothing more to do without it.
+            if not rag_api_available:
                 return None, None
 
-            # Fast path: skip LLM routing when no explicit document context
+            # No @mentions → LLM routing → vector search
             if not mentions.selected_sources and not mentions.unresolved_mentions:
                 decision = {
-                    "use_rag": False,
-                    "search_query": mentions.clean_query,
-                    "hyde": False,
-                    "sub_queries": False,
-                    "stepback": False,
-                    "use_reranker": True,
-                    "decision_source": "fast-path",
+                    "use_rag": False, "search_query": mentions.clean_query,
+                    "hyde": False, "sub_queries": False, "stepback": False,
+                    "use_reranker": True, "decision_source": "fast-path",
                 }
                 decision_time = 0
             else:
                 decision_start = time.time()
                 decision = self._decide_retrieval(mentions)
                 decision_time = time.time() - decision_start
-            rag_log = {
-                "rag_needed": decision["use_rag"],
-                "rag_used": False,
-                "decision_source": decision["decision_source"],
-                "search_query": decision["search_query"],
-                "enhancements": {
-                    key: decision[key] for key in ("hyde", "sub_queries", "stepback")
-                },
-                "use_reranker": decision["use_reranker"],
-                "mentioned_sources": list(mentions.selected_sources),
-                "unresolved_mentions": list(mentions.unresolved_mentions),
-                "selection_origin": mentions.selection_origin,
-                "total_results": 0,
-                "timing": {"decision": round(decision_time, 3)},
-            }
-            if not decision["use_rag"]:
-                rag_log["retrieval_mode"] = "not_needed"
-                rag_log["timing"]["total"] = round(time.time() - start, 3)
-                return None, rag_log
 
-            # A selector was supplied but did not resolve. Searching every
-            # document would violate the user's requested scope.
-            if mentions.had_mentions and not mentions.selected_sources:
-                rag_log["retrieval_mode"] = "blocked_unresolved_mentions"
-                rag_log["error"] = "No requested document mention could be resolved"
-                rag_log["timing"]["total"] = round(time.time() - start, 3)
-                return None, rag_log
+            if not decision["use_rag"]:
+                return None, {
+                    "rag_used": False, "rag_needed": False,
+                    "retrieval_mode": "not_needed",
+                    "decision_source": decision["decision_source"],
+                    "search_query": decision["search_query"],
+                    "mentioned_sources": list(mentions.selected_sources),
+                    "unresolved_mentions": list(mentions.unresolved_mentions),
+                    "selection_origin": mentions.selection_origin,
+                    "enhancements": {key: decision[key] for key in ("hyde", "sub_queries", "stepback")},
+                    "use_reranker": decision["use_reranker"],
+                    "timing": {"decision": round(decision_time, 3), "total": round(time.time() - start, 3)},
+                }
 
             rag_response = rag_client.search(
                 decision["search_query"],
@@ -477,7 +531,7 @@ class ContextBuilder:
             enabled_enhancements = [
                 key for key in ("hyde", "sub_queries", "stepback") if decision[key]
             ]
-            rag_log.update({
+            rag_log = {
                 "retrieval_mode": "+".join(enabled_enhancements) or "hybrid",
                 "hierarchical": rag_response.get("hierarchical", False),
                 "enhanced_queries": enhanced_queries,
@@ -487,6 +541,14 @@ class ContextBuilder:
                     for r in results if r.get("source")
                 }),
                 "rag_used": True,
+                "rag_needed": True,
+                "decision_source": decision["decision_source"],
+                "search_query": decision["search_query"],
+                "mentioned_sources": list(mentions.selected_sources),
+                "unresolved_mentions": list(mentions.unresolved_mentions),
+                "selection_origin": mentions.selection_origin,
+                "enhancements": {key: decision[key] for key in ("hyde", "sub_queries", "stepback")},
+                "use_reranker": decision["use_reranker"],
                 "step_timing": search_timing,
                 "timing": {
                     "decision": round(decision_time, 3),
@@ -497,7 +559,7 @@ class ContextBuilder:
                         if isinstance(value, (int, float)) and key != "total"
                     },
                 },
-            })
+            }
             if not results:
                 return None, rag_log
             lines = []
@@ -506,7 +568,10 @@ class ContextBuilder:
                 text = r.get("text", "").strip()
                 meta = r.get("metadata", {}) or {}
                 filename = meta.get("filename", "") or source.split("/")[-1]
-                if filename:
+                method = r.get("method", "")
+                if method == "hyde_fallback":
+                    lines.append(f"[Related context] {text[:500]}")
+                elif filename and filename != "__hyde_fallback__":
                     score = r.get("score", 0)
                     lines.append(f"[{filename}] (relevance: {score:.2f}) {text[:500]}")
                 else:
@@ -518,7 +583,6 @@ class ContextBuilder:
             return None, {"rag_used": False, "error": "RAG search failed", "total_results": 0, "timing": {"total": round(total_time, 3)}}
 
     def _add_recent_chat_history(self):
-        from apps.compaction.services import messages_after_compaction
 
         recent = messages_after_compaction(self.chat)
         if self.user_message:
@@ -533,7 +597,6 @@ class ContextBuilder:
             })
 
     def _load_compaction(self) -> str | None:
-        from apps.compaction.services import latest_compaction
 
         compaction = latest_compaction(self.chat)
         if not compaction:
@@ -552,8 +615,6 @@ class ContextBuilder:
         if not self.user or not self.user.is_authenticated:
             return None
         try:
-            from apps.memory.services import get_user_memories
-            from apps.memory.models import MemorySettings
             settings_obj = MemorySettings.objects.filter(user=self.user).first()
             if settings_obj and not settings_obj.is_enabled:
                 return None

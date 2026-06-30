@@ -34,7 +34,6 @@ import cgi
 import json
 import mimetypes
 import os
-import sys
 from datetime import date as _date
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -46,7 +45,7 @@ PORT = int(os.environ.get("FILE_SERVER_PORT", 8888))
 
 # ─── helpers ──────────────────────────────────────────────────────────────────
 
-def _json(handler, code, body):
+def _json(handler, code, body) -> None:
     data = json.dumps(body).encode()
     handler.send_response(code)
     handler.send_header("Content-Type", "application/json")
@@ -174,11 +173,11 @@ def _openapi_spec():
 # ─── handler ──────────────────────────────────────────────────────────────────
 
 class Handler(BaseHTTPRequestHandler):
-    def log_message(self, fmt, *args):
-        print(f"[file-server] {self.address_string()} {fmt % args}", flush=True)
+    def log_message(self, fmt, *args) -> None:
+        pass
 
     # ── POST /upload ──────────────────────────────────────────────────────────
-    def do_POST(self):
+    def do_POST(self) -> None:
         parsed = urlparse(self.path)
         if parsed.path != "/upload":
             _json(self, 404, {"ok": False, "error": "not found"})
@@ -190,7 +189,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         pdict["boundary"] = pdict["boundary"].encode()
-        length = int(self.headers.get("Content-Length", 0))
+        int(self.headers.get("Content-Length", 0))
         form = cgi.parse_multipart(self.rfile, pdict)
 
         user_id  = (form.get("user_id", [b"anonymous"])[0] or b"anonymous")
@@ -234,7 +233,7 @@ class Handler(BaseHTTPRequestHandler):
         _json(self, 200, {"ok": True, "path": rel_path, "size": dest.stat().st_size})
 
     # ── GET /files/<path>  or  GET /browse ────────────────────────────────────
-    def do_GET(self):
+    def do_GET(self) -> None:
         parsed = urlparse(self.path)
         path   = parsed.path
 
@@ -275,7 +274,7 @@ class Handler(BaseHTTPRequestHandler):
         _json(self, 404, {"ok": False, "error": "not found"})
 
     # ── DELETE /files/<path> ──────────────────────────────────────────────────
-    def do_DELETE(self):
+    def do_DELETE(self) -> None:
         parsed = urlparse(self.path)
         if parsed.path.startswith("/files/"):
             rel = parsed.path[len("/files/"):]
@@ -291,5 +290,4 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     DOCS_ROOT.mkdir(parents=True, exist_ok=True)
-    print(f"[file-server] Listening on :{PORT}  DOCS_ROOT={DOCS_ROOT}", flush=True)
     HTTPServer(("0.0.0.0", PORT), Handler).serve_forever()

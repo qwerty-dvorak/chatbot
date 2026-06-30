@@ -30,7 +30,7 @@ class ChatListView(LoginRequiredMixin, ListView):
 class ChatCreateView(LoginRequiredMixin, CreateView):
     model = Chat
     template_name = "chat/chat_new.html"
-    fields = ["title"]
+    fields = ["title"]  # noqa: RUF012
 
     def form_valid(self, form):
         form.instance.user = self.request.user
@@ -126,8 +126,8 @@ class ChatDetailView(LoginRequiredMixin, DetailView):
             knowledge_indices = set()
             raw = form.cleaned_data.get("knowledge_indices", "")
             if raw:
-                try:
-                    knowledge_indices = set(int(i) for i in raw.split(",") if i.strip())
+                try:  # noqa: SIM105
+                    knowledge_indices = set(int(i) for i in raw.split(",") if i.strip())  # noqa: C401
                 except (ValueError, TypeError):
                     pass
             for idx, file in enumerate(form.cleaned_data.get("attachment", [])):
@@ -159,12 +159,17 @@ class ChatDetailView(LoginRequiredMixin, DetailView):
 def ingest_attachment(user, file, file_storage_path, sha256):
     """Create a DocumentReference + trigger RAG ingestion for a chat attachment."""
     try:
-        from apps.documents.models import ContentBlob, ArtifactRevision, DocumentReference
-        from apps.ingestion.models import IngestionJob
-        from apps.knowledge.rag_client import rag_client
-        from apps.knowledge.views import _docs_storage, _save_doc_file
         from django.conf import settings
         from django.core.files.base import ContentFile
+
+        from apps.documents.models import (
+            ArtifactRevision,
+            ContentBlob,
+            DocumentReference,
+        )
+        from apps.ingestion.models import IngestionJob
+        from apps.knowledge.rag_client import rag_client
+        from apps.knowledge.views import _save_doc_file
 
         existing = ContentBlob.objects.filter(content_hash=sha256).first()
         doc_ref = None
@@ -242,8 +247,8 @@ def ingest_attachment(user, file, file_storage_path, sha256):
             IngestionJob.objects.create(document_reference=doc_ref)
             logger.info("Queued local ingestion job for doc_ref %s", doc_ref.id)
         return doc_ref
-    except Exception as exc:
-        logger.exception("Failed to ingest attachment: %s", exc)
+    except Exception:
+        logger.exception("Failed to ingest attachment: %s")
         return None
 
 
@@ -425,7 +430,7 @@ class ChatCompactView(LoginRequiredMixin, View):
 
 class ChatShareView(LoginRequiredMixin, CreateView):
     model = ChatShare
-    fields = []
+    fields = []  # noqa: RUF012
     template_name = "chat/chat_share.html"
 
     def get_context_data(self, **kwargs):
@@ -531,8 +536,9 @@ class ChatAttachmentView(LoginRequiredMixin, View):
         from django.core.files.storage import default_storage
         if not default_storage.exists(file_path):
             return JsonResponse({"error": "file not found on disk"}, status=404)
-        from django.http import FileResponse
         import mimetypes
+
+        from django.http import FileResponse
         mime = att.get("mime_type") or mimetypes.guess_type(filename)[0] or "application/octet-stream"
         disposition = "inline" if mime.startswith("image/") else "attachment"
         response = FileResponse(default_storage.open(file_path, "rb"), content_type=mime)
@@ -561,7 +567,6 @@ class ChatAttachmentIngestView(LoginRequiredMixin, View):
         raw = default_storage.open(file_path, "rb").read()
         fake_file = ContentFile(raw, name=att["original_filename"])
         fake_file.content_type = att.get("mime_type", "application/octet-stream")
-        import traceback
         try:
             doc_ref = ingest_attachment(request.user, fake_file, file_path, att.get("sha256", ""))
         except Exception as exc:
@@ -620,7 +625,6 @@ class SharedChatContinueView(LoginRequiredMixin, View):
                 role=msg.role,
                 content=msg.content,
                 attachments=msg.attachments,
-                tool_invocations=msg.tool_invocations,
                 metadata=msg.metadata,
                 status=msg.status,
                 created_at=msg.created_at,

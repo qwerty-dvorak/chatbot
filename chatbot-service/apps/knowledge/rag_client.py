@@ -60,7 +60,7 @@ class RagApiClient:
                 return resp.json()
         except requests.RequestException as exc:
             duration = time.time() - start
-            logger.error("RAG API ingest failed after %.3fs: %s", duration, exc)
+            logger.error("RAG API ingest failed after %.3fs: %s", duration, exc)  # noqa: TRY400
             return None
 
     def get_job(self, job_id: str) -> dict | None:
@@ -104,7 +104,7 @@ class RagApiClient:
     def cancel_job(self, job_id: str) -> bool:
         try:
             resp = self._timed_request("DELETE", f"{self.base_url}/v1/ingestions/{job_id}", timeout=10)
-            return resp.status_code == 200
+            return resp.status_code == 200  # noqa: PLR2004
         except requests.RequestException as exc:
             logger.warning("RAG API cancel_job failed: %s", exc)
             return False
@@ -112,7 +112,7 @@ class RagApiClient:
     def _timed_request(self, method: str, url: str, **kwargs) -> requests.Response:
         start = time.time()
         try:
-            resp = requests.request(method, url, **kwargs)
+            resp = requests.request(method, url, **kwargs)  # noqa: S113
             resp.raise_for_status()
             duration = time.time() - start
             logger.info("[TIMING] rag_api_%s %.3fs %s %s", method.lower(), duration, resp.status_code, url)
@@ -146,7 +146,7 @@ class RagApiClient:
             resp = self._timed_request("POST", f"{self.base_url}/v1/search", json=body, timeout=30)
             return resp.json()
         except requests.RequestException as exc:
-            logger.error("RAG API search failed: %s", exc)
+            logger.error("RAG API search failed: %s", exc)  # noqa: TRY400
             return {"results": [], "enhanced_queries": []}
 
 

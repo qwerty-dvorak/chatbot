@@ -5,7 +5,7 @@ logger = logging.getLogger("django.request")
 
 
 class RequestLoggingMiddleware:
-    def __init__(self, get_response):
+    def __init__(self, get_response) -> None:
         self.get_response = get_response
 
     def __call__(self, request):
@@ -23,7 +23,8 @@ class RequestLoggingMiddleware:
         if request.user.is_authenticated:
             extra["user"] = str(request.user)
 
-        log_fn = logger.warning if response.status_code >= 400 else logger.info
+        warn_threshold = 400
+        log_fn = logger.warning if response.status_code >= warn_threshold else logger.info
         log_fn(
             "[%.0fms] %s %s → %s%s",
             extra["duration_ms"],

@@ -26,5 +26,5 @@ class ChatCompaction(models.Model):
             models.Index(fields=["chat", "from_message", "to_message"]),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"Compaction for {self.chat_id} @ {self.created_at}"

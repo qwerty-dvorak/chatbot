@@ -1,7 +1,5 @@
 from django import forms
 
-from .models import Message
-
 
 class MultipleFileInput(forms.ClearableFileInput):
     allow_multiple_selected = True
@@ -26,17 +24,23 @@ class MessageForm(forms.Form):
         content = cleaned.get("content")
         attachments = cleaned.get("attachment") or []
         if not content and not attachments:
-            raise forms.ValidationError("Message content or attachment is required.")
+            msg = "Message content or attachment is required."
+            raise forms.ValidationError(msg)
+        max_attachment_size = 50 * 1024 * 1024
         for attachment in attachments:
-            if attachment.size > 50 * 1024 * 1024:
-                raise forms.ValidationError("File size must be under 50MB.")
+            if attachment.size > max_attachment_size:
+                msg = "File size must be under 50MB."
+                raise forms.ValidationError(msg)
             allowed = [
                 "text/plain", "text/markdown", "text/csv",
                 "application/pdf",
                 "image/png", "image/jpeg", "image/webp",
             ]
             if attachment.content_type not in allowed:
-                raise forms.ValidationError(f"File type {attachment.content_type} is not supported.")
-        if len(attachments) > 10:
-            raise forms.ValidationError("A message can contain at most 10 attachments.")
+                msg = f"File type {attachment.content_type} is not supported."
+                raise forms.ValidationError(msg)
+        max_attachments = 10
+        if len(attachments) > max_attachments:
+            msg = "A message can contain at most 10 attachments."
+            raise forms.ValidationError(msg)
         return cleaned

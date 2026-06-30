@@ -7,7 +7,7 @@ from apps.ingestion.models import IngestionJob, IngestionStepAttempt
 
 
 class IngestionStepAttemptTest(TestCase):
-    def setUp(self):
+    def setUp(self) -> None:
         self.user = User.objects.create_user(email="user@test.com", password="pass")
         self.blob = ContentBlob.objects.create(
             content_hash="a" * 64,
@@ -27,7 +27,7 @@ class IngestionStepAttemptTest(TestCase):
         )
         self.job = IngestionJob.objects.create(document_reference=self.doc_ref)
 
-    def test_create_step_attempt(self):
+    def test_create_step_attempt(self) -> None:
         step = IngestionStepAttempt.objects.create(
             job=self.job,
             step_type=IngestionStepAttempt.StepType.EXTRACT,
@@ -38,14 +38,14 @@ class IngestionStepAttemptTest(TestCase):
         self.assertEqual(step.status, "running")
         self.assertEqual(step.attempt_number, 1)
 
-    def test_step_default_status(self):
+    def test_step_default_status(self) -> None:
         step = IngestionStepAttempt.objects.create(
             job=self.job,
             step_type=IngestionStepAttempt.StepType.CHUNK,
         )
         self.assertEqual(step.status, IngestionStepAttempt.Status.QUEUED)
 
-    def test_unique_job_step_attempt(self):
+    def test_unique_job_step_attempt(self) -> None:
         IngestionStepAttempt.objects.create(
             job=self.job,
             step_type=IngestionStepAttempt.StepType.EXTRACT,
@@ -58,7 +58,7 @@ class IngestionStepAttemptTest(TestCase):
                 attempt_number=1,
             )
 
-    def test_all_step_types(self):
+    def test_all_step_types(self) -> None:
         types = [
             IngestionStepAttempt.StepType.EXTRACT,
             IngestionStepAttempt.StepType.OCR,
@@ -75,7 +75,7 @@ class IngestionStepAttemptTest(TestCase):
             )
             self.assertEqual(step.step_type, step_type)
 
-    def test_all_status_types(self):
+    def test_all_status_types(self) -> None:
         statuses = [
             IngestionStepAttempt.Status.QUEUED,
             IngestionStepAttempt.Status.RUNNING,
@@ -92,7 +92,7 @@ class IngestionStepAttemptTest(TestCase):
             )
             self.assertEqual(step.status, status)
 
-    def test_step_with_duration(self):
+    def test_step_with_duration(self) -> None:
         step = IngestionStepAttempt.objects.create(
             job=self.job,
             step_type=IngestionStepAttempt.StepType.EMBED_TEXT,
@@ -101,7 +101,7 @@ class IngestionStepAttemptTest(TestCase):
         )
         self.assertEqual(step.duration_ms, 1500)
 
-    def test_step_with_error(self):
+    def test_step_with_error(self) -> None:
         step = IngestionStepAttempt.objects.create(
             job=self.job,
             step_type=IngestionStepAttempt.StepType.OCR,
@@ -110,7 +110,7 @@ class IngestionStepAttemptTest(TestCase):
         )
         self.assertEqual(step.error, "OCR service timeout")
 
-    def test_multiple_attempts_on_same_step(self):
+    def test_multiple_attempts_on_same_step(self) -> None:
         IngestionStepAttempt.objects.create(
             job=self.job,
             step_type=IngestionStepAttempt.StepType.EXTRACT,
@@ -130,7 +130,7 @@ class IngestionStepAttemptTest(TestCase):
         self.assertEqual(attempts[0].status, "failed")
         self.assertEqual(attempts[1].status, "succeeded")
 
-    def test_step_accessible_from_job(self):
+    def test_step_accessible_from_job(self) -> None:
         IngestionStepAttempt.objects.create(
             job=self.job,
             step_type=IngestionStepAttempt.StepType.EXTRACT,
@@ -141,7 +141,7 @@ class IngestionStepAttemptTest(TestCase):
         )
         self.assertEqual(self.job.step_attempts.count(), 2)
 
-    def test_cascade_delete_job(self):
+    def test_cascade_delete_job(self) -> None:
         IngestionStepAttempt.objects.create(
             job=self.job,
             step_type=IngestionStepAttempt.StepType.EXTRACT,
@@ -152,7 +152,7 @@ class IngestionStepAttemptTest(TestCase):
             IngestionStepAttempt.objects.filter(job_id=job_id).exists()
         )
 
-    def test_step_string_representation(self):
+    def test_step_string_representation(self) -> None:
         step = IngestionStepAttempt.objects.create(
             job=self.job,
             step_type=IngestionStepAttempt.StepType.CHUNK,

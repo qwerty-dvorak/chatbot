@@ -19,6 +19,7 @@ from pipeline.jobs import TERMINAL_STATUSES, IngestionWorker, JobStore
 from pipeline.milvus import connect_milvus, ensure_collection, get_client
 from pipeline.models import IngestionTier
 from pipeline.process import process_image, process_text
+from pipeline.progress import ProgressTracker
 from pipeline.query import enhance_query
 from pipeline.search import search
 from pipeline.tiers import options_for_tier, tier_from_str
@@ -40,10 +41,20 @@ def _execute_job(job: dict) -> dict:
     results: list[dict] = []
     errors: list[dict[str, str]] = []
 
+    def persist_steps(_job_id: str, steps: list[dict]) -> None:
+        job_store.update_steps(_job_id, steps)
+
     for file_path in file_paths:
         source_name = file_path.name
         try:
             doc = extract(str(file_path), fast=tier == IngestionTier.INSTANT)
+            text_steps = ["extract", "store_raw", "db_insert", "chunk", "summary", "hyde", "persist", "embed", "index"]
+            image_steps = ["extract", "store_raw", "ocr", "db_insert", "persist", "embed", "index", "chunk", "hyde"]
+            step_names = image_steps if doc.images else text_steps
+            tracker = ProgressTracker(job["id"], step_names, persist_fn=persist_steps)
+            tracker.start("extract", f"file={source_name}")
+            tracker.complete("extract", f"type={doc.content_type.value}")
+
             existing_doc_id = payload.get("document_id")
             chunk_strategy = payload.get("strategy") or options.chunk_strategy
             generate_hyde = (
@@ -64,6 +75,7 @@ def _execute_job(job: dict) -> dict:
                         "use_text_embedding": options.use_text_embedding,
                         "chunk_strategy": chunk_strategy,
                         "generate_hyde": generate_hyde,
+                        "progress_tracker": tracker,
                     },
                 )
             else:
@@ -75,9 +87,11 @@ def _execute_job(job: dict) -> dict:
                         "generate_hyde": generate_hyde,
                         "hyde_per_chunk": options.hypothetical_questions_per_chunk,
                         "generate_summary": True,
+                        "progress_tracker": tracker,
                     },
                 )
             results.append(result)
+            logger.info("[job %s] file=%s completed", job["id"][:8], source_name)
         except Exception as exc:
             logger.exception("Failed to process %s", source_name)
             errors.append({"file": source_name, "error": str(exc)})
@@ -224,11 +238,11 @@ async def root() -> RedirectResponse:
 @app.post("/v1/ingest", status_code=status.HTTP_202_ACCEPTED)
 async def enqueue_ingestion(  # noqa: PLR0913
     files: Annotated[list[UploadFile], File()],
-    tier: Annotated[IngestionTier, Form(IngestionTier.SLOW)],
-    strategy: Annotated[Literal["recursive", "sentence_window", "hierarchical"] | None, Form(None)] = None,
-    hypothetical_questions: Annotated[bool | None, Form(None)] = None,
-    ocr_mode: Annotated[Literal["none", "basic", "paddleocr"] | None, Form(None)] = None,
-    document_id: Annotated[str | None, Form(None)] = None,
+    tier: Annotated[IngestionTier, Form()] = IngestionTier.SLOW,
+    strategy: Annotated[Literal["recursive", "sentence_window", "hierarchical"] | None, Form()] = None,
+    hypothetical_questions: Annotated[bool | None, Form()] = None,
+    ocr_mode: Annotated[Literal["none", "basic", "paddleocr"] | None, Form()] = None,
+    document_id: Annotated[str | None, Form()] = None,
 ) -> dict:
     if not files:
         raise HTTPException(status_code=422, detail="At least one file is required")

@@ -15,7 +15,7 @@ class ChatAdmin(admin.ModelAdmin):
     list_display = ("title", "user", "archived", "created_at", "updated_at")
     list_filter = ("archived",)
     search_fields = ("title", "user__email")
-    inlines = [MessageInline]
+    inlines = [MessageInline]  # noqa: RUF012
 
 
 @admin.register(Message)

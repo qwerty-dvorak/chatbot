@@ -1,5 +1,4 @@
-"""
-Shared HTTP helpers for LLM API requests.
+"""Shared HTTP helpers for LLM API requests.
 
 Uses only stdlib urllib — zero external HTTP dependencies.
 """
@@ -12,7 +11,12 @@ from typing import Any
 
 from django.conf import settings
 
-from .errors import LLMConnectionError, LLMProviderError, LLMRateLimitError, LLMTimeoutError
+from .errors import (
+    LLMConnectionError,
+    LLMProviderError,
+    LLMRateLimitError,
+    LLMTimeoutError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -45,22 +49,23 @@ def json_request(
         LLMTimeoutError    — request exceeded *timeout* seconds.
         LLMRateLimitError  — HTTP 429.
         LLMProviderError   — any other non-2xx status.
+
     """
     headers = _auth_headers(api_key)
     data = json.dumps(body).encode() if body is not None else None
-    req = urllib.request.Request(url, data=data, headers=headers, method=method)
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)  # noqa: S310
 
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
             return json.loads(resp.read().decode())
     except urllib.error.HTTPError as e:
         status = e.code
         detail = e.read().decode()
-        if status == 401:
+        if status == 401:  # noqa: PLR2004
             raise LLMProviderError(detail, provider="openai", status_code=401)
-        elif status == 429:
+        if status == 429:  # noqa: PLR2004
             raise LLMRateLimitError(detail)
-        elif status in (408, 504):
+        if status in (408, 504):
             raise LLMTimeoutError(detail)
         raise LLMProviderError(detail, provider="openai", status_code=status)
     except urllib.error.URLError as e:
@@ -79,18 +84,18 @@ def json_stream_request(
     """
     headers = _auth_headers(api_key)
     data = json.dumps(body).encode()
-    req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+    req = urllib.request.Request(url, data=data, headers=headers, method="POST")  # noqa: S310
 
     try:
-        return urllib.request.urlopen(req, timeout=timeout)
+        return urllib.request.urlopen(req, timeout=timeout)  # noqa: S310
     except urllib.error.HTTPError as e:
         status = e.code
         detail = e.read().decode()
-        if status == 401:
+        if status == 401:  # noqa: PLR2004
             raise LLMProviderError(detail, provider="openai", status_code=401)
-        elif status == 429:
+        if status == 429:  # noqa: PLR2004
             raise LLMRateLimitError(detail)
-        elif status in (408, 504):
+        if status in (408, 504):
             raise LLMTimeoutError(detail)
         raise LLMProviderError(detail, provider="openai", status_code=status)
     except urllib.error.URLError as e:

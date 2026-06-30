@@ -1,8 +1,9 @@
-import json
 from typing import Any
 
-from .models import ToolDefinition
+from django.conf import settings as django_settings
 
+from .models import ToolDefinition
+from .permissions import check_tool_permission
 
 # Retrieval is an internal context-building stage. Exposing it to the answer
 # model creates a second, conflicting RAG path and lets @mentions leak into a
@@ -27,13 +28,11 @@ class ToolRegistry:
         return [t for t in self._tools.values() if t.is_enabled]
 
     def get_schemas(self, user=None) -> list[dict[str, Any]]:
-        from django.conf import settings as django_settings
-
         # Auto-load from DB on first call (each gunicorn worker starts with empty registry)
         if not self._tools:
             try:
                 self.refresh_from_db()
-            except Exception:
+            except Exception:  # noqa: BLE001
                 return []
 
         if not getattr(django_settings, "TOOL_CALLS_ENABLED", True):
@@ -60,7 +59,6 @@ class ToolRegistry:
         return schemas
 
     def _is_permitted(self, tool: ToolDefinition, user) -> bool:
-        from .permissions import check_tool_permission
         return check_tool_permission(tool, user)
 
     def refresh_from_db(self):

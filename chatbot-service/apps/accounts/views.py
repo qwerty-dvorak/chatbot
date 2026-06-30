@@ -34,8 +34,8 @@ class SettingsView(LoginRequiredMixin, TemplateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
 
-        from apps.memory.services import get_memory_settings
         from apps.memory.forms import MemorySettingsForm
+        from apps.memory.services import get_memory_settings
         from apps.tools.models import ToolDefinition
 
         mem_settings = get_memory_settings(self.request.user)
@@ -56,8 +56,8 @@ class SettingsView(LoginRequiredMixin, TemplateView):
         action = request.POST.get("action")
 
         if action == "memory":
-            from apps.memory.services import get_memory_settings
             from apps.memory.forms import MemorySettingsForm
+            from apps.memory.services import get_memory_settings
             mem_settings = get_memory_settings(request.user)
             form = MemorySettingsForm(request.POST, instance=mem_settings)
             if form.is_valid():

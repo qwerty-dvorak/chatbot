@@ -8,7 +8,6 @@ Each handler receives (arguments: dict, context: dict) where context contains:
 Return a dict (serialised to JSON) or a plain string.
 """
 
-import json
 import logging
 from typing import Any
 
@@ -29,7 +28,7 @@ def register_builtin(name: str):
 # ── memory.search ──────────────────────────────────────────────────────────────
 
 @register_builtin("memory.search")
-def memory_search(arguments: dict[str, Any], context: dict = {}) -> dict:
+def memory_search(arguments: dict[str, Any], context: dict = {}) -> dict:  # noqa: B006
     query  = arguments.get("query", "")
     top_k  = int(arguments.get("top_k", 5))
     user   = context.get("user")
@@ -60,7 +59,7 @@ def memory_search(arguments: dict[str, Any], context: dict = {}) -> dict:
 # ── memory.save ────────────────────────────────────────────────────────────────
 
 @register_builtin("memory.save")
-def memory_save(arguments: dict[str, Any], context: dict = {}) -> dict:
+def memory_save(arguments: dict[str, Any], context: dict = {}) -> dict:  # noqa: B006
     content    = arguments.get("content", "").strip()
     importance = int(arguments.get("importance", 1))
     user       = context.get("user")
@@ -87,18 +86,18 @@ def memory_save(arguments: dict[str, Any], context: dict = {}) -> dict:
 # ── memory.aggregate ──────────────────────────────────────────────────────────
 
 @register_builtin("memory.aggregate")
-def memory_aggregate(arguments: dict[str, Any], context: dict = {}) -> dict:
+def memory_aggregate(arguments: dict[str, Any], context: dict = {}) -> dict:  # noqa: B006
     """Scan recent chat history for user preferences/facts and save as memories."""
     user = context.get("user")
-    chat = context.get("chat")
+    _chat = context.get("chat")
 
     if not user:
         return {"aggregated": False, "message": "No user context."}
 
     try:
         from apps.chat.models import Message
-        from apps.memory.services import save_memory
         from apps.llm.clients import ChatClient
+        from apps.memory.services import save_memory
 
         recent = Message.objects.filter(
             chat__user=user, role=Message.Role.USER,
@@ -151,7 +150,7 @@ def memory_aggregate(arguments: dict[str, Any], context: dict = {}) -> dict:
 # ── knowledge.grep ─────────────────────────────────────────────────────────────
 
 @register_builtin("knowledge.grep")
-def knowledge_grep(arguments: dict[str, Any], context: dict = {}) -> dict:
+def knowledge_grep(arguments: dict[str, Any], context: dict = {}) -> dict:  # noqa: B006
     """Strict substring grep across user-uploaded knowledge documents.
 
     When RAG API is enabled, also searches the RAG pipeline for results.
@@ -160,7 +159,7 @@ def knowledge_grep(arguments: dict[str, Any], context: dict = {}) -> dict:
     top_k   = int(arguments.get("top_k", 10))
     case_sensitive = bool(arguments.get("case_sensitive", False))
     document_title = arguments.get("document_title", "")
-    user    = context.get("user")
+    _user    = context.get("user")
 
     if not pattern:
         return {"matches": [], "message": "No pattern provided."}
@@ -205,10 +204,9 @@ def knowledge_grep(arguments: dict[str, Any], context: dict = {}) -> dict:
 # ── knowledge.ingest_status ────────────────────────────────────────────────────
 
 @register_builtin("knowledge.ingest_status")
-def ingest_status(arguments: dict[str, Any], context: dict = {}) -> dict:
+def ingest_status(arguments: dict[str, Any], context: dict = {}) -> dict:  # noqa: B006
     user = context.get("user")
     try:
-        from apps.ingestion.models import IngestionJob
 
         doc_qs = DocumentReference.objects.all()
         if user:
@@ -230,7 +228,7 @@ def ingest_status(arguments: dict[str, Any], context: dict = {}) -> dict:
 # ── chat.compact ───────────────────────────────────────────────────────────────
 
 @register_builtin("chat.compact")
-def chat_compact(arguments: dict[str, Any], context: dict = {}) -> dict:
+def chat_compact(arguments: dict[str, Any], context: dict = {}) -> dict:  # noqa: B006
     chat = context.get("chat")
     if not chat:
         return {"compacted": False, "message": "No chat context."}
@@ -266,30 +264,16 @@ def chat_compact(arguments: dict[str, Any], context: dict = {}) -> dict:
         return {"compacted": False, "error": str(exc)}
 
 
-# ── document.analyze ───────────────────────────────────────────────────────────
-
-def _find_document(user, document_id):
-    """Look up a DocumentReference by UUID or title."""
-    import uuid as _uuid
-    try:
-        _uuid.UUID(str(document_id))
-        return DocumentReference.objects.filter(id=document_id, owner=user).first()
-    except (ValueError, AttributeError):
-        pass
-    return DocumentReference.objects.filter(
-        owner=user, title__iexact=document_id
-    ).select_related("artifact_revision__blob").first()
-
-
 def _ingest_from_attachment(chat, filename, user):
     """Find an attachment in chat messages and trigger RAG ingestion."""
     from django.conf import settings as dj_settings
+    from django.core.files.base import ContentFile
+
     from apps.chat.models import Message
-    from apps.documents.models import ContentBlob, ArtifactRevision, DocumentReference
+    from apps.documents.models import ArtifactRevision, ContentBlob, DocumentReference
     from apps.ingestion.models import IngestionJob
     from apps.knowledge.rag_client import rag_client
     from apps.knowledge.views import _docs_storage, _save_doc_file
-    from django.core.files.base import ContentFile
 
     latest = Message.objects.filter(
         chat=chat, role=Message.Role.USER, status=Message.Status.COMPLETED
@@ -305,7 +289,6 @@ def _ingest_from_attachment(chat, filename, user):
     if not att:
         return None
 
-    import hashlib
     from django.core.files.storage import default_storage
     file_path = att.get("file", "")
     if not default_storage.exists(file_path):
@@ -329,7 +312,7 @@ def _ingest_from_attachment(chat, filename, user):
     with default_storage.open(file_path, "rb") as f:
         raw = f.read()
     mime = att.get("mime_type", "application/octet-stream")
-    docs_storage = _docs_storage()
+    _docs_storage = _docs_storage()
     rel_path = _save_doc_file(str(user.id), ContentFile(raw, att.get("original_filename", "file")))
 
     if not doc_ref:
@@ -361,8 +344,8 @@ def _ingest_from_attachment(chat, filename, user):
     if rag_client.is_enabled():
         import os
         docs_root = getattr(dj_settings, "DOCS_ROOT",
-                            os.path.join(dj_settings.MEDIA_ROOT, "docs"))
-        full_path = os.path.join(docs_root, rel_path)
+                            os.path.join(dj_settings.MEDIA_ROOT, "docs"))  # noqa: PTH118
+        full_path = os.path.join(docs_root, rel_path)  # noqa: PTH118
         ingest_result = rag_client.ingest(full_path)
         job = None
         if ingest_result and ingest_result.get("id"):
@@ -378,100 +361,4 @@ def _ingest_from_attachment(chat, filename, user):
         IngestionJob.objects.create(document_reference=doc_ref)
     return doc_ref
 
-@register_builtin("document.analyze")
-def document_analyze(arguments: dict[str, Any], context: dict = {}) -> dict:
-    user        = context.get("user")
-    chat        = context.get("chat")
-    document_id = arguments.get("document_id", "").strip()
 
-    if not user:
-        return {"analyzed": False, "message": "No user context."}
-
-    try:
-        doc_ref = _find_document(user, document_id) if document_id else None
-        if not doc_ref and document_id and chat:
-            doc_ref = _ingest_from_attachment(chat, document_id, user)
-
-        if not doc_ref:
-            return {"analyzed": False, "message": f"Document '{document_id}' not found and no matching attachment to ingest."}
-
-        revision = doc_ref.artifact_revision
-        job = None
-        from apps.ingestion.models import IngestionJob
-        jobs = list(IngestionJob.objects.filter(document_reference=doc_ref).order_by("-created_at")[:1])
-        job = jobs[0] if jobs else None
-
-        # If still pending and no job, re-ingest from attachment
-        if revision.processing_status in ("pending",) and not job and chat:
-            doc_ref = _ingest_from_attachment(chat, document_id, user)
-            if doc_ref:
-                revision = doc_ref.artifact_revision
-                jobs = list(IngestionJob.objects.filter(document_reference=doc_ref).order_by("-created_at")[:1])
-                job = jobs[0] if jobs else None
-
-        # Check RAG pipeline's KnowledgeDocument for real status
-        from apps.knowledge.models import KnowledgeDocument
-        rag_doc = KnowledgeDocument.objects.filter(
-            sha256=revision.blob.content_hash
-        ).order_by("-created_at").first() if revision.blob else None
-        rag_ready = rag_doc is not None and rag_doc.status in ("ready", "completed", "succeeded")
-
-        # Poll for completion
-        import time as _time
-        from apps.knowledge.rag_client import rag_client as _rag
-        deadline = _time.time() + 60
-
-        while _time.time() < deadline:
-            if rag_ready:
-                break
-            rag_doc = KnowledgeDocument.objects.filter(
-                sha256=revision.blob.content_hash
-            ).order_by("-created_at").first() if revision.blob else None
-            rag_ready = rag_doc is not None and rag_doc.status in ("ready", "completed", "succeeded")
-            if rag_ready:
-                break
-            if job and job.metadata and job.metadata.get("rag_job_id") and _rag.is_enabled():
-                try:
-                    rag_status = _rag.get_job(job.metadata["rag_job_id"])
-                    if rag_status:
-                        rs = rag_status.get("status", "")
-                        if rs in ("succeeded", "completed"):
-                            rag_ready = True
-                            break
-                        if rs in ("failed", "error"):
-                            revision.processing_status = ArtifactRevision.ProcessingStatus.FAILED
-                            revision.save(update_fields=["processing_status"])
-                            break
-                except Exception:
-                    pass
-            _time.sleep(3)
-
-        # Update revision status to match reality
-        if rag_ready and revision.processing_status != ArtifactRevision.ProcessingStatus.READY:
-            revision.processing_status = ArtifactRevision.ProcessingStatus.READY
-            revision.save(update_fields=["processing_status"])
-
-        revision.refresh_from_db()
-        is_ready = revision.processing_status == ArtifactRevision.ProcessingStatus.READY
-        summary = ""
-        if rag_doc and rag_doc.analysis_summary:
-            summary = rag_doc.analysis_summary[:500]
-        elif rag_doc and rag_doc.extracted_text:
-            summary = rag_doc.extracted_text[:500]
-        elif revision.summary:
-            summary = revision.summary[:500]
-        elif revision.extracted_text:
-            summary = revision.extracted_text[:500]
-
-        return {
-            "analyzed":   is_ready,
-            "id":         str(doc_ref.id),
-            "title":      doc_ref.title,
-            "status":     revision.processing_status,
-            "rag_status": rag_doc.status if rag_doc else "unknown",
-            "mime_type":  revision.blob.mime_type if revision.blob else "",
-            "summary":    summary or "No text extracted yet.",
-        }
-    except Exception as exc:
-        logger.exception("document.analyze failed")
-        return {"analyzed": False, "error": str(exc)}

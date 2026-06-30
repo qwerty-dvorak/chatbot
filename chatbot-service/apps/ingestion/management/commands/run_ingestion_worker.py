@@ -3,7 +3,7 @@ import time
 
 from django.core.management.base import BaseCommand
 
-from ...models import IngestionJob
+from ...models import IngestionJob  # noqa: TID252
 
 logger = logging.getLogger(__name__)
 
@@ -49,17 +49,16 @@ class Command(BaseCommand):
             job.save(update_fields=["status", "finished_at", "metadata"])
             self.stdout.write(self.style.SUCCESS(f"  RAG job {rag_job_id} succeeded, status updated"))
             return True
+        self.stdout.write(self.style.WARNING(f"  RAG job {rag_job_id} failed ({status}) — falling back to local ingestion"))
+        job.metadata.pop("rag_job_id", None)
+        job.save(update_fields=["metadata"])
+        from ...services import run_ingestion  # noqa: TID252
+        success = run_ingestion(job)
+        if success:
+            self.stdout.write(self.style.SUCCESS(f"  Local fallback succeeded for job {job.id}"))
         else:
-            self.stdout.write(self.style.WARNING(f"  RAG job {rag_job_id} failed ({status}) — falling back to local ingestion"))
-            job.metadata.pop("rag_job_id", None)
-            job.save(update_fields=["metadata"])
-            from ...services import run_ingestion
-            success = run_ingestion(job)
-            if success:
-                self.stdout.write(self.style.SUCCESS(f"  Local fallback succeeded for job {job.id}"))
-            else:
-                self.stdout.write(self.style.ERROR(f"  Local fallback failed for job {job.id}"))
-            return success
+            self.stdout.write(self.style.ERROR(f"  Local fallback failed for job {job.id}"))
+        return success
 
     def handle(self, *args, **options):
         interval = options["interval"]
@@ -72,7 +71,7 @@ class Command(BaseCommand):
                 if job.metadata and job.metadata.get("rag_job_id"):
                     self._poll_rag_job(job)
                 else:
-                    from ...services import run_ingestion
+                    from ...services import run_ingestion  # noqa: TID252
                     success = run_ingestion(job)
                     if success:
                         self.stdout.write(self.style.SUCCESS(f"Job {job.id} succeeded"))

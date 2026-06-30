@@ -28,7 +28,7 @@ class ExecutionTrace(models.Model):
             models.Index(fields=["status"]),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"Trace {self.trace_type} ({self.status})"
 
 
@@ -72,5 +72,5 @@ class ExecutionSpan(models.Model):
             models.Index(fields=["operation", "status"]),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"Span {self.operation} ({self.status})"

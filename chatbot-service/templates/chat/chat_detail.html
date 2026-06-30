@@ -918,7 +918,18 @@ function toggleKnowledge(btn, chatId, msgId, index) {
   function showToolResult(data) {
     const statusEl = document.getElementById('tcs-' + data.tool_call_id);
     if (statusEl) statusEl.textContent = '✓ done';
-    const el = document.getElementById('tc-' + data.tool_call_id);
+    let el = document.getElementById('tc-' + data.tool_call_id);
+    if (!el) {
+      const blocks = document.querySelectorAll('#msgs-inner .tool-call-block');
+      for (const block of blocks) {
+        if (block.querySelector('.tc-result')) continue;
+        const nameEl = block.querySelector('.tc-name');
+        if (nameEl && nameEl.textContent.trim() === data.name) {
+          el = block;
+          break;
+        }
+      }
+    }
     if (el) {
       const res = document.createElement('div');
       res.className = 'tc-result';
@@ -930,6 +941,12 @@ function toggleKnowledge(btn, chatId, msgId, index) {
       } catch {}
       res.textContent = content.length > 400 ? content.slice(0, 400) + '…' : content;
       el.appendChild(res);
+      if (!el.querySelector('.tc-status')) {
+        const s = document.createElement('span');
+        s.className = 'tc-status';
+        s.textContent = '✓ done';
+        el.appendChild(s);
+      }
     }
     scrollBot(false);
   }
@@ -967,18 +984,11 @@ function toggleKnowledge(btn, chatId, msgId, index) {
   }
   function render(text) {
     const esc = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-    const withToolCalls = esc.replace(
-      /\|tool_call\|&gt;call:(\w+(?:\.\w+)*)\{([^}]*)\}&lt;\|tool_call\|/g,
-      function(_, name, args) {
-        const pretty = args.replace(/&lt;\|"\|&gt;|&lt;\|'\|&gt;/g, '"');
-        return '<div class="tool-call-block" style="margin:8px 0">' +
-          '<span class="tc-icon">🔧</span>' +
-          '<span class="tc-name">' + name + '</span>' +
-          '<code class="tc-args">' + pretty + '</code>' +
-          '</div>';
-      }
+    const stripped = esc.replace(
+      /(?:&lt;\|tool_call\|&gt;\s*)?call:(\w+(?:\.\w+)*)\{([^}]*)\}(?:\s*&lt;\|tool_call\|&gt;)?/g,
+      ''
     );
-    const withPre = withToolCalls.replace(/```(\w*)\n?([\s\S]*?)```/g, function(_, lang, c) {
+    const withPre = stripped.replace(/```(\w*)\n?([\s\S]*?)```/g, function(_, lang, c) {
       return renderCodeBlock(c.trim(), lang);
     });
     const withCode = withPre.replace(/`([^`\n]+)`/g, '<code>$1</code>');

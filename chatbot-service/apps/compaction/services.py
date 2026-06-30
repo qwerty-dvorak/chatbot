@@ -3,6 +3,12 @@ import re
 
 from django.conf import settings
 
+from apps.chat.models import Message
+from apps.llm.clients import ChatClient
+from apps.llm.model_info import get_model_context_limit
+from apps.llm.prompts import COMPACTION_CONTEXT_PROMPT, SYSTEM_PROMPT
+from apps.llm.streaming import ChannelContentParser
+
 from .models import ChatCompaction
 
 MIN_MESSAGES_TO_COMPACT = 10
@@ -20,7 +26,6 @@ def latest_compaction(chat):
 
 
 def messages_after_compaction(chat):
-    from apps.chat.models import Message
 
     messages = list(
         Message.objects.filter(
@@ -43,7 +48,6 @@ def messages_after_compaction(chat):
 def _clean_json_response(content: str) -> dict:
     content = content.strip()
     if "<|channel" in content:
-        from apps.llm.streaming import ChannelContentParser
 
         parser = ChannelContentParser()
         parts = parser.feed(content) + parser.finish()
@@ -63,8 +67,6 @@ def _clean_json_response(content: str) -> dict:
 
 
 def context_usage(chat) -> dict:
-    from apps.llm.model_info import get_model_context_limit
-    from apps.llm.prompts import COMPACTION_CONTEXT_PROMPT, SYSTEM_PROMPT
 
     previous = latest_compaction(chat)
     context_parts = [SYSTEM_PROMPT]
@@ -121,7 +123,6 @@ def compact_chat(chat):
         f"{prior_context}Conversation to compact:\n{transcript}"
     )
 
-    from apps.llm.clients import ChatClient
 
     response = ChatClient().chat_completion(
         messages=[
@@ -143,7 +144,7 @@ def compact_chat(chat):
     facts = facts if isinstance(facts, list) else []
     open_questions = open_questions if isinstance(open_questions, list) else []
 
-    compaction = ChatCompaction.objects.create(
+    return ChatCompaction.objects.create(
         chat=chat,
         from_message=selected[0],
         to_message=selected[-1],
@@ -155,4 +156,3 @@ def compact_chat(chat):
         ),
         model=settings.CHAT_MODEL,
     )
-    return compaction

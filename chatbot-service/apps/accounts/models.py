@@ -26,7 +26,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     class Meta:
         db_table = "users"
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.email
 
 
@@ -49,5 +49,5 @@ class SecurityLog(models.Model):
             models.Index(fields=["event", "-created_at"]),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.event} - {self.user_id}"

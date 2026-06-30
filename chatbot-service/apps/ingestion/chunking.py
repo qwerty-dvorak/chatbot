@@ -1,11 +1,12 @@
-import hashlib
+"""Text chunking for document ingestion."""
+
 import re
 
 from django.conf import settings
 
 
 class TextChunker:
-    def __init__(self, target_tokens=None, overlap_tokens=None):
+    def __init__(self, target_tokens=None, overlap_tokens=None) -> None:
         self.target_tokens = target_tokens or settings.RAG_CHUNK_TARGET_TOKENS
         self.overlap_tokens = overlap_tokens or settings.RAG_CHUNK_OVERLAP_TOKENS
 
@@ -42,6 +43,5 @@ class TextChunker:
         return {
             "chunk_index": index,
             "content": content.strip(),
-            "content_hash": hashlib.sha256(content.strip().encode()).hexdigest(),
             "token_count": self._estimate_tokens(content),
         }

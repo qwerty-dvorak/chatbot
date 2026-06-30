@@ -240,7 +240,53 @@ def search(  # noqa: C901, PLR0912, PLR0913, PLR0915
     timing["search"] = round(t_search_total, 4)
 
     if not all_result_lists:
-        timing["total"] = round(sum(v for v in timing.values() if isinstance(v, float)), 4)
+        total_s = round(sum(v for v in timing.values() if isinstance(v, float)), 4)
+        timing["total"] = total_s
+        # Fallback: no enhanced query matched. Try the raw query directly
+        # (it may not be in the enhanced list if HyDE replaced it).
+        raw_embedding = embed_text([Chunk(id=uuid.uuid4().hex, source_path="__query__", text=query, chunk_type=ChunkType.TEXT)])
+        if raw_embedding:
+            t0 = clock()
+            fallback_extra = _paths_filter(artifact_paths) if artifact_paths else None
+            if hierarchical and fallback_extra is None:
+                raw_results = vector_search(raw_embedding[0].embedding, cfg.summary_top_k, extra_filter='chunk_type == "summary"')
+                matched = list({h.chunk.source_path for h in raw_results})
+                if matched:
+                    extra = f'{_paths_filter(matched)} and chunk_type != "summary"'
+                    raw_results = (
+                        vector_search(raw_embedding[0].embedding, retrieval_k, extra_filter=extra)
+                        if mode == "vector"
+                        else hybrid_search(query, raw_embedding[0].embedding, retrieval_k, extra_filter=extra, source_paths=matched)
+                    )
+                else:
+                    raw_results = []
+            elif mode == "vector":
+                raw_results = vector_search(raw_embedding[0].embedding, retrieval_k, extra_filter=fallback_extra)
+            elif mode == "bm25":
+                raw_results = bm25_search(query, retrieval_k, source_paths=artifact_paths)
+            else:
+                raw_results = hybrid_search(query, raw_embedding[0].embedding, retrieval_k, extra_filter=fallback_extra, source_paths=artifact_paths)
+            timing["raw_fallback_search"] = round(clock() - t0, 4)
+            if raw_results:
+                all_result_lists.append(raw_results)
+                timing["total"] = round(sum(v for v in timing.values() if isinstance(v, float)), 4)
+
+    if not all_result_lists:
+        # Everything failed — return HyDE text as a fallback result so the
+        # caller has something to work with instead of empty.
+        hyde_text = None
+        for q in enhanced_queries:
+            if q != query and len(q) > 20:
+                hyde_text = q
+                break
+        if hyde_text:
+            fallback_chunk = Chunk(
+                id=uuid.uuid4().hex, source_path="__hyde_fallback__",
+                text=hyde_text, chunk_type=ChunkType.TEXT,
+            )
+            fallback = SearchResult(chunk=fallback_chunk, score=0.5, rank=0, retrieval_method="hyde_fallback")
+            timing["total"] = total_s
+            return [fallback], timing
         return lexical_results[:effective_top_k], timing
 
     t0 = clock()

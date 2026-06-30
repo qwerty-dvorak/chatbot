@@ -1,3 +1,5 @@
+"""PDF extractor: basic metadata passthrough."""
+
 from typing import Any
 
 from .base import BaseExtractor

@@ -20,7 +20,7 @@ RAG_STATUS_MAP = {
 class Command(BaseCommand):
     help = "Sync RAG pipeline ingestion job status to local IngestionJob records."
 
-    def handle(self, *args, **options):
+    def handle(self, *args, **options) -> None:  # noqa: C901
         if not rag_client.is_enabled():
             self.stdout.write("RAG API not enabled, skipping sync.")
             return

@@ -4,11 +4,13 @@ import zlib
 
 from django.core.files.base import ContentFile
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.core.files.storage import default_storage
+from django.core.management import call_command
 from django.test import TestCase, override_settings
 from django.urls import reverse
+
 from apps.accounts.models import User
 from apps.chat.models import Chat, Message, MessageEdit
+from apps.tools.models import ToolCall as ToolCallModel
 
 
 def _make_minimal_png(width: int = 1, height: int = 1) -> bytes:
@@ -17,19 +19,19 @@ def _make_minimal_png(width: int = 1, height: int = 1) -> bytes:
         c = chunk_type + data
         crc = struct.pack(">I", zlib.crc32(c) & 0xFFFFFFFF)
         return struct.pack(">I", len(data)) + c + crc
-    sig = b'\x89PNG\r\n\x1a\n'
-    ihdr = _chunk(b'IHDR', struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
-    raw_data = b'\x00' + b'\xff\x00\x00\xff\x00\x00' * (width * height)
+    sig = b"\x89PNG\r\n\x1a\n"
+    ihdr = _chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+    raw_data = b"\x00" + b"\xff\x00\x00\xff\x00\x00" * (width * height)
     compressed = zlib.compress(raw_data)
-    idat = _chunk(b'IDAT', compressed)
-    iend = _chunk(b'IEND', b'')
+    idat = _chunk(b"IDAT", compressed)
+    iend = _chunk(b"IEND", b"")
     return sig + ihdr + idat + iend
 
 
 class ChatAPITest(TestCase):
     """End-to-end API tests for the chat flow."""
 
-    def setUp(self):
+    def setUp(self) -> None:
         self.password = "testpass123"
         self.user = User.objects.create_user(
             email="testuser@example.com", password=self.password,
@@ -38,12 +40,12 @@ class ChatAPITest(TestCase):
 
     # ── Public API endpoints ──────────────────────────────────────────────
 
-    def test_health_endpoint(self):
+    def test_health_endpoint(self) -> None:
         response = self.client.get(reverse("api-health"))
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "ok")
 
-    def test_stats_endpoint_returns_counts(self):
+    def test_stats_endpoint_returns_counts(self) -> None:
         chat = Chat.objects.create(user=self.user, title="Stats", path="s1")
         Message.objects.create(chat=chat, role=Message.Role.USER, content="Hi")
         response = self.client.get(reverse("api-stats"))
@@ -55,7 +57,7 @@ class ChatAPITest(TestCase):
 
     # ── Chat CRUD ─────────────────────────────────────────────────────────
 
-    def test_create_chat_via_post(self):
+    def test_create_chat_via_post(self) -> None:
         response = self.client.post(
             reverse("chat:new"), {"title": "API Chat"}, follow=True,
         )
@@ -64,13 +66,13 @@ class ChatAPITest(TestCase):
             Chat.objects.filter(title="API Chat", user=self.user).exists()
         )
 
-    def test_chat_detail_shows_messages(self):
+    def test_chat_detail_shows_messages(self) -> None:
         chat = Chat.objects.create(user=self.user, title="Detail", path="d1")
         Message.objects.create(chat=chat, role=Message.Role.USER, content="Hello")
         response = self.client.get(reverse("chat:detail", args=[chat.id]))
         self.assertContains(response, "Hello")
 
-    def test_chat_list_owner_only(self):
+    def test_chat_list_owner_only(self) -> None:
         Chat.objects.create(user=self.user, title="Mine", path="m1")
         other = User.objects.create_user(email="other@e.com", password="pass")
         Chat.objects.create(user=other, title="Theirs", path="t1")
@@ -78,16 +80,16 @@ class ChatAPITest(TestCase):
         self.assertContains(response, "Mine")
         self.assertNotContains(response, "Theirs")
 
-    def test_other_user_cannot_access_chat(self):
+    def test_other_user_cannot_access_chat(self) -> None:
         chat = Chat.objects.create(user=self.user, title="Private", path="p1")
-        other = User.objects.create_user(email="other@e.com", password="pass")
+        User.objects.create_user(email="other@e.com", password="pass")
         self.client.login(username="other@e.com", password="pass")
         response = self.client.get(reverse("chat:detail", args=[chat.id]))
         self.assertEqual(response.status_code, 404)
 
     # ── Message posting ───────────────────────────────────────────────────
 
-    def test_send_message_creates_user_and_pending_assistant(self):
+    def test_send_message_creates_user_and_pending_assistant(self) -> None:
         chat = Chat.objects.create(user=self.user, title="Msg", path="m1")
         response = self.client.post(
             reverse("chat:detail", args=[chat.id]),
@@ -104,7 +106,7 @@ class ChatAPITest(TestCase):
         self.assertEqual(msgs[1].role, "assistant")
         self.assertEqual(msgs[1].status, "pending")
 
-    def test_edit_latest_user_message_replaces_assistant_turn(self):
+    def test_edit_latest_user_message_replaces_assistant_turn(self) -> None:
         chat = Chat.objects.create(user=self.user, title="Edit", path="edit")
         user_msg = Message.objects.create(
             chat=chat,
@@ -147,7 +149,7 @@ class ChatAPITest(TestCase):
         self.assertEqual(edit.new_content, "Updated question")
         self.assertEqual(edit.superseded_message_ids, [str(old_assistant.id)])
 
-    def test_edit_rejects_non_latest_user_message(self):
+    def test_edit_rejects_non_latest_user_message(self) -> None:
         chat = Chat.objects.create(user=self.user, title="Edit", path="edit-non-latest")
         first = Message.objects.create(chat=chat, role=Message.Role.USER, content="First")
         Message.objects.create(chat=chat, role=Message.Role.ASSISTANT, content="Answer")
@@ -164,7 +166,7 @@ class ChatAPITest(TestCase):
         self.assertEqual(first.content, "First")
         self.assertEqual(MessageEdit.objects.count(), 0)
 
-    def test_edit_rejects_while_assistant_response_streaming(self):
+    def test_edit_rejects_while_assistant_response_streaming(self) -> None:
         chat = Chat.objects.create(user=self.user, title="Edit", path="edit-streaming")
         user_msg = Message.objects.create(chat=chat, role=Message.Role.USER, content="Question")
         Message.objects.create(
@@ -184,7 +186,7 @@ class ChatAPITest(TestCase):
         user_msg.refresh_from_db()
         self.assertEqual(user_msg.content, "Question")
 
-    def test_post_empty_message_rejected(self):
+    def test_post_empty_message_rejected(self) -> None:
         chat = Chat.objects.create(user=self.user, title="Empty", path="e1")
         response = self.client.post(
             reverse("chat:detail", args=[chat.id]), {"content": ""},
@@ -192,7 +194,7 @@ class ChatAPITest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("required", str(response.context["form"].errors))
 
-    def test_openapi_json_includes_web_rag_and_file_server_paths(self):
+    def test_openapi_json_includes_web_rag_and_file_server_paths(self) -> None:
         response = self.client.get(reverse("openapi-json"))
         self.assertEqual(response.status_code, 200)
         data = response.json()
@@ -201,7 +203,7 @@ class ChatAPITest(TestCase):
         self.assertIn("/v1/search", data["paths"])
         self.assertIn("/upload", data["paths"])
 
-    def test_message_accepts_multiple_attachments(self):
+    def test_message_accepts_multiple_attachments(self) -> None:
         chat = Chat.objects.create(user=self.user, title="Attachments", path="attachments")
         response = self.client.post(
             reverse("chat:detail", args=[chat.id]),
@@ -223,7 +225,7 @@ class ChatAPITest(TestCase):
     # ── Streaming ─────────────────────────────────────────────────────────
 
     @override_settings(RAG_ENABLED=False)
-    def test_stream_endpoint_returns_sse_events(self):
+    def test_stream_endpoint_returns_sse_events(self) -> None:
         chat = Chat.objects.create(user=self.user, title="Stream", path="s1")
         self.client.post(
             reverse("chat:detail", args=[chat.id]),
@@ -251,7 +253,7 @@ class ChatAPITest(TestCase):
         self.assertIn("1", full_text, "Model response should contain '1' from the count request")
 
     @override_settings(RAG_ENABLED=False)
-    def test_stream_marks_message_completed(self):
+    def test_stream_marks_message_completed(self) -> None:
         chat = Chat.objects.create(user=self.user, title="Done", path="d1")
         self.client.post(
             reverse("chat:detail", args=[chat.id]),
@@ -268,7 +270,7 @@ class ChatAPITest(TestCase):
         self.assertGreater(len(msg.content), 0)
 
     @override_settings(RAG_ENABLED=False)
-    def test_full_chat_flow_end_to_end(self):
+    def test_full_chat_flow_end_to_end(self) -> None:
         chat = Chat.objects.create(user=self.user, title="E2E", path="e2e")
         self.client.post(
             reverse("chat:detail", args=[chat.id]),
@@ -286,7 +288,7 @@ class ChatAPITest(TestCase):
         self.assertNotEqual(msgs[1].content, "")
 
     @override_settings(RAG_ENABLED=False)
-    def test_stream_event_types_and_structure(self):
+    def test_stream_event_types_and_structure(self) -> None:
         chat = Chat.objects.create(user=self.user, title="Types", path="t1")
         self.client.post(
             reverse("chat:detail", args=[chat.id]),
@@ -316,7 +318,7 @@ class ChatAPITest(TestCase):
     # ── Vision / Image with streaming ─────────────────────────────────────
 
     @override_settings(RAG_ENABLED=False)
-    def test_stream_with_image_attachment_llm_responds(self):
+    def test_stream_with_image_attachment_llm_responds(self) -> None:
         png_data = _make_minimal_png(4, 4)
         image = ContentFile(png_data, name="test_vision.png")
 
@@ -360,8 +362,7 @@ class ChatAPITest(TestCase):
         RAG_ENABLED=False,
         TOOL_CALLS_ENABLED=True,
     )
-    def test_tool_call_triggered_via_streaming(self):
-        from django.core.management import call_command
+    def test_tool_call_triggered_via_streaming(self) -> None:
         call_command("sync_builtin_tools")
 
         chat = Chat.objects.create(user=self.user, title="ToolCall", path="tc1")
@@ -400,9 +401,8 @@ class ChatAPITest(TestCase):
         RAG_ENABLED=False,
         TOOL_CALLS_ENABLED=True,
     )
-    def test_tool_call_records_persisted(self):
-        from django.core.management import call_command
-        from apps.tools.models import ToolCall as ToolCallModel
+    def test_tool_call_records_persisted(self) -> None:
+
         call_command("sync_builtin_tools")
 
         chat = Chat.objects.create(user=self.user, title="ToolRec", path="tr1")
@@ -431,7 +431,7 @@ class ChatAPITest(TestCase):
         RAG_ENABLED=False,
         CHAT_REASONING_ENABLED=True,
     )
-    def test_reasoning_events_via_streaming(self):
+    def test_reasoning_events_via_streaming(self) -> None:
         chat = Chat.objects.create(user=self.user, title="Reason", path="r1")
         self.client.post(
             reverse("chat:detail", args=[chat.id]),
@@ -467,7 +467,7 @@ class ChatAPITest(TestCase):
         RAG_ENABLED=False,
         CHAT_REASONING_ENABLED=True,
     )
-    def test_reasoning_stored_in_message_metadata(self):
+    def test_reasoning_stored_in_message_metadata(self) -> None:
         chat = Chat.objects.create(user=self.user, title="ReasonMeta", path="rm1")
         self.client.post(
             reverse("chat:detail", args=[chat.id]),
@@ -488,7 +488,7 @@ class ChatAPITest(TestCase):
         CHAT_REASONING_ENABLED=False,
         TOOL_CALLS_ENABLED=False,
     )
-    def test_multiple_thinking_turns_store_separate_reasoning(self):
+    def test_multiple_thinking_turns_store_separate_reasoning(self) -> None:
         chat = Chat.objects.create(user=self.user, title="MultiThink", path="multi-think")
         prompts = [
             "Calculate 37 multiplied by 19 and explain the calculation.",
@@ -526,8 +526,7 @@ class ChatAPITest(TestCase):
         RAG_ENABLED=False,
         TOOL_CALLS_ENABLED=True,
     )
-    def test_memory_save_tool_e2e_flow(self):
-        from django.core.management import call_command
+    def test_memory_save_tool_e2e_flow(self) -> None:
         call_command("sync_builtin_tools")
 
         chat = Chat.objects.create(user=self.user, title="MemTest", path="mt1")
@@ -566,7 +565,7 @@ class ChatAPITest(TestCase):
 
     # ── Authentication ────────────────────────────────────────────────────
 
-    def test_unauthenticated_access_redirects_to_login(self):
+    def test_unauthenticated_access_redirects_to_login(self) -> None:
         self.client.logout()
         paths = [
             reverse("chat:list"),

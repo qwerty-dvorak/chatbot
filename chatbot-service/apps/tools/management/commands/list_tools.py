@@ -6,7 +6,7 @@ from apps.tools.models import ToolDefinition
 class Command(BaseCommand):
     help = "List all registered tools"
 
-    def handle(self, *args, **options):
+    def handle(self, *args, **options) -> None:
         tools = ToolDefinition.objects.all().order_by("name")
         for tool in tools:
             status = "enabled" if tool.is_enabled else "disabled"

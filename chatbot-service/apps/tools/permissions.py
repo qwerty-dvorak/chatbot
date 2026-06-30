@@ -1,3 +1,5 @@
+"""Tool permission checks."""
+
 from .models import ToolDefinition, ToolPermissionGrant
 
 

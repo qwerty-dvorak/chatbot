@@ -12,7 +12,7 @@ from apps.documents.models import (
 
 
 class ContentBlobTest(TestCase):
-    def setUp(self):
+    def setUp(self) -> None:
         self.blob = ContentBlob.objects.create(
             content_hash="a" * 64,
             mime_type="text/plain",
@@ -21,32 +21,32 @@ class ContentBlobTest(TestCase):
             storage_status=ContentBlob.StorageStatus.STORED,
         )
 
-    def test_create_blob(self):
+    def test_create_blob(self) -> None:
         self.assertEqual(self.blob.content_hash, "a" * 64)
         self.assertEqual(self.blob.mime_type, "text/plain")
         self.assertEqual(self.blob.size_bytes, 100)
         self.assertEqual(self.blob.storage_status, "stored")
 
-    def test_unique_content_hash(self):
+    def test_unique_content_hash(self) -> None:
         with self.assertRaises(IntegrityError):
             ContentBlob.objects.create(
                 content_hash="a" * 64,
                 mime_type="text/plain",
             )
 
-    def test_default_storage_status(self):
+    def test_default_storage_status(self) -> None:
         blob = ContentBlob.objects.create(
             content_hash="b" * 64, mime_type="image/png"
         )
         self.assertEqual(blob.storage_status, ContentBlob.StorageStatus.PENDING)
 
-    def test_string_representation(self):
+    def test_string_representation(self) -> None:
         self.assertIn(self.blob.content_hash[:12], str(self.blob))
         self.assertIn("text/plain", str(self.blob))
 
 
 class ArtifactRevisionTest(TestCase):
-    def setUp(self):
+    def setUp(self) -> None:
         self.blob = ContentBlob.objects.create(
             content_hash="c" * 64, mime_type="application/pdf"
         )
@@ -59,19 +59,19 @@ class ArtifactRevisionTest(TestCase):
             processing_status=ArtifactRevision.ProcessingStatus.READY,
         )
 
-    def test_create_revision(self):
+    def test_create_revision(self) -> None:
         self.assertEqual(self.revision.blob, self.blob)
         self.assertEqual(self.revision.pipeline_fingerprint, "fp_v1_abc123")
         self.assertEqual(self.revision.processing_status, "ready")
 
-    def test_unique_blob_pipeline(self):
+    def test_unique_blob_pipeline(self) -> None:
         with self.assertRaises(IntegrityError):
             ArtifactRevision.objects.create(
                 blob=self.blob,
                 pipeline_fingerprint="fp_v1_abc123",
             )
 
-    def test_default_processing_status(self):
+    def test_default_processing_status(self) -> None:
         new_blob = ContentBlob.objects.create(
             content_hash="d" * 64, mime_type="text/markdown"
         )
@@ -81,17 +81,17 @@ class ArtifactRevisionTest(TestCase):
         )
         self.assertEqual(revision.processing_status, ArtifactRevision.ProcessingStatus.PENDING)
 
-    def test_revision_to_string(self):
+    def test_revision_to_string(self) -> None:
         self.assertIn("fp_v1_abc123", str(self.revision))
 
-    def test_cascade_delete_blob(self):
+    def test_cascade_delete_blob(self) -> None:
         blob_id = self.blob.id
         self.blob.delete()
         self.assertFalse(ArtifactRevision.objects.filter(blob_id=blob_id).exists())
 
 
 class DocumentReferenceTest(TestCase):
-    def setUp(self):
+    def setUp(self) -> None:
         self.owner = User.objects.create_user(
             email="owner@example.com", password="pass123"
         )
@@ -108,12 +108,12 @@ class DocumentReferenceTest(TestCase):
             kind=DocumentReference.Kind.KNOWLEDGE,
         )
 
-    def test_create_document_reference(self):
+    def test_create_document_reference(self) -> None:
         self.assertEqual(self.doc_ref.owner, self.owner)
         self.assertEqual(self.doc_ref.title, "Test Document")
         self.assertEqual(self.doc_ref.kind, "knowledge")
 
-    def test_chat_attachment_kind(self):
+    def test_chat_attachment_kind(self) -> None:
         att = DocumentReference.objects.create(
             owner=self.owner,
             artifact_revision=self.revision,
@@ -124,7 +124,7 @@ class DocumentReferenceTest(TestCase):
 
 
 class DocumentGrantTest(TestCase):
-    def setUp(self):
+    def setUp(self) -> None:
         self.owner = User.objects.create_user(
             email="owner@example.com", password="pass123"
         )
@@ -147,7 +147,7 @@ class DocumentGrantTest(TestCase):
             kind=DocumentReference.Kind.KNOWLEDGE,
         )
 
-    def test_create_viewer_grant(self):
+    def test_create_viewer_grant(self) -> None:
         grant = DocumentGrant.objects.create(
             document_reference=self.doc_ref,
             user=self.viewer,
@@ -156,7 +156,7 @@ class DocumentGrantTest(TestCase):
         self.assertEqual(grant.role, "viewer")
         self.assertEqual(grant.user, self.viewer)
 
-    def test_create_editor_grant(self):
+    def test_create_editor_grant(self) -> None:
         grant = DocumentGrant.objects.create(
             document_reference=self.doc_ref,
             user=self.editor,
@@ -164,7 +164,7 @@ class DocumentGrantTest(TestCase):
         )
         self.assertEqual(grant.role, "editor")
 
-    def test_unique_document_grant(self):
+    def test_unique_document_grant(self) -> None:
         DocumentGrant.objects.create(
             document_reference=self.doc_ref,
             user=self.viewer,
@@ -177,7 +177,7 @@ class DocumentGrantTest(TestCase):
                 role=DocumentGrant.Role.EDITOR,
             )
 
-    def test_grant_query_by_user(self):
+    def test_grant_query_by_user(self) -> None:
         DocumentGrant.objects.create(
             document_reference=self.doc_ref,
             user=self.viewer,
@@ -187,7 +187,7 @@ class DocumentGrantTest(TestCase):
         self.assertEqual(grants.count(), 1)
         self.assertEqual(grants.first().document_reference, self.doc_ref)
 
-    def test_cascade_delete_document_reference(self):
+    def test_cascade_delete_document_reference(self) -> None:
         DocumentGrant.objects.create(
             document_reference=self.doc_ref,
             user=self.viewer,
@@ -197,7 +197,7 @@ class DocumentGrantTest(TestCase):
         self.doc_ref.delete()
         self.assertFalse(DocumentGrant.objects.filter(document_reference_id=ref_id).exists())
 
-    def test_acl_isolation_owner_can_view_all(self):
+    def test_acl_isolation_owner_can_view_all(self) -> None:
         """Owner should always have access; grants are for additional users."""
         grants = self.doc_ref.grants.all()
         self.assertEqual(grants.count(), 0)
@@ -205,7 +205,7 @@ class DocumentGrantTest(TestCase):
 
 
 class EmbeddingSetTest(TestCase):
-    def setUp(self):
+    def setUp(self) -> None:
         self.owner = User.objects.create_user(
             email="owner@example.com", password="pass123"
         )
@@ -216,7 +216,7 @@ class EmbeddingSetTest(TestCase):
             blob=self.blob, pipeline_fingerprint="fp_embed"
         )
 
-    def test_create_text_embedding_set(self):
+    def test_create_text_embedding_set(self) -> None:
         embed = EmbeddingSet.objects.create(
             artifact_revision=self.revision,
             model_name="llama-embed-nemotron-8b",
@@ -230,7 +230,7 @@ class EmbeddingSetTest(TestCase):
         self.assertEqual(len(embed.milvus_ids), 3)
         self.assertEqual(embed.embedding_type, "text")
 
-    def test_create_multimodal_embedding_set(self):
+    def test_create_multimodal_embedding_set(self) -> None:
         embed = EmbeddingSet.objects.create(
             artifact_revision=self.revision,
             model_name="nemotron-colembed-vl-8b-v2",
@@ -240,7 +240,7 @@ class EmbeddingSetTest(TestCase):
         )
         self.assertEqual(embed.embedding_type, "multimodal")
 
-    def test_unique_revision_embedding(self):
+    def test_unique_revision_embedding(self) -> None:
         EmbeddingSet.objects.create(
             artifact_revision=self.revision,
             model_name="test-model",
@@ -257,7 +257,7 @@ class EmbeddingSetTest(TestCase):
                 milvus_collection="test",
             )
 
-    def test_empty_milvus_ids_default(self):
+    def test_empty_milvus_ids_default(self) -> None:
         embed = EmbeddingSet.objects.create(
             artifact_revision=self.revision,
             model_name="test-model",

@@ -1,6 +1,12 @@
 from django.contrib import admin
 
-from .models import ToolCall, ToolDefinition, ToolExecution, ToolPermissionGrant, ToolResult
+from .models import (
+    ToolCall,
+    ToolDefinition,
+    ToolExecution,
+    ToolPermissionGrant,
+    ToolResult,
+)
 
 
 @admin.register(ToolDefinition)
@@ -8,13 +14,13 @@ class ToolDefinitionAdmin(admin.ModelAdmin):
     list_display = ("name", "display_name", "is_enabled", "is_builtin", "permission_level", "version")
     list_filter = ("is_enabled", "is_builtin", "permission_level")
     search_fields = ("name", "display_name", "description")
-    actions = ["enable_tools", "disable_tools"]
+    actions = ["enable_tools", "disable_tools"]  # noqa: RUF012
 
-    def enable_tools(self, request, queryset):
+    def enable_tools(self, request, queryset) -> None:
         queryset.update(is_enabled=True)
     enable_tools.short_description = "Enable selected tools"
 
-    def disable_tools(self, request, queryset):
+    def disable_tools(self, request, queryset) -> None:
         queryset.update(is_enabled=False)
     disable_tools.short_description = "Disable selected tools"
 

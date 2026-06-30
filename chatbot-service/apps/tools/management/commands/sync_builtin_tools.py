@@ -102,25 +102,13 @@ BUILTIN_TOOL_DEFS = [
             "required": [],
         },
     },
-    {
-        "name": "document.analyze",
-        "display_name": "Document Analysis",
-        "description": "Analyze a document by ID, title, or filename. If not found, tries to ingest from chat attachment.",
-        "schema": {
-            "type": "object",
-            "properties": {
-                "document_id": {"type": "string", "description": "Document UUID, title, or attached filename"},
-            },
-            "required": ["document_id"],
-        },
-    },
 ]
 
 
 class Command(BaseCommand):
     help = "Sync built-in tool definitions from code to database"
 
-    def handle(self, *args, **options):
+    def handle(self, *args, **options) -> None:
         created = 0
         updated = 0
         for def_data in BUILTIN_TOOL_DEFS:

@@ -3,9 +3,9 @@ import time
 
 from django.conf import settings
 
-from .endpoints import score_url, rerank_url
-from .http_client import json_request
+from .endpoints import rerank_url, score_url
 from .errors import LLMProviderError
+from .http_client import json_request
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +16,7 @@ class RerankerClient:
         self.base_url = settings.RERANKER_BASE_URL
         self.api_key = settings.RERANKER_API_KEY
 
-    def rerank(self, query: str, documents: list[str], top_k: int = None) -> list[dict]:
+    def rerank(self, query: str, documents: list[str], top_k: int = None) -> list[dict]:  # noqa: RUF013
         top_k = top_k or len(documents)
 
         # Try /score (vLLM native) first, fall back to /v1/rerank (Cohere-compatible)
@@ -42,7 +42,7 @@ class RerankerClient:
                     for item in data.get("data", [])
                 ]
             except LLMProviderError as e:
-                if getattr(e, "status_code", None) != 404:
+                if getattr(e, "status_code", None) != 404:  # noqa: PLR2004
                     raise
                 url = rerank_url(self.base_url)
                 data = json_request(url, rerank_payload, api_key=self.api_key)
@@ -61,11 +61,11 @@ class RerankerClient:
                     "relevance_score": score,
                     "document": documents[idx],
                 })
-            return results
+            return results  # noqa: TRY300
         except LLMProviderError:
             raise
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             duration = time.time() - start
-            logger.error("Rerank failed after %.3fs: %s", duration, e)
-            raise LLMProviderError(str(e))
+            logger.error("Rerank failed after %.3fs: %s", duration, e)  # noqa: TRY400
+            raise LLMProviderError(str(e))  # noqa: B904
 

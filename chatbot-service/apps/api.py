@@ -1,6 +1,8 @@
 from django.conf import settings
 from django.http import JsonResponse
 
+from apps.accounts.models import User
+from apps.chat.models import Chat, Message
 from apps.documents.models import DocumentReference
 
 
@@ -9,9 +11,6 @@ def health_check(request):
 
 
 def stats(request):
-    from apps.accounts.models import User
-    from apps.chat.models import Chat, Message
-
     return JsonResponse({
         "users": User.objects.count(),
         "chats": Chat.objects.count(),

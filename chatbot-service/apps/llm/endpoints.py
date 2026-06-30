@@ -10,8 +10,7 @@ consistently.
 def normalize_url(base_url: str) -> str:
     """Strip trailing /v1 (or any version prefix) and trailing slash."""
     url = base_url.rstrip("/")
-    if url.endswith("/v1"):
-        url = url[:-3]
+    url = url.removesuffix("/v1")
     return url.rstrip("/")
 
 

@@ -7,11 +7,11 @@ from apps.compaction.services import compact_chat
 
 
 class ChatCompactionModelTest(TestCase):
-    def setUp(self):
+    def setUp(self) -> None:
         self.user = User.objects.create_user(email="test@example.com", password="pass123")
         self.chat = Chat.objects.create(user=self.user, title="Test", path="test")
 
-    def test_create_compaction(self):
+    def test_create_compaction(self) -> None:
         first = Message.objects.create(chat=self.chat, role=Message.Role.USER, content="First")
         last = Message.objects.create(chat=self.chat, role=Message.Role.ASSISTANT, content="Last")
         comp = ChatCompaction.objects.create(
@@ -27,7 +27,7 @@ class ChatCompactionModelTest(TestCase):
         self.assertEqual(comp.summary, "Test summary")
         self.assertEqual(comp.token_count, 10)
 
-    def test_compaction_str(self):
+    def test_compaction_str(self) -> None:
         first = Message.objects.create(chat=self.chat, role=Message.Role.USER, content="F")
         last = Message.objects.create(chat=self.chat, role=Message.Role.ASSISTANT, content="L")
         comp = ChatCompaction.objects.create(
@@ -38,16 +38,16 @@ class ChatCompactionModelTest(TestCase):
 
 
 class CompactionServiceTest(TestCase):
-    def setUp(self):
+    def setUp(self) -> None:
         self.user = User.objects.create_user(email="test@example.com", password="pass123")
         self.chat = Chat.objects.create(user=self.user, title="Compaction Test", path="comptest")
 
-    def test_compact_chat_skips_few_messages(self):
+    def test_compact_chat_skips_few_messages(self) -> None:
         Message.objects.create(chat=self.chat, role=Message.Role.USER, content="Hi")
         result = compact_chat(self.chat)
         self.assertIsNone(result)
 
-    def test_compact_chat_creates_compaction(self):
+    def test_compact_chat_creates_compaction(self) -> None:
         for i in range(12):
             Message.objects.create(
                 chat=self.chat,
@@ -63,7 +63,7 @@ class CompactionServiceTest(TestCase):
         self.assertEqual(result.to_message.content, "Message 5")
         self.assertGreater(result.token_count, 0)
 
-    def test_compaction_does_not_delete_messages(self):
+    def test_compaction_does_not_delete_messages(self) -> None:
         for i in range(12):
             Message.objects.create(
                 chat=self.chat,

@@ -14,25 +14,25 @@ from apps.chat.models import (
 
 
 class ChatGrantTest(TestCase):
-    def setUp(self):
+    def setUp(self) -> None:
         self.owner = User.objects.create_user(email="owner@test.com", password="pass")
         self.viewer = User.objects.create_user(email="viewer@test.com", password="pass")
         self.chat = Chat.objects.create(user=self.owner, title="Test", path="test")
 
-    def test_create_viewer_grant(self):
+    def test_create_viewer_grant(self) -> None:
         grant = ChatGrant.objects.create(
             chat=self.chat, user=self.viewer, role=ChatGrant.Role.VIEWER
         )
         self.assertEqual(grant.role, "viewer")
         self.assertEqual(str(grant), f"{self.viewer.id} (viewer) on {self.chat.id}")
 
-    def test_create_editor_grant(self):
+    def test_create_editor_grant(self) -> None:
         grant = ChatGrant.objects.create(
             chat=self.chat, user=self.viewer, role=ChatGrant.Role.EDITOR
         )
         self.assertEqual(grant.role, "editor")
 
-    def test_unique_chat_grant(self):
+    def test_unique_chat_grant(self) -> None:
         ChatGrant.objects.create(
             chat=self.chat, user=self.viewer, role=ChatGrant.Role.VIEWER
         )
@@ -41,7 +41,7 @@ class ChatGrantTest(TestCase):
                 chat=self.chat, user=self.viewer, role=ChatGrant.Role.EDITOR
             )
 
-    def test_grants_accessible_from_chat(self):
+    def test_grants_accessible_from_chat(self) -> None:
         editor = User.objects.create_user(email="editor@test.com", password="pass")
         ChatGrant.objects.create(chat=self.chat, user=self.viewer, role=ChatGrant.Role.VIEWER)
         ChatGrant.objects.create(chat=self.chat, user=editor, role=ChatGrant.Role.EDITOR)
@@ -49,14 +49,14 @@ class ChatGrantTest(TestCase):
 
 
 class ChatBranchTest(TestCase):
-    def setUp(self):
+    def setUp(self) -> None:
         self.owner = User.objects.create_user(email="owner@test.com", password="pass")
         self.chat = Chat.objects.create(user=self.owner, title="Branch Test", path="branch")
         self.msg = Message.objects.create(
             chat=self.chat, role=Message.Role.USER, content="Original"
         )
 
-    def test_create_branch(self):
+    def test_create_branch(self) -> None:
         branch = ChatBranch.objects.create(
             chat=self.chat,
             name="feature-branch",
@@ -66,16 +66,16 @@ class ChatBranchTest(TestCase):
         self.assertEqual(branch.base_message, self.msg)
         self.assertTrue(branch.is_active)
 
-    def test_unique_branch_name(self):
+    def test_unique_branch_name(self) -> None:
         ChatBranch.objects.create(chat=self.chat, name="main")
         with self.assertRaises(IntegrityError):
             ChatBranch.objects.create(chat=self.chat, name="main")
 
-    def test_default_branch_name(self):
+    def test_default_branch_name(self) -> None:
         branch = ChatBranch.objects.create(chat=self.chat)
         self.assertEqual(branch.name, "main")
 
-    def test_set_head_message(self):
+    def test_set_head_message(self) -> None:
         head = Message.objects.create(
             chat=self.chat, role=Message.Role.ASSISTANT, content="Response"
         )
@@ -86,14 +86,14 @@ class ChatBranchTest(TestCase):
 
 
 class TurnRunTest(TestCase):
-    def setUp(self):
+    def setUp(self) -> None:
         self.owner = User.objects.create_user(email="owner@test.com", password="pass")
         self.chat = Chat.objects.create(user=self.owner, title="Turn Test", path="turn")
         self.msg = Message.objects.create(
             chat=self.chat, role=Message.Role.USER, content="Hello"
         )
 
-    def test_create_turn_run(self):
+    def test_create_turn_run(self) -> None:
         turn = TurnRun.objects.create(
             chat=self.chat,
             message=self.msg,
@@ -102,7 +102,7 @@ class TurnRunTest(TestCase):
         self.assertEqual(turn.status, "queued")
         self.assertEqual(turn.message, self.msg)
 
-    def test_turn_run_status_transition(self):
+    def test_turn_run_status_transition(self) -> None:
         turn = TurnRun.objects.create(chat=self.chat, message=self.msg)
         turn.status = TurnRun.Status.RUNNING
         turn.save()
@@ -114,14 +114,14 @@ class TurnRunTest(TestCase):
         turn.refresh_from_db()
         self.assertEqual(turn.status, "completed")
 
-    def test_turn_run_with_branch(self):
+    def test_turn_run_with_branch(self) -> None:
         branch = ChatBranch.objects.create(chat=self.chat, name="dev")
         turn = TurnRun.objects.create(
             chat=self.chat, message=self.msg, branch=branch
         )
         self.assertEqual(turn.branch, branch)
 
-    def test_turn_run_with_worker_id(self):
+    def test_turn_run_with_worker_id(self) -> None:
         turn = TurnRun.objects.create(
             chat=self.chat,
             message=self.msg,
@@ -130,13 +130,13 @@ class TurnRunTest(TestCase):
         )
         self.assertEqual(turn.worker_id, "worker-1")
 
-    def test_default_status_is_queued(self):
+    def test_default_status_is_queued(self) -> None:
         turn = TurnRun.objects.create(chat=self.chat, message=self.msg)
         self.assertEqual(turn.status, TurnRun.Status.QUEUED)
 
 
 class TurnEventTest(TestCase):
-    def setUp(self):
+    def setUp(self) -> None:
         self.owner = User.objects.create_user(email="owner@test.com", password="pass")
         self.chat = Chat.objects.create(user=self.owner, title="Event Test", path="event")
         self.msg = Message.objects.create(
@@ -144,7 +144,7 @@ class TurnEventTest(TestCase):
         )
         self.turn = TurnRun.objects.create(chat=self.chat, message=self.msg)
 
-    def test_create_progress_event(self):
+    def test_create_progress_event(self) -> None:
         event = TurnEvent.objects.create(
             turn_run=self.turn,
             sequence=1,
@@ -154,7 +154,7 @@ class TurnEventTest(TestCase):
         self.assertEqual(event.sequence, 1)
         self.assertEqual(event.event_type, "progress")
 
-    def test_create_text_delta_event(self):
+    def test_create_text_delta_event(self) -> None:
         event = TurnEvent.objects.create(
             turn_run=self.turn,
             sequence=2,
@@ -163,7 +163,7 @@ class TurnEventTest(TestCase):
         )
         self.assertEqual(event.event_type, "text_delta")
 
-    def test_create_tool_call_event(self):
+    def test_create_tool_call_event(self) -> None:
         event = TurnEvent.objects.create(
             turn_run=self.turn,
             sequence=3,
@@ -173,7 +173,7 @@ class TurnEventTest(TestCase):
         self.assertEqual(event.event_type, "tool_call")
         self.assertEqual(event.metadata["tool"], "rag.search")
 
-    def test_create_done_event(self):
+    def test_create_done_event(self) -> None:
         event = TurnEvent.objects.create(
             turn_run=self.turn,
             sequence=4,
@@ -181,7 +181,7 @@ class TurnEventTest(TestCase):
         )
         self.assertEqual(event.event_type, "done")
 
-    def test_unique_turn_event_sequence(self):
+    def test_unique_turn_event_sequence(self) -> None:
         TurnEvent.objects.create(
             turn_run=self.turn, sequence=1, event_type=TurnEvent.EventType.PROGRESS
         )
@@ -190,7 +190,7 @@ class TurnEventTest(TestCase):
                 turn_run=self.turn, sequence=1, event_type=TurnEvent.EventType.DONE
             )
 
-    def test_events_ordered_by_sequence(self):
+    def test_events_ordered_by_sequence(self) -> None:
         TurnEvent.objects.create(
             turn_run=self.turn, sequence=2, event_type=TurnEvent.EventType.TEXT_DELTA
         )
@@ -203,13 +203,13 @@ class TurnEventTest(TestCase):
         events = TurnEvent.objects.filter(turn_run=self.turn).order_by("sequence")
         self.assertEqual([e.sequence for e in events], [1, 2, 3])
 
-    def test_event_metadata_default(self):
+    def test_event_metadata_default(self) -> None:
         event = TurnEvent.objects.create(
             turn_run=self.turn, sequence=1, event_type=TurnEvent.EventType.PROGRESS
         )
         self.assertEqual(event.metadata, {})
 
-    def test_cascade_delete_turn_run(self):
+    def test_cascade_delete_turn_run(self) -> None:
         TurnEvent.objects.create(
             turn_run=self.turn, sequence=1, event_type=TurnEvent.EventType.DONE
         )
@@ -219,12 +219,12 @@ class TurnEventTest(TestCase):
 
 
 class MessageAuthorTest(TestCase):
-    def setUp(self):
+    def setUp(self) -> None:
         self.user = User.objects.create_user(email="user@test.com", password="pass")
         self.other = User.objects.create_user(email="other@test.com", password="pass")
         self.chat = Chat.objects.create(user=self.user, title="Author Test", path="author")
 
-    def test_message_author_field(self):
+    def test_message_author_field(self) -> None:
         msg = Message.objects.create(
             chat=self.chat,
             author=self.user,
@@ -233,7 +233,7 @@ class MessageAuthorTest(TestCase):
         )
         self.assertEqual(msg.author, self.user)
 
-    def test_message_author_nullable(self):
+    def test_message_author_nullable(self) -> None:
         msg = Message.objects.create(
             chat=self.chat,
             role=Message.Role.ASSISTANT,
@@ -241,7 +241,7 @@ class MessageAuthorTest(TestCase):
         )
         self.assertIsNone(msg.author)
 
-    def test_messages_accessible_from_author(self):
+    def test_messages_accessible_from_author(self) -> None:
         Message.objects.create(
             chat=self.chat, author=self.user, role=Message.Role.USER, content="Msg 1"
         )
@@ -252,14 +252,14 @@ class MessageAuthorTest(TestCase):
 
 
 class MessageAttachmentDocumentReferenceTest(TestCase):
-    def setUp(self):
+    def setUp(self) -> None:
         self.user = User.objects.create_user(email="user@test.com", password="pass")
         self.chat = Chat.objects.create(user=self.user, title="Attach Test", path="attach")
         self.msg = Message.objects.create(
             chat=self.chat, role=Message.Role.USER, content="See attached"
         )
 
-    def test_create_attachment_without_document_reference(self):
+    def test_create_attachment_without_document_reference(self) -> None:
         att = MessageAttachment.objects.create(
             message=self.msg,
             original_filename="test.txt",
@@ -269,14 +269,14 @@ class MessageAttachmentDocumentReferenceTest(TestCase):
         self.assertEqual(att.original_filename, "test.txt")
         self.assertIsNone(att.document_reference)
 
-    def test_attachment_string_representation(self):
+    def test_attachment_string_representation(self) -> None:
         att = MessageAttachment.objects.create(
             message=self.msg,
             original_filename="report.pdf",
         )
         self.assertEqual(str(att), "report.pdf")
 
-    def test_attachment_default_mime_type(self):
+    def test_attachment_default_mime_type(self) -> None:
         att = MessageAttachment.objects.create(
             message=self.msg,
             original_filename="unknown.bin",

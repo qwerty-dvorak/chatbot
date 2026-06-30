@@ -1,8 +1,6 @@
-import json
 import struct
 import zlib
 
-from django.conf import settings
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.test import TestCase, override_settings
@@ -26,25 +24,25 @@ def _make_minimal_png(width: int = 1, height: int = 1) -> bytes:
         crc = struct.pack(">I", zlib.crc32(c) & 0xFFFFFFFF)
         return struct.pack(">I", len(data)) + c + crc
 
-    sig = b'\x89PNG\r\n\x1a\n'
-    ihdr = _chunk(b'IHDR', struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
-    raw_data = b'\x00' + b'\xff\x00\x00\xff\x00\x00' * (width * height)
+    sig = b"\x89PNG\r\n\x1a\n"
+    ihdr = _chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+    raw_data = b"\x00" + b"\xff\x00\x00\xff\x00\x00" * (width * height)
     compressed = zlib.compress(raw_data)
-    idat = _chunk(b'IDAT', compressed)
-    iend = _chunk(b'IEND', b'')
+    idat = _chunk(b"IDAT", compressed)
+    iend = _chunk(b"IEND", b"")
     return sig + ihdr + idat + iend
 
 
 class MultimodalContentTest(TestCase):
-    def test_text_only_no_attachments(self):
+    def test_text_only_no_attachments(self) -> None:
         result = _build_multimodal_content("Hello", [])
         self.assertEqual(result, "Hello")
 
-    def test_text_only_none_attachments(self):
+    def test_text_only_none_attachments(self) -> None:
         result = _build_multimodal_content("Hello", None)
         self.assertEqual(result, "Hello")
 
-    def test_image_attachment_creates_image_url_part(self):
+    def test_image_attachment_creates_image_url_part(self) -> None:
         png_data = _make_minimal_png()
         path = default_storage.save("test_attachments/test_image.png", ContentFile(png_data))
         try:
@@ -65,7 +63,7 @@ class MultimodalContentTest(TestCase):
         finally:
             default_storage.delete(path)
 
-    def test_image_without_text(self):
+    def test_image_without_text(self) -> None:
         png_data = _make_minimal_png()
         path = default_storage.save("test_attachments/img_only.png", ContentFile(png_data))
         try:
@@ -83,7 +81,7 @@ class MultimodalContentTest(TestCase):
         finally:
             default_storage.delete(path)
 
-    def test_text_file_attachment_injects_content(self):
+    def test_text_file_attachment_injects_content(self) -> None:
         file_content = "Hello from the text file!"
         path = default_storage.save("test_attachments/test.txt", ContentFile(file_content))
         try:
@@ -103,7 +101,7 @@ class MultimodalContentTest(TestCase):
         finally:
             default_storage.delete(path)
 
-    def test_unknown_mime_type_attachment(self):
+    def test_unknown_mime_type_attachment(self) -> None:
         attachments = [{
             "file": "/nonexistent/foo.bin",
             "original_filename": "foo.bin",
@@ -118,7 +116,7 @@ class MultimodalContentTest(TestCase):
         self.assertIn("foo.bin", combined)
         self.assertIn("application/octet-stream", combined)
 
-    def test_multiple_attachments(self):
+    def test_multiple_attachments(self) -> None:
         png_data = _make_minimal_png()
         img_path = default_storage.save("test_attachments/multi_img.png", ContentFile(png_data))
         txt_path = default_storage.save("test_attachments/multi.txt", ContentFile("Some text"))
@@ -136,7 +134,7 @@ class MultimodalContentTest(TestCase):
             default_storage.delete(img_path)
             default_storage.delete(txt_path)
 
-    def test_missing_image_file_fallback(self):
+    def test_missing_image_file_fallback(self) -> None:
         attachments = [{
             "file": "uploads/nonexistent.png",
             "original_filename": "missing.png",
@@ -153,11 +151,11 @@ class MultimodalContentTest(TestCase):
 
 
 class ContextBuilderMultimodalTest(TestCase):
-    def setUp(self):
+    def setUp(self) -> None:
         self.user = User.objects.create_user(email="test@example.com", password="pass")
         self.chat = Chat.objects.create(user=self.user, title="Multi", path="mm1")
 
-    def test_build_with_image_attachment(self):
+    def test_build_with_image_attachment(self) -> None:
         png_data = _make_minimal_png()
         path = default_storage.save("test_ctx/img.png", ContentFile(png_data))
         try:
@@ -184,7 +182,7 @@ class ContextBuilderMultimodalTest(TestCase):
             default_storage.delete(path)
 
     @override_settings(RAG_ENABLED=False)
-    def test_thinking_mode_prefixes_outbound_prompt_only(self):
+    def test_thinking_mode_prefixes_outbound_prompt_only(self) -> None:
         msg = Message.objects.create(
             chat=self.chat,
             role=Message.Role.USER,
@@ -196,11 +194,11 @@ class ContextBuilderMultimodalTest(TestCase):
         msg.refresh_from_db()
         self.assertEqual(msg.content, "Who are you?")
 
-    def test_history_with_attachment(self):
+    def test_history_with_attachment(self) -> None:
         png_data = _make_minimal_png()
         path = default_storage.save("test_ctx/history_img.png", ContentFile(png_data))
         try:
-            hist_msg = Message.objects.create(
+            Message.objects.create(
                 chat=self.chat, role=Message.Role.USER,
                 content="Previous image",
                 attachments=[{
@@ -228,7 +226,7 @@ class ContextBuilderMultimodalTest(TestCase):
 
 
 class DocumentMentionContextTest(TestCase):
-    def setUp(self):
+    def setUp(self) -> None:
         self.user = User.objects.create_user(email="mentions@example.com", password="pass")
         self.chat = Chat.objects.create(user=self.user, title="Mentions", path="mentions")
         blob = ContentBlob.objects.create(
@@ -254,14 +252,14 @@ class DocumentMentionContextTest(TestCase):
             kind=DocumentReference.Kind.KNOWLEDGE,
         )
 
-    def test_resolves_filename_and_removes_it_from_retrieval_query(self):
+    def test_resolves_filename_and_removes_it_from_retrieval_query(self) -> None:
         result = resolve_document_mentions("what is @topic_geology.txt", self.user)
 
         self.assertEqual(result.clean_query, "what is")
         self.assertEqual(result.selected_sources, ("topic_geology.txt",))
         self.assertEqual(result.unresolved_mentions, ())
 
-    def test_resolves_document_title_containing_spaces(self):
+    def test_resolves_document_title_containing_spaces(self) -> None:
         result = resolve_document_mentions(
             "summarize @Geology Notes 2025.pdf please",
             self.user,
@@ -270,14 +268,14 @@ class DocumentMentionContextTest(TestCase):
         self.assertEqual(result.clean_query, "summarize please")
         self.assertEqual(result.selected_sources, ("Geology Notes 2025.pdf",))
 
-    def test_unresolved_mention_does_not_become_search_text(self):
+    def test_unresolved_mention_does_not_become_search_text(self) -> None:
         result = resolve_document_mentions("explain @missing.txt", self.user)
 
         self.assertEqual(result.clean_query, "explain")
         self.assertEqual(result.selected_sources, ())
         self.assertEqual(result.unresolved_mentions, ("missing.txt",))
 
-    def test_email_address_is_not_treated_as_document_mention(self):
+    def test_email_address_is_not_treated_as_document_mention(self) -> None:
         query = "Email geology@example.com"
         result = resolve_document_mentions(query, self.user)
 
@@ -285,7 +283,7 @@ class DocumentMentionContextTest(TestCase):
         self.assertEqual(result.clean_query, query)
 
     @override_settings(RAG_ENABLED=False)
-    def test_mention_is_added_to_context_while_user_text_is_preserved(self):
+    def test_mention_is_added_to_context_while_user_text_is_preserved(self) -> None:
         msg = Message.objects.create(
             chat=self.chat,
             role=Message.Role.USER,
@@ -299,7 +297,7 @@ class DocumentMentionContextTest(TestCase):
         self.assertEqual(messages[-1]["content"], msg.content)
 
     @override_settings(RAG_ENABLED=False)
-    def test_document_selection_is_inherited_by_follow_up_turn(self):
+    def test_document_selection_is_inherited_by_follow_up_turn(self) -> None:
         Message.objects.create(
             chat=self.chat,
             role=Message.Role.USER,
@@ -321,7 +319,7 @@ class DocumentMentionContextTest(TestCase):
             messages[0]["content"],
         )
 
-    def test_explicit_unresolved_mention_does_not_inherit_old_scope(self):
+    def test_explicit_unresolved_mention_does_not_inherit_old_scope(self) -> None:
         Message.objects.create(
             chat=self.chat,
             role=Message.Role.USER,
@@ -344,14 +342,14 @@ class DocumentMentionContextTest(TestCase):
         self.assertEqual(inherited.unresolved_mentions, ("missing.txt",))
         self.assertEqual(inherited.selection_origin, "explicit")
 
-    def test_rag_decision_requires_boolean_use_rag(self):
+    def test_rag_decision_requires_boolean_use_rag(self) -> None:
         with self.assertRaises(ValueError):
             _normalise_rag_decision(
                 '{"use_rag": "yes", "search_query": "geology"}',
                 "fallback",
             )
 
-    def test_rag_decision_strips_markdown_fence_and_applies_defaults(self):
+    def test_rag_decision_strips_markdown_fence_and_applies_defaults(self) -> None:
         decision = _normalise_rag_decision(
             '```json\n{"use_rag": true, "search_query": "geology overview"}\n```',
             "fallback",
@@ -364,14 +362,14 @@ class DocumentMentionContextTest(TestCase):
 
 
 class ChatAPIAttachmentTest(TestCase):
-    def setUp(self):
+    def setUp(self) -> None:
         self.password = "testpass123"
         self.user = User.objects.create_user(
             email="attachment_test@example.com", password=self.password,
         )
         self.client.login(username=self.user.email, password=self.password)
 
-    def test_send_message_with_image_attachment(self):
+    def test_send_message_with_image_attachment(self) -> None:
         png_data = _make_minimal_png()
         image = ContentFile(png_data, name="test_upload.png")
 
@@ -395,7 +393,7 @@ class ChatAPIAttachmentTest(TestCase):
         self.assertIn("sha256", att)
         self.assertGreater(att["size_bytes"], 0)
 
-    def test_send_message_with_text_file_attachment(self):
+    def test_send_message_with_text_file_attachment(self) -> None:
         file_content = b"Hello, this is a test document."
         text_file = ContentFile(file_content, name="test_doc.txt")
 
@@ -414,7 +412,7 @@ class ChatAPIAttachmentTest(TestCase):
         self.assertEqual(msg.attachments[0]["original_filename"], "test_doc.txt")
         self.assertEqual(msg.attachments[0]["mime_type"], "text/plain")
 
-    def test_stream_with_image_stores_attachment_metadata(self):
+    def test_stream_with_image_stores_attachment_metadata(self) -> None:
         png_data = _make_minimal_png()
         image = ContentFile(png_data, name="stream_img.png")
 

@@ -7,7 +7,7 @@ from apps.tools.registry import ToolRegistry
 
 
 class ToolPermissionsTest(TestCase):
-    def setUp(self):
+    def setUp(self) -> None:
         self.user = User.objects.create_user(email="user@example.com", password="pass123")
         self.staff = User.objects.create_user(
             email="staff@example.com", password="pass123", is_staff=True
@@ -28,33 +28,33 @@ class ToolPermissionsTest(TestCase):
             name="system.tool", display_name="System Tool", permission_level="system"
         )
 
-    def test_user_can_access_user_tool(self):
+    def test_user_can_access_user_tool(self) -> None:
         self.assertTrue(check_tool_permission(self.user_tool, self.user))
 
-    def test_user_cannot_access_staff_tool(self):
+    def test_user_cannot_access_staff_tool(self) -> None:
         self.assertFalse(check_tool_permission(self.staff_tool, self.user))
 
-    def test_staff_can_access_staff_tool(self):
+    def test_staff_can_access_staff_tool(self) -> None:
         self.assertTrue(check_tool_permission(self.staff_tool, self.staff))
 
-    def test_staff_cannot_access_system_tool(self):
+    def test_staff_cannot_access_system_tool(self) -> None:
         self.assertFalse(check_tool_permission(self.system_tool, self.staff))
 
-    def test_admin_can_access_system_tool(self):
+    def test_admin_can_access_system_tool(self) -> None:
         self.assertTrue(check_tool_permission(self.system_tool, self.admin))
 
-    def test_disabled_tool_returns_false(self):
+    def test_disabled_tool_returns_false(self) -> None:
         self.user_tool.is_enabled = False
         self.user_tool.save()
         self.assertFalse(check_tool_permission(self.user_tool, self.user))
 
-    def test_unauthenticated_user_cannot_access_any_tool(self):
+    def test_unauthenticated_user_cannot_access_any_tool(self) -> None:
         self.assertFalse(check_tool_permission(self.user_tool, None))
 
-    def test_check_user_tool_override_returns_none_if_no_grant(self):
+    def test_check_user_tool_override_returns_none_if_no_grant(self) -> None:
         self.assertIsNone(check_user_tool_override(self.user_tool, self.user))
 
-    def test_check_user_tool_override_returns_grant(self):
+    def test_check_user_tool_override_returns_grant(self) -> None:
         grant = ToolPermissionGrant.objects.create(
             tool=self.user_tool, user=self.user, is_allowed=False
         )
@@ -62,7 +62,7 @@ class ToolPermissionsTest(TestCase):
         self.assertEqual(result, grant)
 
     @override_settings(RAG_ENABLED=True, TOOL_CALLS_ENABLED=True)
-    def test_rag_search_is_not_exposed_to_answer_model(self):
+    def test_rag_search_is_not_exposed_to_answer_model(self) -> None:
         rag_tool = ToolDefinition.objects.create(
             name="rag.search",
             display_name="RAG Search",

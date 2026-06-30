@@ -1,13 +1,16 @@
+"""Tool execution engine for built-in tools."""
+
 import datetime
 import json
 import time
 from typing import Any
 
+from .builtin import BUILTIN_TOOLS
 from .models import ToolCall, ToolDefinition, ToolExecution, ToolResult
 
 
 class ToolExecutor:
-    def __init__(self, tool_registry, context: dict | None = None):
+    def __init__(self, tool_registry, context: dict | None = None) -> None:
         self.registry = tool_registry
         self.context  = context or {}
 
@@ -22,10 +25,9 @@ class ToolExecutor:
 
         if not tool_def:
             execution.status = ToolExecution.Status.FAILED
-            execution.error_type = "ToolNotFound"
             execution.error_message = f"Tool {tool_call.name_snapshot} not found in registry"
-            execution.completed_at = datetime.datetime.now(tz=datetime.timezone.utc)
-            execution.save(update_fields=["status", "error_type", "error_message", "completed_at"])
+            execution.completed_at = datetime.datetime.now(tz=datetime.UTC)
+            execution.save(update_fields=["status", "error_message", "completed_at"])
             return ToolResult.objects.create(
                 tool_call=tool_call,
                 execution=execution,
@@ -37,37 +39,33 @@ class ToolExecutor:
             result_content = self._run_tool(tool_def, tool_call.arguments)
             execution.status = ToolExecution.Status.SUCCEEDED
             execution.duration_ms = int((time.time() - start) * 1000)
-            execution.completed_at = datetime.datetime.now(tz=datetime.timezone.utc)
+            execution.completed_at = datetime.datetime.now(tz=datetime.UTC)
             execution.save(update_fields=["status", "duration_ms", "completed_at"])
 
-            tool_result = ToolResult.objects.create(
+            return ToolResult.objects.create(
                 tool_call=tool_call,
                 execution=execution,
                 content=result_content,
             )
-            return tool_result
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             execution.status = ToolExecution.Status.FAILED
-            execution.error_type = type(e).__name__
-            execution.error_message = str(e)
+            execution.error_message = f"{type(e).__name__}: {e}"
             execution.duration_ms = int((time.time() - start) * 1000)
-            execution.completed_at = datetime.datetime.now(tz=datetime.timezone.utc)
-            execution.save(update_fields=["status", "error_type", "error_message", "duration_ms", "completed_at"])
+            execution.completed_at = datetime.datetime.now(tz=datetime.UTC)
+            execution.save(update_fields=["status", "error_message", "duration_ms", "completed_at"])
 
-            tool_result = ToolResult.objects.create(
+            return ToolResult.objects.create(
                 tool_call=tool_call,
                 execution=execution,
                 content=f"Error executing {tool_call.name_snapshot}: {e}",
             )
-            return tool_result
 
     def _run_tool(self, tool_def: ToolDefinition, arguments: dict[str, Any]) -> str:
-        from .builtin import BUILTIN_TOOLS
-
         handler = BUILTIN_TOOLS.get(tool_def.name)
         if not handler:
-            raise ValueError(f"No handler registered for tool: {tool_def.name}")
+            msg = f"No handler registered for tool: {tool_def.name}"
+            raise ValueError(msg)
 
         result = handler(arguments, self.context)
         if isinstance(result, dict):

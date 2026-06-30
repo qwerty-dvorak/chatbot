@@ -1,6 +1,5 @@
 import uuid
 
-from django.conf import settings
 from django.db import models
 
 
@@ -36,7 +35,7 @@ class IngestionJob(models.Model):
             models.Index(fields=["document_reference", "-created_at"]),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"Ingestion {self.document_reference_id} - {self.status}"
 
 
@@ -87,5 +86,5 @@ class IngestionStepAttempt(models.Model):
             )
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.step_type} attempt {self.attempt_number} ({self.status})"

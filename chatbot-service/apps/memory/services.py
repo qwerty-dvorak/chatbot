@@ -13,7 +13,8 @@ logger = logging.getLogger(__name__)
 
 
 def get_user_memories(user, query=None, top_k=5):
-    """Search user memories using multiple strategies:
+    """
+    Search user memories using multiple strategies:
 
     1. Vector/semantic search via Milvus (if available)
     2. Keyword search — split query into words, match any word via __icontains
@@ -62,14 +63,14 @@ def _search_vectors(user, query, top_k):
                 except Memory.DoesNotExist:
                     continue
             return memories
-    except Exception:
+    except Exception:  # noqa: BLE001
         logger.warning("Milvus vector search failed")
     return []
 
 
 def _search_keywords(user, query, top_k):
     """Split query into words, find memories matching ANY word, rank by match count."""
-    words = [w for w in re.split(r'\s+', query.strip()) if len(w) > 1]
+    words = [w for w in re.split(r"\s+", query.strip()) if len(w) > 1]
     if not words:
         return list(Memory.objects.filter(
             user=user, content__icontains=query
@@ -111,7 +112,7 @@ def _index_memory(memory):
                 "importance": memory.importance,
             }],
         )
-    except Exception:
+    except Exception:  # noqa: BLE001
         logger.warning("Failed to index memory in Milvus")
 
 

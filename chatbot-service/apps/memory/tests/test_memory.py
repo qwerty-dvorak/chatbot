@@ -37,7 +37,7 @@ class MemorySettingsModelTest(TestCase):
 
     def test_settings_one_to_one(self):
         MemorySettings.objects.create(user=self.user)
-        with self.assertRaises(Exception):
+        with self.assertRaises(Exception):  # noqa: B017
             MemorySettings.objects.create(user=self.user)
 
 

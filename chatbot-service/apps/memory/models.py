@@ -23,7 +23,7 @@ class Memory(models.Model):
             models.Index(fields=["user", "-updated_at"]),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.content[:60]
 
     def get_milvus_id(self):
@@ -53,5 +53,5 @@ class MemorySettings(models.Model):
     class Meta:
         db_table = "memory_settings"
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"Memory settings for {self.user.email}"

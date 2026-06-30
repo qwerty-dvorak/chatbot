@@ -1,6 +1,12 @@
 from django.contrib import admin
 
-from apps.documents.models import ArtifactRevision, ContentBlob, DocumentGrant, DocumentReference, EmbeddingSet
+from apps.documents.models import (
+    ArtifactRevision,
+    ContentBlob,
+    DocumentGrant,
+    DocumentReference,
+    EmbeddingSet,
+)
 
 
 @admin.register(DocumentReference)

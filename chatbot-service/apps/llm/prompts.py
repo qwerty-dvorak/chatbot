@@ -1,12 +1,14 @@
-import os
+"""System prompt templates loaded from disk."""
 
-_PROMPTS_DIR = os.path.join(os.path.dirname(__file__), "prompts")
+from pathlib import Path
+
+_PROMPTS_DIR = Path(__file__).parent / "prompts"
 
 
 def _load(name: str) -> str:
-    path = os.path.join(_PROMPTS_DIR, name)
+    path = _PROMPTS_DIR / name
     try:
-        with open(path) as f:
+        with path.open() as f:
             return f.read().strip()
     except FileNotFoundError:
         return ""

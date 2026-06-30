@@ -1,3 +1,6 @@
+"""Text file extractor."""
+
+from pathlib import Path
 from typing import Any
 
 from .base import BaseExtractor
@@ -14,7 +17,7 @@ class TextExtractor(BaseExtractor):
         content = extracted_text
         if not content and file_path:
             try:
-                with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+                with Path(file_path).open(encoding="utf-8", errors="replace") as f:
                     content = f.read()
             except FileNotFoundError:
                 pass

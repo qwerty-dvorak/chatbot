@@ -1,8 +1,8 @@
 import os
 from pathlib import Path
 
-from dotenv import load_dotenv
 from django.core.wsgi import get_wsgi_application
+from dotenv import load_dotenv
 
 load_dotenv()
 mode = os.environ.get("MODE", "local").lower()

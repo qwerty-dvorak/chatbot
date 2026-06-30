@@ -1,5 +1,4 @@
-"""
-Chat completion client.
+"""Chat completion client.
 
 Pure urllib — no external LLM SDK dependency.  Uses the shared endpoint helpers and HTTP
 client from this package so URL building and error handling are consistent across
@@ -14,8 +13,13 @@ from typing import Any
 from django.conf import settings
 
 from .endpoints import chat_completions_url, models_url, normalize_url
+from .errors import (
+    LLMConnectionError,
+    LLMProviderError,
+    LLMRateLimitError,
+    LLMTimeoutError,
+)
 from .http_client import json_request, json_stream_request
-from .errors import LLMConnectionError, LLMProviderError, LLMRateLimitError, LLMTimeoutError
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +43,7 @@ def _discover_lora_via_api(base_url: str | None = None) -> list[str] | None:
         models = [m["id"] for m in resp.get("data", [])]
         base = settings.CHAT_MODEL.removeprefix("openai/")
         return [m for m in models if m != base and "/" not in m]
-    except Exception:
+    except Exception:  # noqa: BLE001
         logger.debug("Could not discover LoRAs from %s", url)
         return None
 
@@ -133,7 +137,7 @@ class ChatClient:
         lora_adapter = kwargs.get("lora_adapter")
         model = self._select_model(messages, lora_adapter=lora_adapter)
         _debug_log(messages, model, kwargs)
-        start = time.time()
+        _start = time.time()
         try:
             body = self._build_body(model, messages, stream=False, **kwargs)
             url = chat_completions_url(self.base_url)
@@ -147,11 +151,11 @@ class ChatClient:
             }
             if msg.get("reasoning"):
                 result["reasoning"] = msg["reasoning"]
-            return result
+            return result  # noqa: TRY300
         except (LLMConnectionError, LLMProviderError, LLMRateLimitError, LLMTimeoutError):
             raise
-        except Exception as e:
-            raise LLMProviderError(str(e), provider="openai")
+        except Exception as e:  # noqa: BLE001
+            raise LLMProviderError(str(e), provider="openai")  # noqa: B904
 
     def chat_completion_stream(self, messages: list[dict[str, str]], **kwargs):
         lora_adapter = kwargs.get("lora_adapter")
@@ -164,7 +168,7 @@ class ChatClient:
             resp = json_stream_request(url, body, api_key=self.api_key)
             last_chunk = None
             for line in resp:
-                line = line.decode().strip()
+                line = line.decode().strip()  # noqa: PLW2901
                 if line.startswith("data: ") and line != "data: [DONE]":
                     chunk = json.loads(line[6:])
                     last_chunk = chunk
@@ -174,5 +178,5 @@ class ChatClient:
                 logger.info("[TIMING] streaming_llm=%.3fs model=%s", duration, model)
         except (LLMConnectionError, LLMProviderError, LLMRateLimitError, LLMTimeoutError):
             raise
-        except Exception as e:
-            raise LLMProviderError(str(e), provider="openai")
+        except Exception as e:  # noqa: BLE001
+            raise LLMProviderError(str(e), provider="openai")  # noqa: B904

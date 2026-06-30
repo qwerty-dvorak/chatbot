@@ -35,7 +35,7 @@ class ToolDefinition(models.Model):
             models.Index(fields=["is_enabled", "permission_level"]),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.name
 
 
@@ -92,7 +92,7 @@ class ToolCall(models.Model):
             models.Index(fields=["status"]),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.name_snapshot} [{self.status}]"
 
 
@@ -114,9 +114,6 @@ class ToolExecution(models.Model):
         max_length=30, choices=Status.choices, default=Status.RUNNING
     )
     input_snapshot = models.JSONField(default=dict, blank=True)
-    stdout = models.TextField(default="")
-    stderr = models.TextField(default="")
-    error_type = models.CharField(max_length=255, blank=True, null=True)
     error_message = models.TextField(default="")
     duration_ms = models.IntegerField(null=True, blank=True)
     started_at = models.DateTimeField(auto_now_add=True)
@@ -133,7 +130,7 @@ class ToolExecution(models.Model):
             models.Index(fields=["status", "-created_at"]),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"Attempt {self.attempt} - {self.status}"
 
 
@@ -158,7 +155,7 @@ class ToolResult(models.Model):
             models.Index(fields=["created_at"]),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"Result for {self.tool_call_id}"
 
 
@@ -183,5 +180,5 @@ class ToolPermissionGrant(models.Model):
             models.Index(fields=["tool", "role"]),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"Grant for {self.tool.name}"

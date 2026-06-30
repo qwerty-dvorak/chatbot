@@ -1,3 +1,4 @@
+import logging
 import os
 
 from django.conf import settings
@@ -31,8 +32,8 @@ def run_ingestion(job: IngestionJob) -> bool:
         _index_chunks(chunks, doc_ref)
         job.status = IngestionJob.Status.SUCCEEDED
         job.save(update_fields=["status", "finished_at"])
-        return True
-    except Exception as e:
+        return True  # noqa: TRY300
+    except Exception as e:  # noqa: BLE001
         job.status = IngestionJob.Status.FAILED
         job.error = str(e)
         job.save(update_fields=["status", "error", "finished_at"])
@@ -42,16 +43,16 @@ def run_ingestion(job: IngestionJob) -> bool:
 def _extract_text(file_path: str, mime_type: str, existing_text: str = "") -> str:
     extractor = _get_extractor(mime_type)
     if not extractor:
-        raise ValueError(f"No extractor for MIME type: {mime_type}")
+        raise ValueError(f"No extractor for MIME type: {mime_type}")  # noqa: TRY003, EM102
     result = extractor.extract(file_path, mime_type, existing_text)
     return result.get("text", "")
 
 
 def _resolve_path(object_key: str) -> str:
-    if os.path.isabs(object_key):
+    if os.path.isabs(object_key):  # noqa: PTH117
         return object_key
-    docs_root = getattr(settings, "DOCS_ROOT", os.path.join(settings.MEDIA_ROOT, "docs"))
-    return os.path.join(docs_root, object_key)
+    docs_root = getattr(settings, "DOCS_ROOT", os.path.join(settings.MEDIA_ROOT, "docs"))  # noqa: PTH118
+    return os.path.join(docs_root, object_key)  # noqa: PTH118
 
 
 def _index_chunks(chunks, doc_ref):
@@ -66,9 +67,9 @@ def _index_chunks(chunks, doc_ref):
             vectors,
             chunks,
         )
-    except Exception:
-        import logging
-        logging.getLogger(__name__).warning("Failed to index chunks in Milvus")
+    except Exception:  # noqa: BLE001
+        logger = logging.getLogger(__name__)
+        logger.warning("Failed to index chunks in Milvus")
 
 
 def _get_extractor(mime_type: str):

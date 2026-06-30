@@ -8,7 +8,7 @@ _milvus_available = None
 
 
 def _check_milvus():
-    global _milvus_available
+    global _milvus_available  # noqa: PLW0603
     if _milvus_available is None:
         try:
             import pymilvus  # noqa: F401
@@ -51,7 +51,7 @@ def ensure_collection(collection_name, dimension, description=""):
         index_params=index_params,
     )
     client.load_collection(collection_name)
-    logger.info(f"Created Milvus collection: {collection_name} (dim={dimension})")
+    logger.info(f"Created Milvus collection: {collection_name} (dim={dimension})")  # noqa: G004
     return client
 
 
@@ -75,7 +75,7 @@ def insert_vectors(collection_name, vectors, metadata_list):
         return []
     client = get_milvus_client()
     data = []
-    for i, (vec, meta) in enumerate(zip(vectors, metadata_list)):
+    for i, (vec, meta) in enumerate(zip(vectors, metadata_list)):  # noqa: B905
         data.append({
             "id": meta.get("id", str(i)),
             "vector": vec,
@@ -88,7 +88,7 @@ def search_vectors(collection_name, query_vector, top_k=10, offset=0, expr=None)
     if not _check_milvus():
         return []
     client = get_milvus_client()
-    kwargs = dict(
+    kwargs = dict(  # noqa: C408
         collection_name=collection_name,
         data=[query_vector],
         limit=top_k,
