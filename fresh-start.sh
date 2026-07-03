@@ -29,7 +29,7 @@ echo "Nuking PostgreSQL volume..."
 docker volume rm postgres_data 2>/dev/null || true
 
 echo "Nuking Milvus volumes (etcd, minio, milvus)..."
-rm -rf "$SCRIPT_DIR/milvus/volumes"
+docker run --rm -v "$SCRIPT_DIR/milvus/volumes:/v" ubuntu:24.04 bash -c "rm -rf /v/etcd /v/minio /v/milvus"
 
 # --- Source model endpoints ---
 ENV_FILE="$SCRIPT_DIR/models/.env.$MODE"
@@ -65,6 +65,4 @@ echo "  Milvus, models, and file server are NOT running."
 echo "  Start them separately when needed, e.g.:"
 echo "    bash milvus/start.sh"
 echo ""
-echo "  To ingest global seed data:"
-echo "    docker exec web uv run python manage.py ingest_global_knowledge \\"
-echo "      --settings=config.settings.production"
+echo "  Global seed data is auto-ingested during web container startup."

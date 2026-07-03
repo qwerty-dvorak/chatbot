@@ -114,7 +114,7 @@ docker run -d \
   -e RAG_API_ENABLED="$RAG_API_ENABLED" \
   -e RAG_API_BASE_URL="$RAG_API_BASE_URL" \
   -e RAG_ENABLED="$RAG_ENABLED" \
-  -e CSRF_TRUSTED_ORIGINS="$CSRF_TRUSTED_ORIGINS" \
+  -e CSRF_TRUSTED_ORIGINS="${CSRF_TRUSTED_ORIGINS:-}" \
   -e RAG_TOP_K=5 \
   -e RAG_MIN_SIMILARITY=0.45 \
   -e TOOL_CALLS_ENABLED=true \
@@ -123,10 +123,12 @@ docker run -d \
   -e CHAT_RESPONSE_MAX_TOKENS=2048 \
   -v media_data:/app/media \
   -v docs_data:/data/docs \
+  -v "$ROOT_DIR/seed_data:/seed_data" \
   -p 8080:8000 \
   "$IMAGE_NAME" \
   sh -c "uv run python manage.py migrate --settings=config.settings.production && \
          uv run python manage.py sync_builtin_tools --settings=config.settings.production && \
+         bash /app/shell_scripts/auto_ingest.sh & \
          uv run gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 2"
 
 echo "Starting Django Worker..."
@@ -160,12 +162,12 @@ docker run -d \
   -e RAG_API_ENABLED="$RAG_API_ENABLED" \
   -e RAG_API_BASE_URL="$RAG_API_BASE_URL" \
   -e RAG_ENABLED="$RAG_ENABLED" \
-  -e CSRF_TRUSTED_ORIGINS="$CSRF_TRUSTED_ORIGINS" \
+  -e CSRF_TRUSTED_ORIGINS="${CSRF_TRUSTED_ORIGINS:-}" \
   -e TOOL_CALLS_ENABLED=true \
   -v media_data:/app/media \
   -v docs_data:/data/docs \
   "$IMAGE_NAME" \
-  sh -c "uv run python manage.py migrate --settings=config.settings.production && \
+  sh -c "until uv run python -c \"import django; django.setup(); from django.db import connection; tables = connection.introspection.table_names(); assert 'ingestion_jobs' in tables\" 2>/dev/null; do echo 'waiting for migrations...'; sleep 2; done && \
          uv run python manage.py run_ingestion_worker --settings=config.settings.production"
 
 echo ""

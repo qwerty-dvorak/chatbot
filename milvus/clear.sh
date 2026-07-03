@@ -15,7 +15,7 @@ for c in milvus-standalone milvus-minio milvus-etcd; do
   docker rm -f "$c" 2>/dev/null || true
 done
 
-rm -rf "$VOL_DIR/etcd" "$VOL_DIR/minio" "$VOL_DIR/milvus"
+docker run --rm -v "$VOL_DIR:/v" ubuntu:24.04 bash -c "rm -rf /v/etcd /v/minio /v/milvus"
 mkdir -p "$VOL_DIR/etcd" "$VOL_DIR/minio" "$VOL_DIR/milvus"
 
 echo "Milvus data cleared. Run 'bash start.sh' to recreate."

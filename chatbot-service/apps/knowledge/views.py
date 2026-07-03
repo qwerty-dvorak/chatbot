@@ -14,6 +14,8 @@ from django.urls import reverse_lazy
 from django.views import View
 from django.views.generic import DetailView, ListView
 
+from django.db.models import Q
+
 from apps.documents.models import ArtifactRevision, ContentBlob, DocumentReference
 from apps.ingestion.models import IngestionJob
 from apps.knowledge.models import KnowledgeDocument
@@ -52,14 +54,26 @@ def _save_doc_file(user_id, uploaded_file):
     return storage.save(rel, uploaded_file)
 
 
+def _global_knowledge_hashes() -> list[str]:
+    return list(
+        KnowledgeDocument.objects.filter(source__is_global=True)
+        .exclude(sha256="")
+        .values_list("sha256", flat=True)
+    )
+
+
 class DocumentListView(LoginRequiredMixin, ListView):
     model = DocumentReference
     template_name = "knowledge/document_list.html"
     context_object_name = "documents"
 
     def get_queryset(self):
+        q = Q(owner=self.request.user)
+        global_hashes = _global_knowledge_hashes()
+        if global_hashes:
+            q |= Q(artifact_revision__blob__content_hash__in=global_hashes)
         return DocumentReference.objects.filter(
-            owner=self.request.user, kind=DocumentReference.Kind.KNOWLEDGE
+            q, kind=DocumentReference.Kind.KNOWLEDGE
         ).select_related("artifact_revision__blob").order_by("-created_at")
 
 
@@ -69,8 +83,12 @@ class DocumentDetailView(LoginRequiredMixin, DetailView):
     context_object_name = "document"
 
     def get_queryset(self):
+        q = Q(owner=self.request.user)
+        global_hashes = _global_knowledge_hashes()
+        if global_hashes:
+            q |= Q(artifact_revision__blob__content_hash__in=global_hashes)
         return DocumentReference.objects.filter(
-            owner=self.request.user, kind=DocumentReference.Kind.KNOWLEDGE
+            q, kind=DocumentReference.Kind.KNOWLEDGE
         ).select_related("artifact_revision__blob")
 
     def get_context_data(self, **kwargs):
@@ -215,8 +233,12 @@ class DocumentStatusJsonView(LoginRequiredMixin, DetailView):
     model = DocumentReference
 
     def get_queryset(self):
+        q = Q(owner=self.request.user)
+        global_hashes = _global_knowledge_hashes()
+        if global_hashes:
+            q |= Q(artifact_revision__blob__content_hash__in=global_hashes)
         return DocumentReference.objects.filter(
-            owner=self.request.user, kind=DocumentReference.Kind.KNOWLEDGE
+            q, kind=DocumentReference.Kind.KNOWLEDGE
         ).select_related("artifact_revision__blob")
 
     def render_to_response(self, context, **response_kwargs):
@@ -391,12 +413,13 @@ class IngestionQueueJsonView(LoginRequiredMixin, View):
     """JSON endpoint for queue management."""
 
     def get(self, request, job_id=None):
-        # Show only items that are NOT yet succeeded
+        q = Q(document_reference__owner=request.user)
+        global_hashes = _global_knowledge_hashes()
+        if global_hashes:
+            q |= Q(document_reference__artifact_revision__blob__content_hash__in=global_hashes)
         jobs = IngestionJob.objects.filter(
-            document_reference__owner=request.user,
+            q,
             document_reference__kind=DocumentReference.Kind.KNOWLEDGE,
-        ).exclude(
-            status=IngestionJob.Status.SUCCEEDED,
         ).select_related("document_reference").order_by("queue_order", "-created_at")[:100]
 
         if rag_client.is_enabled():
@@ -473,10 +496,49 @@ class IngestionQueueJsonView(LoginRequiredMixin, View):
         return JsonResponse({"error": "unknown action"}, status=400)
 
 
+class GlobalKnowledgeStatusView(View):
+    """Public JSON endpoint showing global knowledge status — no auth required."""
+
+    def get(self, request):
+        documents = KnowledgeDocument.objects.filter(
+            source__is_global=True,
+        ).order_by("-created_at")
+        items = []
+        for doc in documents:
+            chunk_count = doc.chunks.count()
+            refs = DocumentReference.objects.filter(
+                artifact_revision__blob__content_hash=doc.sha256,
+                kind=DocumentReference.Kind.KNOWLEDGE,
+            )
+            job = IngestionJob.objects.filter(
+                document_reference__in=refs,
+            ).order_by("-created_at").first()
+            items.append({
+                "id": str(doc.id),
+                "title": doc.title or doc.original_filename,
+                "status": doc.status,
+                "sha256": doc.sha256[:16],
+                "mime_type": doc.mime_type,
+                "chunks": chunk_count,
+                "has_summary": bool(doc.analysis_summary),
+                "summary": (doc.analysis_summary[:500] + "…") if doc.analysis_summary and len(doc.analysis_summary) > 500 else (doc.analysis_summary or ""),
+                "job_status": job.status if job else None,
+                "created_at": doc.created_at.isoformat() if doc.created_at else None,
+            })
+        return JsonResponse({"documents": items})
+
+
 class DocumentDeleteView(LoginRequiredMixin, View):
     def post(self, request, pk):
-        doc_ref = DocumentReference.objects.filter(id=pk, owner=request.user).first()
+        q = Q(id=pk, owner=request.user)
+        global_hashes = _global_knowledge_hashes()
+        if global_hashes:
+            q |= Q(id=pk, artifact_revision__blob__content_hash__in=global_hashes)
+        doc_ref = DocumentReference.objects.filter(q).first()
         if doc_ref:
+            if doc_ref.owner != request.user:
+                messages.error(request, "This document is global knowledge and cannot be deleted.")
+                return redirect("knowledge:list")
             content_hash = doc_ref.artifact_revision.blob.content_hash if doc_ref.artifact_revision and doc_ref.artifact_revision.blob else None
             if content_hash:
                 is_global = KnowledgeDocument.objects.filter(

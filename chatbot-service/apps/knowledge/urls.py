@@ -10,6 +10,7 @@ urlpatterns = [
     path("queue/", views.IngestionQueueView.as_view(), name="queue"),
     path("queue/data/", views.IngestionQueueJsonView.as_view(), name="queue-data"),
     path("queue/<uuid:job_id>/", views.IngestionQueueJsonView.as_view(), name="queue-action"),
+    path("global/status/", views.GlobalKnowledgeStatusView.as_view(), name="global-status"),
     path("<uuid:pk>/", views.DocumentDetailView.as_view(), name="detail"),
     path("<uuid:pk>/status/", views.DocumentStatusJsonView.as_view(), name="status"),
     path("<uuid:pk>/delete/", views.DocumentDeleteView.as_view(), name="delete"),

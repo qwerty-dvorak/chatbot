@@ -17,10 +17,12 @@ case "$MODE" in
     ;;
 esac
 
-mapfile -t DOCKERFILES < <(find "$ROOT_DIR" -type f -name 'Dockerfile*' \
-  -not -path '*/.git/*' -not -path '*/.venv/*' | sort)
-mapfile -t PYPROJECTS < <(find "$ROOT_DIR" -type f -name 'pyproject.toml' \
-  -not -path '*/.git/*' -not -path '*/.venv/*' | sort)
+mapfile -t DOCKERFILES < <(find "$ROOT_DIR" \
+  \( -path '*/milvus/volumes' -prune \) -o \
+  \( -type f -name 'Dockerfile*' -not -path '*/.git/*' -not -path '*/.venv/*' -print \) | sort)
+mapfile -t PYPROJECTS < <(find "$ROOT_DIR" \
+  \( -path '*/milvus/volumes' -prune \) -o \
+  \( -type f -name 'pyproject.toml' -not -path '*/.git/*' -not -path '*/.venv/*' -print \) | sort)
 
 python3 - "$MODE" "$ROOT_DIR" "${DOCKERFILES[@]}" "${PYPROJECTS[@]}" <<'PY'
 import re
