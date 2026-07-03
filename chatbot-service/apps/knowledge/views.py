@@ -523,7 +523,14 @@ class GlobalKnowledgeStatusView(View):
                 "has_summary": bool(doc.analysis_summary),
                 "summary": (doc.analysis_summary[:500] + "…") if doc.analysis_summary and len(doc.analysis_summary) > 500 else (doc.analysis_summary or ""),
                 "job_status": job.status if job else None,
+                "job_metadata": job.metadata if job else None,
+                "job_id": str(job.id) if job else None,
+                "rag_job_id": job.metadata.get("rag_job_id") if job and job.metadata else None,
+                "rag_result": job.metadata.get("rag_result") if job and job.metadata else None,
+                "rag_timing": job.metadata.get("rag_timing") if job and job.metadata else None,
+                "rag_step_summary": job.metadata.get("rag_step_summary") if job and job.metadata else None,
                 "created_at": doc.created_at.isoformat() if doc.created_at else None,
+                "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
             })
         return JsonResponse({"documents": items})
 

@@ -114,6 +114,9 @@ class ToolExecution(models.Model):
         max_length=30, choices=Status.choices, default=Status.RUNNING
     )
     input_snapshot = models.JSONField(default=dict, blank=True)
+    stdout = models.TextField(default="")
+    stderr = models.TextField(default="")
+    error_type = models.CharField(max_length=255, null=True, blank=True)
     error_message = models.TextField(default="")
     duration_ms = models.IntegerField(null=True, blank=True)
     started_at = models.DateTimeField(auto_now_add=True)

@@ -69,7 +69,7 @@ class Command(BaseCommand):
 
             self.stdout.write(f"  Ingesting: {fname} ...")
 
-            doc_ref, job = self._create_chain(fpath, fname, sha256)
+            doc_ref, job = self._create_chain(fpath, fname, sha256, global_source)
 
             result = rag_client.ingest(
                 fpath,
@@ -96,30 +96,14 @@ class Command(BaseCommand):
 
             job.metadata["rag_job_id"] = job_id
             job.save(update_fields=["metadata"])
-
-            job_result = rag_client.poll_job(job_id, max_retries=120, interval=2.0)
-            if not job_result or job_result.get("status") != "succeeded":
-                self.stdout.write(self.style.WARNING(f"  Ingestion did not succeed: {fname}"))
-                job.status = IngestionJob.Status.FAILED
-                job.error = job_result.get("error", "poll timed out or failed") if job_result else "poll timed out"
-                job.save(update_fields=["status", "error"])
-                ingested += 1
-                continue
-
-            doc = KnowledgeDocument.objects.filter(sha256=sha256).order_by("-created_at").first()
-            if doc and doc.source != global_source:
-                doc.source = global_source
-                doc.save(update_fields=["source"])
-
-            self._update_chain_result(job, job_result)
-            self.stdout.write(f"  OK: {fname}")
+            self.stdout.write(f"  Submitted: {fname} (rag_job_id={job_id})")
             ingested += 1
 
         self.stdout.write(self.style.SUCCESS(
             f"Done. {ingested} ingested, {skipped} skipped (already global)."
         ))
 
-    def _create_chain(self, fpath: str, fname: str, sha256: str) -> tuple[DocumentReference, IngestionJob]:
+    def _create_chain(self, fpath: str, fname: str, sha256: str, global_source: KnowledgeSource) -> tuple[DocumentReference, IngestionJob]:
         blob, _ = ContentBlob.objects.get_or_create(
             content_hash=sha256,
             defaults={
@@ -142,6 +126,17 @@ class Command(BaseCommand):
             kind=DocumentReference.Kind.KNOWLEDGE,
             defaults={"owner": owner, "title": fname},
         )
+        KnowledgeDocument.objects.get_or_create(
+            sha256=sha256,
+            defaults={
+                "source": global_source,
+                "content_blob": blob,
+                "title": fname,
+                "original_filename": fname,
+                "mime_type": mimetypes.guess_type(fname)[0] or "application/octet-stream",
+                "status": "pending",
+            },
+        )
         job, created = IngestionJob.objects.get_or_create(
             document_reference=doc_ref,
             status=IngestionJob.Status.QUEUED,
@@ -154,7 +149,7 @@ class Command(BaseCommand):
             job.save(update_fields=["status", "metadata", "error"])
         return doc_ref, job
 
-    def _update_chain_result(self, job: IngestionJob, job_result: dict) -> None:
+    def _update_chain_result(self, job: IngestionJob, job_result: dict, sha256: str) -> None:
         primary = job_result.get("result") or {}
         first_result = (primary.get("results") or [None])[0] or {}
         job.status = IngestionJob.Status.SUCCEEDED
@@ -169,3 +164,4 @@ class Command(BaseCommand):
         revision = job.document_reference.artifact_revision
         revision.processing_status = ArtifactRevision.ProcessingStatus.READY
         revision.save(update_fields=["processing_status"])
+        KnowledgeDocument.objects.filter(sha256=sha256).update(status="ready")

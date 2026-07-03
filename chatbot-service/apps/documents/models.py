@@ -72,6 +72,7 @@ class ArtifactRevision(models.Model):
 class DocumentReference(models.Model):
     class Kind(models.TextChoices):
         KNOWLEDGE = "knowledge", "Knowledge"
+        CHAT_ATTACHMENT = "chat_attachment", "Chat Attachment"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     owner = models.ForeignKey(

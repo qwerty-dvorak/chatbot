@@ -131,6 +131,7 @@ class Message(models.Model):
     role = models.CharField(max_length=30, choices=Role.choices)
     content = models.TextField(default="")
     status = models.CharField(max_length=30, choices=Status.choices, default=Status.COMPLETED)
+    tool_invocations = models.JSONField(default=dict, blank=True)
     attachments = models.JSONField(default=list, blank=True)
     metadata = models.JSONField(default=dict, blank=True)
     edit_count = models.PositiveIntegerField(default=0)
@@ -202,6 +203,7 @@ class MessageDelta(models.Model):
     sequence = models.IntegerField()
     delta_type = models.CharField(max_length=30, choices=DeltaType.choices, default=DeltaType.TEXT)
     content = models.TextField(default="")
+    raw_event = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
