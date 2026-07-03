@@ -16,6 +16,7 @@ from django.views.generic import DetailView, ListView
 
 from apps.documents.models import ArtifactRevision, ContentBlob, DocumentReference
 from apps.ingestion.models import IngestionJob
+from apps.knowledge.models import KnowledgeDocument
 
 from .rag_client import rag_client
 
@@ -476,6 +477,14 @@ class DocumentDeleteView(LoginRequiredMixin, View):
     def post(self, request, pk):
         doc_ref = DocumentReference.objects.filter(id=pk, owner=request.user).first()
         if doc_ref:
+            content_hash = doc_ref.artifact_revision.blob.content_hash if doc_ref.artifact_revision and doc_ref.artifact_revision.blob else None
+            if content_hash:
+                is_global = KnowledgeDocument.objects.filter(
+                    sha256=content_hash, source__is_global=True,
+                ).exists()
+                if is_global:
+                    messages.error(request, "This document is global knowledge and cannot be deleted.")
+                    return redirect("knowledge:list")
             pending_jobs = IngestionJob.objects.filter(
                 document_reference=doc_ref,
                 status__in=[IngestionJob.Status.QUEUED, IngestionJob.Status.RUNNING],

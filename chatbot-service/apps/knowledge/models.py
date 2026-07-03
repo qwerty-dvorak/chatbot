@@ -7,6 +7,8 @@ class KnowledgeSource(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=255)
     source_type = models.CharField(max_length=50)
+    visibility = models.CharField(max_length=30, default="private")
+    is_global = models.BooleanField(default=False)
     metadata = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

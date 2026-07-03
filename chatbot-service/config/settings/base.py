@@ -173,6 +173,12 @@ MAX_UPLOAD_MB = int(os.environ.get("MAX_UPLOAD_MB", "50"))
 INGESTION_SYNC = os.environ.get("INGESTION_SYNC", "false").lower() in ("true", "1", "yes")
 MEMORY_AUTO_SAVE_DEFAULT = os.environ.get("MEMORY_AUTO_SAVE_DEFAULT", "true").lower() in ("true", "1", "yes")
 
+# Seed data directory for global knowledge
+SEED_DATA_ROOT = os.environ.get(
+    "SEED_DATA_ROOT",
+    str(BASE_DIR.parent / "seed_data"),
+)
+
 # Tool settings
 TOOL_CALLS_ENABLED = os.environ.get("TOOL_CALLS_ENABLED", "true").lower() in ("true", "1", "yes")
 TOOL_CALL_TIMEOUT_SECONDS = int(os.environ.get("TOOL_CALL_TIMEOUT_SECONDS", "60"))

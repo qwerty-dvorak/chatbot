@@ -265,10 +265,10 @@ def _build_image_chunks(  # noqa: PLR0913
         asset_id = pgdb.insert_asset(
             document_id=doc_id,
             asset_type="page" if doc.content_type.value == "pdf" else "image",
-            file=store.store_path(key) or "", mime_type="image/png",
+            mime_type="image/png",
             page_number=item.source_index + 1, text=ocr_result.text,
             source_index=item.source_index, derived_index=item.derived_index,
-            object_key=key, sha256=hashlib.sha256(item.data).hexdigest(),
+            sha256=hashlib.sha256(item.data).hexdigest(),
             width=item.width, height=item.height,
             ocr_backend=ocr_mode, ocr_status=ocr_result.status,
             preprocessing={"operations": list(item.operations)},

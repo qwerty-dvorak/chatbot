@@ -298,13 +298,11 @@ def get_chunk(chunk_id: str) -> dict | None:
 def insert_asset(  # noqa: PLR0913
     document_id: str,
     asset_type: str,
-    file: str = "",
     mime_type: str = "",
     page_number: int | None = None,
     text: str = "",
     source_index: int = 0,
     derived_index: int = 0,
-    object_key: str = "",
     sha256: str = "",
     width: int = 0,
     height: int = 0,
@@ -312,28 +310,28 @@ def insert_asset(  # noqa: PLR0913
     ocr_status: str = "skipped",
     preprocessing: dict | None = None,
     metadata: dict | None = None,
+    file: str = "",
+    object_key: str = "",
 ) -> str:
     """Insert an asset row, returning its UUID."""
     asset_id = str(uuid.uuid4())
     execute(
         """INSERT INTO document_assets
-           (id, document_id, asset_type, file, mime_type, page_number, text,
+           (id, document_id, asset_type, mime_type, page_number, text,
             analysis,
-            source_index, derived_index, object_key, sha256, width, height,
+            source_index, derived_index, sha256, width, height,
             ocr_backend, ocr_status, preprocessing, metadata, created_at)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, '', %s, %s, %s, %s, %s, %s,
+           VALUES (%s, %s, %s, %s, %s, %s, '', %s, %s, %s, %s, %s,
                    %s, %s, %s, %s, NOW())""",
         (
             asset_id,
             document_id,
             _sanitize(asset_type),
-            _sanitize(file),
             _sanitize(mime_type),
             page_number,
             _sanitize(text),
             source_index,
             derived_index,
-            _sanitize(object_key),
             _sanitize(sha256),
             width,
             height,
